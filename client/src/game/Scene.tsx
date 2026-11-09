@@ -23,8 +23,8 @@ export function Scene() {
       <AdaptiveDpr pixelated={false} />
       <color attach="background" args={['#e6f2f4']} />
       <fog attach="fog" args={['#eaf3ee', 42, 120]} />
-      <hemisphereLight args={['#fff7ea', '#e8d6b8', 1.5]} />
-      <directionalLight position={[18, 30, 12]} intensity={1.5} color="#fff3dd" />
+      <hemisphereLight args={['#fffaf2', '#efe2cc', 1.9]} />
+      <directionalLight position={[18, 30, 12]} intensity={1.25} color="#fff6e8" />
       <ambientLight intensity={0.25} />
       <World />
       <CameraRig />

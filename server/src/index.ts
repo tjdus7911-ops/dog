@@ -15,7 +15,10 @@ import { DEFAULT_PRIVACY } from '../../shared/protocol';
 const PORT = Number(process.env.PORT ?? 3001);
 const app = express();
 app.disable('x-powered-by');
+// Render 등 프록시 뒤에 배포될 때 실제 접속자 IP로 가입/로그인 횟수 제한을 적용
+if (process.env.RENDER || process.env.MUNGLE_TRUST_PROXY) app.set('trust proxy', 1);
 app.use(express.json({ limit: '6mb' }));
+app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: process.env.MUNGLE_CORS?.split(',') ?? false }, maxHttpBufferSize: 64 * 1024 });

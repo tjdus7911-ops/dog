@@ -2,7 +2,7 @@
   "name": "mungle-village",
   "private": true,
   "version": "0.2.0",
-  "description": "멍글마을 — 로우폴리 3D 반려견 산책 커뮤니티",
+  "description": "멍글마을 — 3D 반려견 산책 커뮤니티",
   "workspaces": [
     "client",
     "server"
@@ -17,5 +17,8 @@
   },
   "devDependencies": {
     "concurrently": "^9.0.0"
+  },
+  "engines": {
+    "node": ">=22.5"
   }
 }

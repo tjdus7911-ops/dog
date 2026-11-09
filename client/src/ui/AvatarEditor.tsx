@@ -262,7 +262,7 @@ export default function AvatarEditor({ mode }: { mode: 'onboarding' | 'edit' }) 
         </div>
         <span className="w-px h-7 bg-[#e9d8c6]" />
         <h1 className="font-display text-xl md:text-[28px]">아바타 {mode === 'edit' ? '꾸미기' : '만들기'}</h1>
-        <p className="hidden lg:block text-sm text-cocoa-soft border-b-2 border-[#f3e3d2] pb-0.5">나와 우리 강아지를 닮은 로우폴리 아바타를 꾸며 주세요 ♡</p>
+        <p className="hidden lg:block text-sm text-cocoa-soft border-b-2 border-[#f3e3d2] pb-0.5">나와 우리 강아지를 닮은 말랑한 3D 아바타를 꾸며 주세요 ♡</p>
         {mode === 'edit' && <button className="ml-auto btn btn-ghost w-10 h-10" onClick={() => set({ panel: 'none' })} aria-label="닫기">✕</button>}
       </header>
 

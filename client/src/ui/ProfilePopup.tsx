@@ -38,7 +38,7 @@ export function ProfilePopup() {
         <button className="absolute top-3 right-3 btn btn-ghost w-9 h-9" onClick={close} aria-label="닫기">✕</button>
         <div className="absolute -bottom-10 left-4 w-24 h-24 rounded-full bg-cream border-4 border-white shadow-md overflow-hidden">
           <Canvas camera={{ position: [0, 0.3, 1.55], fov: 34 }} dpr={[1, 2]}>
-            <hemisphereLight args={['#fff7ea', '#e8d6b8', 1.5]} />
+            <hemisphereLight args={['#fffaf2', '#efe2cc', 2.1]} />
             <directionalLight position={[2, 4, 3]} intensity={1.3} />
             <SpinningHuman profile={p} />
           </Canvas>

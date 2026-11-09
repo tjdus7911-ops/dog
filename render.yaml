@@ -1,0 +1,18 @@
+# Render.com 무료 웹 서비스 배포 설정 (Blueprint)
+# - 클라이언트를 빌드한 뒤, 서버(Express + Socket.IO)가 API·실시간·정적 파일을 한 주소에서 함께 제공한다.
+# - 무료 플랜은 디스크가 임시라서 재배포/재시작 시 가입 정보·채팅 기록이 초기화될 수 있다(테스트용).
+services:
+  - type: web
+    name: mungle-village
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.12.0
+      - key: MUNGLE_PARK_CAPACITY
+        value: "30"
+      - key: ANTHROPIC_API_KEY
+        sync: false

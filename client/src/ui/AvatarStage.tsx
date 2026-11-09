@@ -113,8 +113,8 @@ export function AvatarStage({ human, dog, walking, focus }: { human: HumanAvatar
     <Canvas camera={{ position: [0.6, 1.05, 3.25], fov: 36 }} dpr={[1, 2]} gl={{ antialias: true }}>
       <color attach="background" args={['#bfe3f7']} />
       <fog attach="fog" args={['#d9effa', 6, 14]} />
-      <hemisphereLight args={['#fff7ea', '#e8d6b8', 1.5]} />
-      <directionalLight position={[2.5, 5, 4]} intensity={1.45} color="#fff3dd" />
+      <hemisphereLight args={['#fffaf2', '#efe2cc', 2.1]} />
+      <directionalLight position={[2, 4, 5]} intensity={1.15} color="#fff6e8" />
       <Garden />
       <Actors human={human} dog={dog} walking={walking} />
       <OrbitControls ref={controls as never} enablePan={false} enableDamping minDistance={1.2} maxDistance={5}

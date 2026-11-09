@@ -41,6 +41,7 @@ export interface HumanAvatar {
 
 export const COAT_COLORS = [
   '#f7f1e6', '#f2dcb8', '#e6b47a', '#d98c4a', '#b8703a', '#7a4a2c', '#3a302c', '#9a9aa2', '#e8e4dc',
+  '#eea54e', '#fbefd9',
 ] as const;
 export const HARNESS_COLORS = ['#e8574a', '#f39a7b', '#5b8fd1', '#7cb36b', '#f6c453', '#b59ad6'] as const;
 
@@ -84,7 +85,7 @@ export const DEFAULT_HUMAN: HumanAvatar = {
   shoes: 'sneaker',
   hat: 'cap',
   hatColor: '#f3e3c3',
-  accessory: 'backpack',
+  accessory: 'none',
 };
 
 /** 견종 프리셋 — 수동 커스터마이징의 출발점. (AI 분석은 아직 연결되지 않음) */
@@ -95,7 +96,7 @@ export const BREED_PRESETS: Record<string, { label: string; dog: Omit<DogAvatar,
   husky: { label: '허스키형', dog: { breed: 'husky', size: 'large', coat: '#9a9aa2', secondary: '#f7f1e6', pattern: 'mask', ear: 'pointy', tail: 'fluffy', fur: 'short', snout: 'long' } },
   retriever: { label: '리트리버형', dog: { breed: 'retriever', size: 'large', coat: '#e6b47a', secondary: '#e6b47a', pattern: 'none', ear: 'floppy', tail: 'straight', fur: 'short', snout: 'long' } },
   beagle: { label: '비글형', dog: { breed: 'beagle', size: 'medium', coat: '#f7f1e6', secondary: '#b8703a', pattern: 'saddle', ear: 'floppy', tail: 'straight', fur: 'short', snout: 'medium' } },
-  corgi: { label: '웰시코기형', dog: { breed: 'corgi', size: 'small', coat: '#d98c4a', secondary: '#f7f1e6', pattern: 'socks', ear: 'pointy', tail: 'short', fur: 'short', snout: 'medium' } },
+  corgi: { label: '웰시코기형', dog: { breed: 'corgi', size: 'small', coat: '#eea54e', secondary: '#fbefd9', pattern: 'socks', ear: 'pointy', tail: 'short', fur: 'short', snout: 'medium' } },
   pomeranian: { label: '포메라니안형', dog: { breed: 'pomeranian', size: 'small', coat: '#e6b47a', secondary: '#f7f1e6', pattern: 'mask', ear: 'pointy', tail: 'fluffy', fur: 'long', snout: 'short' } },
   dachshund: { label: '닥스훈트형', dog: { breed: 'dachshund', size: 'small', coat: '#7a4a2c', secondary: '#d98c4a', pattern: 'mask', ear: 'floppy', tail: 'straight', fur: 'short', snout: 'long' } },
   mix: { label: '믹스/기타', dog: { breed: 'mix', size: 'medium', coat: '#7a4a2c', secondary: '#f7f1e6', pattern: 'patch', ear: 'fold', tail: 'straight', fur: 'short', snout: 'medium' } },

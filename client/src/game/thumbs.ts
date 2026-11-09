@@ -16,9 +16,9 @@ const SIZE = 192;
 let renderer: THREE.WebGLRenderer | null = null;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 20);
-scene.add(new THREE.HemisphereLight('#fff7ea', '#e8d6b8', 1.55));
-const sun = new THREE.DirectionalLight('#fff3dd', 1.45);
-sun.position.set(2, 4, 3);
+scene.add(new THREE.HemisphereLight('#fffaf2', '#efe2cc', 2.2));
+const sun = new THREE.DirectionalLight('#fff6e8', 1.1);
+sun.position.set(2, 4, 5);
 scene.add(sun);
 
 const results = new Map<string, string>();

@@ -1,11 +1,12 @@
 // 파츠 조립 → 관절(bone)별 단일 메시로 병합하는 유틸
-// - 캐릭터는 수십 개의 둥근 로우폴리 파츠로 만들지만, 렌더링 시에는 관절 수(약 7개)만큼만 그린다.
+// - 캐릭터는 수십 개의 둥근 파츠로 만들지만, 렌더링 시에는 관절 수(약 7개)만큼만 그린다.
 // - 병합 결과는 아바타 설정별로 캐시해 같은 모습의 캐릭터·썸네일이 지오메트리를 공유한다.
+// - v3: 첨부 레퍼런스(말랑한 점토 장난감 질감)에 맞춰 부드러운 셰이딩 사용
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
-/** 모든 캐릭터가 공유하는 재질: 정점 색상 + 플랫 셰이딩(로우폴리 면), 무광 */
-export const characterMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+/** 모든 캐릭터가 공유하는 재질: 정점 색상 + 부드러운 셰이딩, 무광 점토 느낌 */
+export const characterMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
 
 const geoCache = new Map<string, THREE.BufferGeometry>();
 function cached<T extends THREE.BufferGeometry>(key: string, make: () => T): T {
@@ -14,19 +15,44 @@ function cached<T extends THREE.BufferGeometry>(key: string, make: () => T): T {
   return g;
 }
 
-/** 파츠용 기본 도형 (세그먼트 수를 낮게 유지해 면이 보이는 로우폴리 질감) */
+/** 파츠용 기본 도형 — 부드러운 곡면이 나오도록 충분히 분할 */
 export const shape = {
-  /** 둥근 덩어리: 이십면체 2단계 분할 — 부드럽지만 면이 살아 있는 형태 */
-  blob: (detail = 2) => cached(`blob${detail}`, () => new THREE.IcosahedronGeometry(1, detail)),
-  sphere: (w = 10, h = 8) => cached(`sph${w},${h}`, () => new THREE.SphereGeometry(1, w, h)),
-  dome: (thetaFrac: number, w = 14, h = 6) => cached(`dome${thetaFrac},${w},${h}`, () => new THREE.SphereGeometry(1, w, h, 0, Math.PI * 2, 0, Math.PI * thetaFrac)),
-  capsule: (r: number, len: number, cap = 3, radial = 8) => cached(`cap${r},${len},${cap},${radial}`, () => new THREE.CapsuleGeometry(r, len, cap, radial)),
-  cyl: (rt: number, rb: number, h: number, seg = 10, open = false) => cached(`cyl${rt},${rb},${h},${seg},${open}`, () => new THREE.CylinderGeometry(rt, rb, h, seg, 1, open)),
-  cone: (r: number, h: number, seg = 4) => cached(`cone${r},${h},${seg}`, () => new THREE.ConeGeometry(r, h, seg)),
-  torus: (r: number, t: number, arc = Math.PI * 2, rs = 5, ts = 14) => cached(`tor${r},${t},${arc},${rs},${ts}`, () => new THREE.TorusGeometry(r, t, rs, ts, arc)),
-  /** 앞머리용: 정면 쪽 구면 조각 (위에서부터 thetaFrac*π 까지) */
-  fringe: (thetaFrac: number) => cached(`fr${thetaFrac}`, () => new THREE.SphereGeometry(1, 18, 8, Math.PI / 2 - 1.05, 2.1, 0, Math.PI * thetaFrac)),
-  halfDisc: (r: number) => cached(`hd${r}`, () => new THREE.CircleGeometry(r, 8, Math.PI, Math.PI)),
+  /** 둥근 덩어리 (구) */
+  ball: (w = 24, h = 18) => cached(`ball${w},${h}`, () => new THREE.SphereGeometry(1, w, h)),
+  /** 위쪽 일부만 있는 구 (thetaFrac*π 까지) */
+  dome: (thetaFrac: number, w = 28, h = 12) => cached(`dome${thetaFrac},${w},${h}`, () => new THREE.SphereGeometry(1, w, h, 0, Math.PI * 2, 0, Math.PI * thetaFrac)),
+  /** 앞쪽 일부 구면 (phi 범위) */
+  shell: (phiStart: number, phiLen: number, thetaStart: number, thetaLen: number) =>
+    cached(`sh${phiStart},${phiLen},${thetaStart},${thetaLen}`, () => new THREE.SphereGeometry(1, 28, 16, phiStart, phiLen, thetaStart, thetaLen)),
+  capsule: (r: number, len: number) => cached(`cap${r},${len}`, () => new THREE.CapsuleGeometry(r, len, 6, 16)),
+  cyl: (rt: number, rb: number, h: number, seg = 20, open = false) => cached(`cyl${rt},${rb},${h},${seg},${open}`, () => new THREE.CylinderGeometry(rt, rb, h, seg, 1, open)),
+  cone: (r: number, h: number, seg = 16) => cached(`cone${r},${h},${seg}`, () => new THREE.ConeGeometry(r, h, seg)),
+  torus: (r: number, t: number, arc = Math.PI * 2, rs = 10, ts = 28) => cached(`tor${r},${t},${arc},${rs},${ts}`, () => new THREE.TorusGeometry(r, t, rs, ts, arc)),
+  /** 머리카락 껍질: 구면 일부에 세로 가닥 결(볼록한 줄)을 새긴 형태 */
+  hair: (phiStart: number, phiLen: number, thetaLen: number, lobes: number, amp = 0.035) =>
+    cached(`hair${phiStart},${phiLen},${thetaLen},${lobes},${amp}`, () => {
+      const g = new THREE.SphereGeometry(1, 72, 24, phiStart, phiLen, 0, thetaLen);
+      const pos = g.attributes.position;
+      const v = new THREE.Vector3();
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i);
+        const theta = Math.acos(Math.max(-1, Math.min(1, v.y)));
+        let phi = Math.atan2(v.z, -v.x);
+        if (phi < 0) phi += Math.PI * 2;
+        const t = (phi - phiStart) / phiLen; // 0~1
+        const w = Math.min(1, Math.max(0, (theta - 0.35) / 0.55)); // 위쪽은 매끈, 아래로 갈수록 결이 뚜렷
+        const lobe = Math.pow(Math.abs(Math.cos(t * lobes * Math.PI)), 0.6);
+        // 아래 끝은 안쪽으로 살짝 말림
+        const tuck = Math.max(0, (theta - thetaLen + 0.25) / 0.25);
+        const k = 1 + amp * w * lobe - 0.06 * tuck * tuck;
+        pos.setXYZ(i, v.x * k, v.y, v.z * k);
+      }
+      g.computeVertexNormals();
+      return g;
+    }),
+  /** 아래쪽 반원 (웃는 입) */
+  halfDisc: (r: number) => cached(`hd${r}`, () => new THREE.CircleGeometry(r, 16, Math.PI, Math.PI)),
+  disc: (r: number) => cached(`dc${r}`, () => new THREE.CircleGeometry(r, 20)),
   box: (w: number, h: number, d: number) => cached(`box${w},${h},${d}`, () => new THREE.BoxGeometry(w, h, d)),
 };
 
@@ -53,6 +79,15 @@ export function bone(parent: THREE.Object3D, name: string, pos: V3 = [0, 0, 0]) 
   return g;
 }
 
+/** 보조 그룹 (병합 시 부모 관절에 합쳐짐) */
+export function group(parent: THREE.Object3D, pos: V3 = [0, 0, 0], rot: V3 = [0, 0, 0]) {
+  const g = new THREE.Group();
+  g.position.set(...pos);
+  g.rotation.set(...rot);
+  parent.add(g);
+  return g;
+}
+
 /** 타원체 표면 위의 점 (yaw: 좌우, pitch: 상하) — 얼굴 파츠를 머리 표면에 붙일 때 사용 */
 export function onSurface(center: V3, radii: V3, yaw: number, pitch: number, k = 1): V3 {
   return [
@@ -64,7 +99,7 @@ export function onSurface(center: V3, radii: V3, yaw: number, pitch: number, k =
 
 const tmpColor = new THREE.Color();
 
-/** 관절별로 하위 파츠를 하나의 지오메트리로 합친다. */
+/** 관절별로 하위 파츠를 하나의 지오메트리로 합친다 (부드러운 법선 유지). */
 export function bake(root: THREE.Group) {
   root.updateMatrixWorld(true);
   const bones: THREE.Object3D[] = [root];
@@ -90,10 +125,20 @@ export function bake(root: THREE.Group) {
     inv.copy(b.matrixWorld).invert();
     const geos: THREE.BufferGeometry[] = [];
     for (const m of meshes) {
-      let g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
-      for (const k of Object.keys(g.attributes)) if (k !== 'position') g.deleteAttribute(k);
+      const g = m.geometry.clone();
+      for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
+      if (!g.attributes.normal) g.computeVertexNormals();
+      if (!g.index) {
+        const n = g.attributes.position.count;
+        g.setIndex(Array.from({ length: n }, (_, i) => i));
+      }
       rel.multiplyMatrices(inv, m.matrixWorld);
       g.applyMatrix4(rel);
+      // 음수 스케일(좌우 반전)로 면 방향이 뒤집힌 경우 인덱스 순서 보정
+      if (rel.determinant() < 0) {
+        const idx = g.index!.array as Uint16Array | Uint32Array;
+        for (let i = 0; i < idx.length; i += 3) { const t = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = t; }
+      }
       tmpColor.set(m.userData.color);
       const n = g.attributes.position.count;
       const col = new Float32Array(n * 3);
@@ -104,13 +149,11 @@ export function bake(root: THREE.Group) {
     }
     const merged = mergeGeometries(geos, false)!;
     geos.forEach((g) => g.dispose());
-    merged.computeVertexNormals();
     merged.computeBoundingSphere();
     const mesh = new THREE.Mesh(merged, characterMaterial);
     mesh.name = `${b.name || 'root'}-mesh`;
     b.add(mesh);
   }
-  // 빈 보조 그룹 정리
   const empty: THREE.Object3D[] = [];
   root.traverse((o) => { if (o.type === 'Group' && !o.userData.bone && o !== root && o.children.length === 0) empty.push(o); });
   empty.forEach((o) => o.removeFromParent());
@@ -125,20 +168,8 @@ export function templateCache(max = 120) {
     if (!t) {
       t = bake(build());
       map.set(key, t);
-      if (map.size > max) {
-        const first = map.keys().next().value!;
-        const old = map.get(first)!;
-        map.delete(first);
-        // 다른 인스턴스가 공유 중일 수 있어 즉시 dispose 하지 않는다 (GC 대상)
-        void old;
-      }
+      if (map.size > max) map.delete(map.keys().next().value!);
     }
     return t.clone(true);
   };
-}
-
-export function findBone(root: THREE.Object3D, name: string) {
-  const b = root.getObjectByName(name);
-  if (!b) throw new Error(`bone ${name} not found`);
-  return b;
 }

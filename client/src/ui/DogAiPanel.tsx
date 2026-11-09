@@ -77,7 +77,7 @@ export function DogAiPanel({ current, onApply, onUseAsProfile }: { current: DogA
         {available === false && <span className="text-[11px] rounded-full bg-white px-2 py-0.5 text-cocoa-soft">사용 불가</span>}
       </div>
       <p className="text-[13px] text-cocoa-soft mt-1 leading-relaxed">
-        우리 강아지 사진을 올리면 AI가 견종 유형·털색·털 길이·귀·꼬리·체형·무늬를 분석해 닮은 로우폴리 강아지로 맞춰 드려요.
+        우리 강아지 사진을 올리면 AI가 견종 유형·털색·털 길이·귀·꼬리·체형·무늬를 분석해 닮은 3D 강아지로 맞춰 드려요.
       </p>
 
       <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ''; }} />
