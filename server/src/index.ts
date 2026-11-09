@@ -15,6 +15,7 @@ import { filterProfanity, RateLimiter, sanitize } from './moderation';
 import { AnalysisError, dogAnalyzer, type DogPhoto } from './dogAnalyzer';
 import { validateDog, validateHuman } from '../../shared/avatar';
 import { DEFAULT_PRIVACY } from '../../shared/protocol';
+import { claimedItems, registerCommunity, screenExtras } from './community';
 
 const PORT = Number(process.env.PORT ?? 3001);
 const app = express();
@@ -249,6 +250,7 @@ function homeView(viewer: number, owner: number): HomeView | null {
     owner: { nickname: p.nickname, dogName: p.dogName, dogPhoto: p.dogPhoto, human: p.human, dog: p.dog },
     residence: res, visibility: h.visibility, layout: h.layout,
     likes: repo.countLikes(owner), likedByMe: repo.hasLiked(owner, viewer), isOwner: viewer === owner,
+    owned: viewer === owner ? claimedItems(owner) : [],
     guestbook: repo.listGuestbook(owner).filter((g) => !repo.eitherBlocked(viewer, g.author_id)).map((g) => ({
       id: g.id, authorId: g.author_id, nickname: g.nickname, dogName: g.dog_name, text: g.text, ts: g.created_at,
       canDelete: viewer === owner || viewer === g.author_id,
@@ -269,7 +271,7 @@ app.get('/api/home/:userId', requireAuth, (req, res) => {
 app.put('/api/home/me/layout', requireAuth, (req, res) => {
   const me = (req as AuthedRequest).userId;
   if (!repo.getResidence(me)) return res.status(400).json({ error: '입주한 뒤 집을 꾸밀 수 있어요.' });
-  const layout = validateLayout(req.body?.layout);
+  const layout = validateLayout(req.body?.layout, new Set(claimedItems(me)));
   if (!layout) return res.status(400).json({ error: '가구 배치 정보가 올바르지 않아요.' });
   repo.saveHome(me, { layout });
   rt.homeUpdated(me);
@@ -425,12 +427,23 @@ function screenFeed() {
   // 오늘의 강아지: 승인된 강아지 중 날짜마다 한 마리씩 돌아가며
   const day = Math.floor((Date.now() + 9 * 3600_000) / 86400_000);
   const today = dogs.length ? dogs[day % dogs.length] : null;
+  const { meetups, popular } = screenExtras();
+  const pop = popular && popular.id !== today?.id ? popular : null;
   const slides = [
     ...(today ? [{ ...toScreen(today), label: '오늘의 강아지' }] : []),
-    ...dogs.filter((d) => d !== today).slice(0, 6).map((d) => ({ ...toScreen(d), label: '우리 강아지 자랑' })),
+    ...(pop ? [{ ...toScreen(pop), label: `인기 자랑 글 ❤️${pop.likes}` }] : []),
+    ...meetups.map((m) => ({
+      id: m.id as number, kind: 'meetup', label: '동네 모임 일정', title: m.title as string,
+      text: `${fmtWhen(m.starts_at)} · ${m.kind === 'online' ? '온라인 · ' : ''}${m.place}`, image: null,
+      author: repo.getPublicProfile(m.host_id)?.nickname ?? '', authorId: m.host_id as number, dogName: null, ts: m.created_at as number,
+    })),
+    ...dogs.filter((d) => d !== today && d.id !== pop?.id).slice(0, 6).map((d) => ({ ...toScreen(d), label: '우리 강아지 자랑' })),
     ...notices.slice(0, 3).map((n) => ({ ...toScreen(n), label: '운영 공지' })),
   ];
   return slides;
+}
+function fmtWhen(ts: number) {
+  return new Date(ts).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', weekday: 'short', hour: 'numeric', minute: '2-digit' });
 }
 function toScreen(r: Record<string, any>) {
   return { id: r.id as number, kind: r.kind as string, title: r.title as string, text: r.text as string, image: (r.image as string | null) ?? null,
@@ -485,6 +498,9 @@ app.post('/api/admin/notices', requireAuth, requireAdmin, (req, res) => {
   rt.screenUpdated();
   res.json({ ok: true });
 });
+
+// ---------- 멍글 동네 (강아지 자랑·산책 모임·강아지 모임·애견샵) ----------
+registerCommunity(app, { saveImage, removeImage, notify: (u, e, p) => rt.notify(u, e, p), screenUpdated: () => rt.screenUpdated() });
 
 // ---------- 운영 ----------
 app.get('/api/admin/reports', requireAuth, requireAdmin, (_req, res) => res.json({ reports: repo.listReports() }));

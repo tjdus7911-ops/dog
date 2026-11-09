@@ -6,6 +6,7 @@ import { DEFAULT_PRIVACY, type MyProfile } from '@shared/protocol';
 import { DEFAULT_LAYOUT, validateLayout, type HomeVisibility, type PlacedItem } from '@shared/home';
 import { APARTMENT_BUILDINGS, isValidUnit, unitsOf } from '@shared/apartment';
 import { interpretDogFeatures, jsonPrompt, type DogPhotoKind } from '@shared/dogAnalysis';
+import { demoClaimed, demoCommunity } from './demoCommunity';
 
 export const DEMO = import.meta.env.VITE_DEMO === '1';
 
@@ -98,7 +99,7 @@ export async function demoApi(path: string, opts: { method?: string; body?: any 
     let saved: { layout: PlacedItem[]; visibility: HomeVisibility } = { layout: DEFAULT_LAYOUT, visibility: 'public' };
     try { const raw = localStorage.getItem(KEYH); if (raw) saved = { ...saved, ...JSON.parse(raw) }; } catch { /* 무시 */ }
     if (path === '/api/home/me/layout') {
-      const layout = validateLayout(opts.body?.layout);
+      const layout = validateLayout(opts.body?.layout, new Set(demoClaimed()));
       if (!layout) throw new Error('가구 배치 정보가 올바르지 않아요.');
       saved = { ...saved, layout };
     } else if (path === '/api/home/me/visibility') saved = { ...saved, visibility: opts.body?.visibility ?? 'public' };
@@ -108,10 +109,12 @@ export async function demoApi(path: string, opts: { method?: string; body?: any 
       home: {
         ownerId: cur.id, owner: { nickname: cur.nickname, dogName: cur.dogName, dogPhoto: cur.dogPhoto, human: cur.human, dog: cur.dog },
         residence: cur.residence, visibility: saved.visibility, layout: validateLayout(saved.layout) ?? DEFAULT_LAYOUT,
-        likes: 0, likedByMe: false, isOwner: true, guestbook: [],
+        likes: 0, likedByMe: false, isOwner: true, guestbook: [], owned: demoClaimed(),
       },
     };
   }
+  const community = demoCommunity(path, opts, cur);
+  if (community !== undefined) return community;
   if (path === '/api/dog-analysis/status') return { available: !!(await getSample()), demo: true };
   if (path === '/api/dog-analysis') return { result: await analyzeInClaude(opts.body?.photos ?? []) };
   throw new Error('미리보기에서는 서버 기능을 사용할 수 없어요.');

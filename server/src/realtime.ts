@@ -8,7 +8,7 @@ import {
   CHAT_MAX_LEN, HumanAnim, NET_TICK_MS, PARKS, RUN_SPEED,
   type ChatMessage, type FriendEntry, type NetState, type ParkInfo, type PlayerSnapshot, type PublicProfile, type SeatMap,
 } from '../../shared/protocol';
-import { APARTMENT_ENTRANCE, SEAT_BY_ID, SEAT_REACH, WORLD_RADIUS, spawnPoint } from '../../shared/world';
+import { APARTMENT_ENTRANCE, CAFE_ENTRANCE, SHOP_ENTRANCE, SEAT_BY_ID, SEAT_REACH, WORLD_RADIUS, spawnPoint } from '../../shared/world';
 import { PLACES, SPAWNS, homeSpaceId, insideSpace, parseSpace, type SpaceKind } from '../../shared/spaces';
 import { canVisit } from './access';
 
@@ -191,10 +191,12 @@ export function setupRealtime(io: Server) {
         return okAck(ack, { park: parkInfo(room), spawn: room.players.get(userId)!.state, players: others, seats: Object.fromEntries(room.seats) satisfies SeatMap });
       }
       leavePark(session);
+      // 건물에서 나오면 그 건물 입구 앞에 선다
+      const door = data?.from === 'lobby' ? APARTMENT_ENTRANCE : data?.from === 'cafe' ? CAFE_ENTRANCE : data?.from === 'shop' ? SHOP_ENTRANCE : null;
       const [x, z] = room.kind === 'park'
-        ? (data?.from === 'lobby' ? [APARTMENT_ENTRANCE.x + ((userId % 5) - 2) * 0.5, APARTMENT_ENTRANCE.z + 2.2] : spawnPoint(userId + Date.now() % 1000))
+        ? (door ? [door.x + ((userId % 5) - 2) * 0.5, door.z + 2.2] : spawnPoint(userId + Date.now() % 1000))
         : [SPAWNS[room.kind][0] + ((userId % 5) - 2) * 0.35, SPAWNS[room.kind][1]];
-      const face = room.kind === 'park' && data?.from !== 'lobby' ? Math.PI : 0;
+      const face = room.kind === 'park' && !door ? Math.PI : 0;
       const state: NetState = [x, z, face, 0, x + 0.7, z + 0.3, face, 0];
       const player: Player = { userId, socket, profile, state, lastTs: Date.now(), dirty: true };
       const others: PlayerSnapshot[] = [...room.players.values()]

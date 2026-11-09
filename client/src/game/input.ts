@@ -10,8 +10,10 @@ export const input = {
 };
 
 /** 이동 입력 잠금 설정: 잠글 때 진행 중인 조이스틱·키 입력도 함께 해제 */
-export function setMoveLocked(locked: boolean) {
-  input.locked = locked;
+const lockReasons = new Set<string>();
+export function setMoveLocked(locked: boolean, reason = 'chat') {
+  if (locked) lockReasons.add(reason); else lockReasons.delete(reason);
+  input.locked = lockReasons.size > 0;
   if (locked) {
     input.joy.x = 0; input.joy.y = 0; input.joy.active = false;
     input.keys.clear();

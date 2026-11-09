@@ -151,10 +151,10 @@ CREATE TABLE IF NOT EXISTS screen_items (
 // 마이그레이션: 약관 동의 시각 (기존 계정은 0 = 동의 기록 없음)
 try { db.exec('ALTER TABLE users ADD COLUMN agreed_at INTEGER NOT NULL DEFAULT 0'); } catch { /* 이미 있음 */ }
 
-type Row = Record<string, any>;
-const one = (sql: string, ...p: any[]) => db.prepare(sql).get(...p) as Row | undefined;
-const all = (sql: string, ...p: any[]) => db.prepare(sql).all(...p) as Row[];
-const run = (sql: string, ...p: any[]) => db.prepare(sql).run(...p);
+export type Row = Record<string, any>;
+export const one = (sql: string, ...p: any[]) => db.prepare(sql).get(...p) as Row | undefined;
+export const all = (sql: string, ...p: any[]) => db.prepare(sql).all(...p) as Row[];
+export const run = (sql: string, ...p: any[]) => db.prepare(sql).run(...p);
 
 // ---------- users / sessions ----------
 export function createUser(username: string, passHash: string, salt: string, nickname: string, dogName: string) {

@@ -1,9 +1,14 @@
 import { create } from 'zustand';
 import type { HomeView } from '@shared/home';
 import type { ScreenSlide } from '@shared/screen';
+import type { MeetupMessage } from '@shared/community';
 import type {
   ChatMessage, DirectMessage, FriendEntry, FriendStatus, MyProfile, NotificationItem, ParkInfo, PublicProfile, SeatMap,
 } from '@shared/protocol';
+
+export type CommunityTab = 'meetups' | 'clubs' | 'posts';
+/** 멍글 동네 화면 상태: 탭 + 열어 본 모임/강아지 모임 */
+export interface CommunityView { tab: CommunityTab; meetupId?: number; clubId?: number; compose?: boolean }
 
 export type Panel = 'none' | 'friends' | 'avatar' | 'settings' | 'admin' | 'notifications';
 
@@ -60,6 +65,15 @@ interface State {
   screenSubmit: { photo?: string } | null;
   /** 입주 화면을 이번 접속에서 '나중에 하기'로 넘겼는지 */
   moveInLater: boolean;
+  /** 멍글 동네(커뮤니티) 화면 — 열려 있으면 조이스틱·액션 버튼을 숨기고 이동 입력을 잠금 */
+  community: CommunityView | null;
+  communityVersion: number;
+  /** 열려 있는 모임 채팅에 실시간으로 들어온 메시지 */
+  meetupLive: { meetupId: number; message: MeetupMessage }[];
+  /** 곧 시작하는 모임 안내 */
+  meetupAlert: { meetupId: number; title: string; kind: string; park: string | null; place: string } | null;
+  /** 애견샵 카운터 패널 */
+  shopOpen: boolean;
 }
 
 export const useStore = create<State>()(() => ({
@@ -98,6 +112,11 @@ export const useStore = create<State>()(() => ({
   screenDetail: null,
   screenSubmit: null,
   moveInLater: false,
+  community: null,
+  communityVersion: 0,
+  meetupLive: [],
+  meetupAlert: null,
+  shopOpen: false,
 }));
 
 export const set = useStore.setState;

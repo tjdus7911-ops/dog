@@ -4,7 +4,7 @@ import { PARKS } from './protocol';
 import { resolveCollision, WORLD_RADIUS } from './world';
 import { FURNITURE_BY_ID, ROOM_HALF_D, ROOM_HALF_W, type PlacedItem } from './home';
 
-export type SpaceKind = 'park' | 'lobby' | 'home';
+export type SpaceKind = 'park' | 'lobby' | 'home' | 'cafe' | 'shop';
 
 export interface Place {
   id: string;
@@ -17,6 +17,8 @@ export interface Place {
 export const PLACES: Place[] = [
   ...PARKS.map((p) => ({ ...p, kind: 'park' as const, icon: '🌳' })),
   { id: 'lobby-1', kind: 'lobby', name: '멍글 아파트', icon: '🏢' },
+  { id: 'cafe-1', kind: 'cafe', name: '멍글 애견카페', icon: '☕' },
+  { id: 'shop-1', kind: 'shop', name: '멍글 애견샵', icon: '🛍️' },
 ];
 
 export const homeSpaceId = (ownerId: number) => `home-${ownerId}`;
@@ -27,6 +29,8 @@ export function parseSpace(id: unknown): { kind: SpaceKind; building?: string; o
   if (PARKS.some((p) => p.id === id)) return { kind: 'park' };
   const lobby = /^lobby-(\w{1,8})$/.exec(id);
   if (lobby && PLACES.some((p) => p.id === id)) return { kind: 'lobby', building: lobby[1] };
+  const pl = PLACES.find((p) => p.id === id);
+  if (pl && (pl.kind === 'cafe' || pl.kind === 'shop')) return { kind: pl.kind };
   const home = /^home-(\d{1,10})$/.exec(id);
   if (home) return { kind: 'home', ownerId: Number(home[1]) };
   return null;
@@ -35,7 +39,16 @@ export function parseSpace(id: unknown): { kind: SpaceKind; building?: string; o
 /** 실내 공간 크기 (중심 기준 반폭) */
 export const LOBBY_HALF_W = 4.1;
 export const LOBBY_HALF_D = 3.0;
-export const SPAWNS: Record<Exclude<SpaceKind, 'park'>, [number, number]> = { lobby: [0, 2.3], home: [0.8, 2.2] };
+export const SPAWNS: Record<Exclude<SpaceKind, 'park'>, [number, number]> = { lobby: [0, 2.3], home: [0.8, 2.2], cafe: [0, 2.3], shop: [0, 2.3] };
+/** 애견카페·애견샵 실내 크기 */
+export const SHOP_HALF_W = 4.1;
+export const SHOP_HALF_D = 3.0;
+
+/** 애견카페: 카운터 + 동그란 테이블 3개 / 애견샵: 카운터 + 진열대 */
+export const CAFE_TABLES = [{ x: -2.4, z: 0.2 }, { x: 0.2, z: -0.6 }, { x: 2.6, z: 0.6 }];
+export const CAFE_COUNTER = { x: 0, z: -2.5, hw: 1.8, hd: 0.4 };
+export const SHOP_COUNTER = { x: 2.2, z: -2.4, hw: 1.3, hd: 0.45 };
+export const SHOP_SHELVES = [{ x: -3.6, z: -0.6, hw: 0.35, hd: 1.4 }, { x: -1.2, z: -2.6, hw: 1.2, hd: 0.3 }];
 
 /** 로비 가구(소파·화분) 충돌 */
 const LOBBY_OBSTACLES = [
@@ -62,12 +75,12 @@ export type Collider = (x: number, z: number, r: number) => [number, number];
 /** 공간별 이동 가능 범위 + 장애물 */
 export function spaceCollider(kind: SpaceKind, layout: PlacedItem[] = []): Collider {
   if (kind === 'park') return resolveCollision;
-  const hw = kind === 'lobby' ? LOBBY_HALF_W : ROOM_HALF_W - 0.25;
-  const hd = kind === 'lobby' ? LOBBY_HALF_D : ROOM_HALF_D - 0.25;
+  const hw = kind === 'home' ? ROOM_HALF_W - 0.25 : kind === 'lobby' ? LOBBY_HALF_W : SHOP_HALF_W;
+  const hd = kind === 'home' ? ROOM_HALF_D - 0.25 : kind === 'lobby' ? LOBBY_HALF_D : SHOP_HALF_D;
   const circles = kind === 'home'
     ? layout.filter((i) => !WALKABLE.has(i.type)).map((i) => ({ x: i.x, z: i.z, r: (FURNITURE_BY_ID.get(i.type)?.r ?? 0.4) * 0.85 }))
-    : [];
-  const boxes = kind === 'lobby' ? LOBBY_OBSTACLES : [];
+    : kind === 'cafe' ? CAFE_TABLES.map((t) => ({ ...t, r: 0.55 })) : [];
+  const boxes = kind === 'lobby' ? LOBBY_OBSTACLES : kind === 'cafe' ? [CAFE_COUNTER] : kind === 'shop' ? [SHOP_COUNTER, ...SHOP_SHELVES] : [];
   return (x, z, r) => {
     for (let k = 0; k < 2; k++) {
       for (const c of circles) {
@@ -85,7 +98,7 @@ export function spaceCollider(kind: SpaceKind, layout: PlacedItem[] = []): Colli
 /** 서버 검증용: 공간 안에 있는 좌표인지 (여유 포함) */
 export function insideSpace(kind: SpaceKind, x: number, z: number) {
   if (kind === 'park') return Math.hypot(x, z) <= WORLD_RADIUS + 0.5;
-  const hw = kind === 'lobby' ? LOBBY_HALF_W : ROOM_HALF_W;
-  const hd = kind === 'lobby' ? LOBBY_HALF_D : ROOM_HALF_D;
+  const hw = kind === 'home' ? ROOM_HALF_W : kind === 'lobby' ? LOBBY_HALF_W : SHOP_HALF_W;
+  const hd = kind === 'home' ? ROOM_HALF_D : kind === 'lobby' ? LOBBY_HALF_D : SHOP_HALF_D;
   return Math.abs(x) <= hw + 0.3 && Math.abs(z) <= hd + 0.3;
 }

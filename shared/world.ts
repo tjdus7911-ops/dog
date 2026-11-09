@@ -98,6 +98,13 @@ export const SEAT_HEIGHT = 0.46;
 /** 아파트 입구 (로비로 들어가는 지점) */
 export const APARTMENT = BUILDINGS.find((b) => b.kind === 'apartment')!;
 export const APARTMENT_ENTRANCE = { x: APARTMENT.x, z: APARTMENT.z + APARTMENT.d / 2 + 0.9, r: 1.8 };
+/** 애견카페·애견샵 입구 (문은 광장 쪽 +z) */
+const entranceOf = (kind: 'cafe' | 'shop') => { const b = BUILDINGS.find((x) => x.kind === kind)!; return { x: b.x, z: b.z + b.d / 2 + 0.9, r: 1.8 }; };
+export const CAFE_ENTRANCE = entranceOf('cafe');
+export const SHOP_ENTRANCE = entranceOf('shop');
+/** 광장 동네 모임 게시판 (포토존 맞은편) */
+const MB_ANGLE = Math.PI / 2 + 0.45;
+export const MEETING_BOARD = { x: Math.sin(MB_ANGLE) * 6.3, z: Math.cos(MB_ANGLE) * 6.3, rot: MB_ANGLE + Math.PI, r: 2.2 };
 
 export const LAMPS: LampDef[] = [];
 for (const a of RADIAL_ANGLES) {
@@ -146,6 +153,7 @@ export const COLLIDERS_CIRCLE: Circle[] = [
   { x: BIG_SCREEN.x - BIG_SCREEN.postX, z: BIG_SCREEN.z, r: 0.3 },
   { x: BIG_SCREEN.x + BIG_SCREEN.postX, z: BIG_SCREEN.z, r: 0.3 },
   { x: PHOTO_ZONE.x, z: PHOTO_ZONE.z, r: 0.55 },
+  { x: MEETING_BOARD.x, z: MEETING_BOARD.z, r: 0.6 },
 ];
 
 export const COLLIDERS_BOX: Box[] = BUILDINGS.map((b) => ({ x: b.x, z: b.z, hw: b.w / 2 + 0.1, hd: b.d / 2 + 0.1 }));

@@ -9,6 +9,7 @@ import { cam } from '../game/CameraRig';
 import { isTouchDevice, setMoveLocked } from '../game/input';
 import { openProfile } from '../net/socket';
 import { resizeImage } from '../lib/image';
+import { openCommunity } from './Community';
 import { Modal, timeLabel } from './common';
 import { DEMO } from '../demo';
 
@@ -119,15 +120,16 @@ export function ScreenDetail() {
   const s = d as ScreenSlide;
   return (
     <Modal onClose={close} className="max-w-[440px] p-0 overflow-hidden">
-      {s.image ? <img src={s.image} alt="" className="w-full max-h-[50vh] object-cover" /> : <div className="h-32 grid place-items-center text-5xl bg-sage-soft">📢</div>}
+      {s.image ? <img src={s.image} alt="" className="w-full max-h-[50vh] object-cover" /> : <div className="h-32 grid place-items-center text-5xl bg-sage-soft">{s.kind === 'meetup' ? '🗓️' : '📢'}</div>}
       <div className="p-5">
-        <span className={`text-xs rounded-full px-2.5 py-1 text-white ${s.kind === 'notice' ? 'bg-[#97c08d]' : 'bg-[#f39a7b]'}`}>{s.label}</span>
+        <span className={`text-xs rounded-full px-2.5 py-1 text-white ${s.kind === 'notice' ? 'bg-[#97c08d]' : s.kind === 'meetup' ? 'bg-[#6fb3d2]' : 'bg-[#f39a7b]'}`}>{s.label}</span>
         <h2 className="font-display text-2xl mt-2">{s.title}</h2>
         {s.text && <p className="mt-1">{s.text}</p>}
-        <p className="text-xs text-cocoa-soft mt-2">{s.kind === 'notice' ? '멍글마을 운영팀' : `${s.author}${s.dogName ? ` · 🐶 ${s.dogName}` : ''}`} · {timeLabel(s.ts)}</p>
+        <p className="text-xs text-cocoa-soft mt-2">{s.kind === 'notice' ? '멍글마을 운영팀' : s.kind === 'meetup' ? `모임장 ${s.author}` : `${s.author}${s.dogName ? ` · 🐶 ${s.dogName}` : ''}`} · {timeLabel(s.ts)}</p>
         <div className="grid gap-2 mt-4">
+          {s.kind === 'meetup' && <button className="btn btn-peach py-2.5" onClick={() => { close(); openCommunity('meetups', { meetupId: s.id }); }}>🐾 모임 보기·참가 신청</button>}
           {s.kind === 'dog' && s.authorId !== me?.id && <button className="btn btn-ghost py-2.5 border border-[#f1e2d2]" onClick={() => { close(); void openProfile(s.authorId); }}>👤 작성자 프로필 보기</button>}
-          <button className="btn btn-coral py-2.5" onClick={() => set({ screenDetail: null, screenSubmit: {} })}>🐶 우리 강아지도 올리기</button>
+          {s.kind !== 'meetup' && <button className="btn btn-coral py-2.5" onClick={() => { close(); openCommunity('posts'); }}>📸 강아지 자랑하고 스크린에 올리기</button>}
         </div>
       </div>
     </Modal>

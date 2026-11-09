@@ -1,4 +1,5 @@
 // 3인칭 추적 카메라 — 수평 360도 회전, 상하 각도 제한, 확대/축소
+import type { SpaceKind } from '@shared/spaces';
 // PC: 마우스 드래그 회전 / 휠 줌 · 모바일: 한 손가락 드래그 회전 / 두 손가락 핀치 줌
 import { useEffect, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
@@ -7,7 +8,7 @@ import { local } from './local';
 import { readMove } from './input';
 import { space } from './space';
 
-export const cam = { yaw: 0, pitch: 0.42, dist: 7.5, lastUserInput: 0, pendingReset: null as null | 'park' | 'lobby' | 'home' };
+export const cam = { yaw: 0, pitch: 0.42, dist: 7.5, lastUserInput: 0, pendingReset: null as null | SpaceKind };
 const MIN_DIST = 3.2, MAX_DIST = 16, MIN_PITCH = 0.08, MAX_PITCH = 1.25;
 
 export function CameraRig() {

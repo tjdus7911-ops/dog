@@ -13,7 +13,10 @@ import { SettingsPanel } from './SettingsPanel';
 import { ConnectionOverlay } from './ConnectionOverlay';
 import { BenchMenu } from './BenchMenu';
 import { PhotoModeBar, PhotoZonePrompt, ScreenDetail, ScreenSubmit } from './Photo';
-import { EntrancePrompt, LobbyPanel } from './Apartment';
+import { LobbyPanel } from './Apartment';
+import { CafeBar, EntrancePrompt, ShopBar } from './Places';
+import { Community, MeetupAlert } from './Community';
+import { isTouchDevice } from '../game/input';
 import { HomeEditor, HomePanel } from './Home';
 
 const AvatarEditor = lazy(() => import('./AvatarEditor'));
@@ -27,18 +30,24 @@ export default function Game() {
   const kind = useStore((s) => s.park?.kind ?? 'park');
   const homeEdit = useStore((s) => s.homeEdit);
   const photo = useStore((s) => s.photoMode);
+  // 멍글 동네가 열려 있으면 조이스틱·액션 버튼을 숨김 (모바일은 채팅·미니맵도 숨겨 겹침 방지)
+  const community = useStore((s) => !!s.community);
+  const touch = isTouchDevice();
   return (
     <div className="relative h-full w-full overflow-hidden">
       <div className="absolute inset-0"><Scene /></div>
       {!photo && <>
         <TopBar />
-        {kind === 'park' && <MiniMap />}
-        <ChatPanel />
-        <ActionBar />
-        <Joystick />
-        {kind === 'park' && <><BenchMenu /><EntrancePrompt /><PhotoZonePrompt /></>}
+        {kind === 'park' && !community && <MiniMap />}
+        {!(community && touch) && <ChatPanel />}
+        {!community && <><ActionBar /><Joystick /></>}
+        {kind === 'park' && !community && <><BenchMenu /><EntrancePrompt /><PhotoZonePrompt /></>}
         {kind === 'lobby' && <LobbyPanel />}
         {kind === 'home' && <HomePanel />}
+        {kind === 'cafe' && <CafeBar />}
+        {kind === 'shop' && <ShopBar />}
+        {!community && <MeetupAlert />}
+        {community && <Community />}
       </>}
       {photo && <PhotoModeBar />}
       {homeEdit && <HomeEditor />}

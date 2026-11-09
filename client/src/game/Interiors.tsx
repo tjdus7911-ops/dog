@@ -124,3 +124,111 @@ export function LobbySpace() {
   }, [version]);
   return <LobbyRoom units={units} />;
 }
+
+// ---------------------------------------------------------------- 애견카페 · 애견샵
+const SW = 4.5, SD = 3.5;
+/** 카페·샵 공용 실내 껍데기: 바닥·뒷벽·옆벽·간판 */
+function ShopShell({ floor, wall, side, sign }: { floor: string; wall: string; side: string; sign: string }) {
+  return (
+    <group>
+      <mesh geometry={geo.box(SW * 2, 0.1, SD * 2)} material={mat(floor)} position={[0, -0.05, 0]} />
+      <mesh geometry={geo.box(SW * 2, 4, 0.2)} material={mat(wall)} position={[0, 2, -SD]} />
+      <mesh geometry={geo.box(0.2, 4, SD * 2)} material={mat(side)} position={[-SW, 2, 0]} />
+      <mesh geometry={geo.box(0.2, 4, SD * 2)} material={mat(side)} position={[SW, 2, 0]} />
+      <mesh geometry={geo.box(SW * 2, 0.4, 0.25)} material={mat(sign)} position={[0, 0.2, -SD + 0.12]} />
+    </group>
+  );
+}
+const Pendant = ({ x, z, color }: { x: number; z: number; color: string }) => {
+  const glow = useMemo(() => new THREE.MeshLambertMaterial({ color: '#fff1b8', emissive: '#ffd77a', emissiveIntensity: 0.7 }), []);
+  return (
+    <group position={[x, 3.2, z]}>
+      <mesh geometry={geo.cyl(0.01, 0.01, 0.9, 4)} material={mat('#5a4a44')} position={[0, 0.45, 0]} />
+      <mesh geometry={geo.cone(0.3, 0.3, 8)} material={mat(color)} />
+      <mesh geometry={geo.ico(0.1, 1)} material={glow} position={[0, -0.14, 0]} />
+    </group>
+  );
+};
+
+/** 멍글 애견카페: 카운터(커피머신·케이크 진열), 동그란 테이블 3개와 의자, 강아지 물그릇·방석 */
+export function CafeSpace() {
+  return (
+    <group>
+      <ShopShell floor="#e3c39c" wall="#fbe9d4" side="#e3efdc" sign="#8fb88a" />
+      {/* 메뉴판 */}
+      <group position={[0, 2.5, -SD + 0.12]}>
+        <mesh geometry={geo.box(3.2, 1.1, 0.06)} material={mat('#4f5b4c')} />
+        {[0, 1, 2].map((i) => <mesh key={i} geometry={geo.box(2.4 - i * 0.4, 0.06, 0.07)} material={mat('#fff8ef')} position={[-0.2, 0.3 - i * 0.28, 0]} />)}
+        <mesh geometry={geo.cyl(0.16, 0.16, 0.05, 8)} material={mat('#f39a7b')} position={[1.25, 0.2, 0.03]} rotation={[Math.PI / 2, 0, 0]} />
+      </group>
+      {/* 카운터 */}
+      <group position={[0, 0, -2.5]}>
+        <mesh geometry={geo.box(3.6, 1.0, 0.8)} material={mat('#c99a6b')} position={[0, 0.5, 0]} />
+        <mesh geometry={geo.box(3.8, 0.08, 0.95)} material={mat('#fff6e8')} position={[0, 1.04, 0]} />
+        <mesh geometry={geo.box(0.5, 0.5, 0.4)} material={mat('#9a9aa2')} position={[-1.2, 1.33, -0.1]} />
+        <mesh geometry={geo.cyl(0.07, 0.06, 0.12, 8)} material={mat('#ffffff')} position={[-1.2, 1.14, 0.12]} />
+        {/* 케이크 진열장 */}
+        <mesh geometry={geo.box(1.1, 0.5, 0.6)} material={mat('#e6f3f5')} position={[0.9, 1.33, 0]} />
+        {[0.6, 0.9, 1.2].map((x, i) => <mesh key={x} geometry={geo.cyl(0.11, 0.11, 0.14, 8)} material={mat(['#f4a6b8', '#f6c453', '#fff6e8'][i])} position={[x, 1.2, 0]} />)}
+      </group>
+      {/* 테이블 + 의자 */}
+      {[[-2.4, 0.2], [0.2, -0.6], [2.6, 0.6]].map(([x, z], i) => (
+        <group key={i} position={[x, 0, z]}>
+          <mesh geometry={geo.cyl(0.08, 0.12, 0.7, 6)} material={mat('#a8794f')} position={[0, 0.35, 0]} />
+          <mesh geometry={geo.cyl(0.5, 0.5, 0.06, 12)} material={mat('#fff6e8')} position={[0, 0.72, 0]} />
+          <mesh geometry={geo.cyl(0.07, 0.06, 0.12, 8)} material={mat(['#f39a7b', '#a9cfa0', '#f4a6b8'][i])} position={[0.12, 0.81, 0.05]} />
+          {[0, Math.PI].map((r) => (
+            <group key={r} rotation={[0, r + 0.3, 0]}>
+              <mesh geometry={geo.cyl(0.2, 0.2, 0.08, 8)} material={mat('#f7c9b4')} position={[0, 0.42, 0.75]} />
+              <mesh geometry={geo.cyl(0.04, 0.04, 0.4, 5)} material={mat('#a8794f')} position={[0, 0.2, 0.75]} />
+            </group>
+          ))}
+        </group>
+      ))}
+      {/* 강아지 코너: 방석·물그릇 */}
+      <group position={[-3.6, 0, 2.4]}>
+        <mesh geometry={geo.cyl(0.5, 0.55, 0.14, 12)} material={mat('#f4a6b8')} position={[0, 0.07, 0]} />
+        <mesh geometry={geo.cyl(0.2, 0.15, 0.1, 12)} material={mat('#8fd3e8')} position={[0.8, 0.05, 0.1]} />
+      </group>
+      <mesh geometry={geo.ico(0.5, 1)} material={mat('#8fc27a')} position={[3.9, 0.9, -3.0]} />
+      <mesh geometry={geo.cyl(0.28, 0.22, 0.5, 8)} material={mat('#e98a5e')} position={[3.9, 0.25, -3.0]} />
+      {[-2, 0, 2].map((x) => <Pendant key={x} x={x} z={0} color="#8fb88a" />)}
+    </group>
+  );
+}
+
+/** 멍글 애견샵: 진열대(사료·장난감), 계산 카운터(선물 받기) */
+export function ShopSpace() {
+  return (
+    <group>
+      <ShopShell floor="#f3e1c6" wall="#fff6e8" side="#fde3d6" sign="#f4a6b8" />
+      {/* 왼쪽 벽 진열대 */}
+      <group position={[-3.6, 0, -0.6]}>
+        <mesh geometry={geo.box(0.7, 2.2, 2.8)} material={mat('#c99a6b')} position={[0, 1.1, 0]} />
+        {[0.5, 1.2, 1.9].map((y, r) => [-1, 0, 1].map((k) => (
+          <mesh key={`${r}${k}`} geometry={geo.box(0.4, 0.4, 0.55)} material={mat(['#f39a7b', '#a9cfa0', '#f6c453', '#8fd3e8'][(r + k + 3) % 4])} position={[0.25, y, k * 0.85]} />
+        )))}
+      </group>
+      {/* 뒷벽 장난감 진열대 */}
+      <group position={[-1.2, 0, -2.6]}>
+        <mesh geometry={geo.box(2.4, 1.1, 0.6)} material={mat('#e3c39c')} position={[0, 0.55, 0]} />
+        {[-0.8, -0.3, 0.2, 0.7].map((x, i) => <mesh key={x} geometry={geo.ico(0.14, 1)} material={mat(['#d7ea6f', '#f4a6b8', '#8fd3e8', '#f39a7b'][i])} position={[x, 1.25, 0]} />)}
+      </group>
+      {/* 계산 카운터 (선물 받는 곳) */}
+      <group position={[2.2, 0, -2.4]}>
+        <mesh geometry={geo.box(2.6, 1.0, 0.9)} material={mat('#f7c9b4')} position={[0, 0.5, 0]} />
+        <mesh geometry={geo.box(2.7, 0.08, 1.0)} material={mat('#fff6e8')} position={[0, 1.04, 0]} />
+        <mesh geometry={geo.box(0.4, 0.3, 0.3)} material={mat('#5a4a44')} position={[0.7, 1.23, 0]} />
+        {/* 선물 상자 */}
+        <group position={[-0.6, 1.24, 0]}>
+          <mesh geometry={geo.box(0.36, 0.3, 0.36)} material={mat('#f39a7b')} />
+          <mesh geometry={geo.box(0.38, 0.06, 0.08)} material={mat('#fff6e8')} position={[0, 0.0, 0]} />
+          <mesh geometry={geo.box(0.08, 0.32, 0.38)} material={mat('#fff6e8')} />
+        </group>
+      </group>
+      {/* 바닥 발바닥 매트 */}
+      <mesh geometry={geo.circle(1.1, 20)} material={mat('#fde3d6')} rotation={[-Math.PI / 2, 0, 0]} position={[0.6, 0.01, 1.4]} />
+      {[-2, 0.5, 3].map((x) => <Pendant key={x} x={x} z={0.4} color="#f4a6b8" />)}
+    </group>
+  );
+}

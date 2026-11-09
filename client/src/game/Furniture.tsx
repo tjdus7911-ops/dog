@@ -138,6 +138,42 @@ export function FurnitureModel({ type, n, photo }: { type: string; n: number; ph
           <mesh geometry={geo.cyl(0.16, 0.16, 0.02, 12)} material={mat('#b8703a')} position={[0, 0.09, 0]} />
         </group>
       );
+    // ---- 애견샵 가구 ----
+    case 'doghouse':
+      return (
+        <group>
+          <mesh geometry={geo.box(0.9, 0.7, 0.9)} material={mat(C.cream)} position={[0, 0.35, 0]} />
+          {[-1, 1].map((s) => <mesh key={s} geometry={geo.box(0.62, 0.06, 1.0)} material={mat(C.coral)} position={[s * 0.24, 0.86, 0]} rotation={[0, 0, -s * 0.72]} />)}
+          <mesh geometry={geo.box(0.4, 0.46, 0.04)} material={mat('#5a4a44')} position={[0, 0.25, 0.455]} />
+          <mesh geometry={geo.cyl(0.2, 0.2, 0.04, 10)} material={mat('#5a4a44')} position={[0, 0.48, 0.455]} rotation={[Math.PI / 2, 0, 0]} />
+          <mesh geometry={geo.box(0.36, 0.1, 0.05)} material={mat(C.yellow)} position={[0, 0.82, 0.46]} />
+        </group>
+      );
+    case 'toybox':
+      return (
+        <group>
+          <mesh geometry={geo.box(0.7, 0.42, 0.5)} material={mat(C.sage)} position={[0, 0.21, 0]} />
+          <mesh geometry={geo.box(0.74, 0.06, 0.54)} material={mat(C.sageDark)} position={[0, 0.44, 0]} />
+          <mesh geometry={geo.ico(0.12, 1)} material={mat('#d7ea6f')} position={[-0.16, 0.52, 0.02]} />
+          <mesh geometry={geo.ico(0.1, 1)} material={mat(C.pink)} position={[0.14, 0.52, -0.05]} />
+          <mesh geometry={geo.cyl(0.03, 0.03, 0.3, 6)} material={mat(C.cream)} position={[0.05, 0.56, 0.1]} rotation={[0, 0, 1.2]} />
+        </group>
+      );
+    case 'cushion':
+      return (
+        <group position={[0, 0.08, 0]}>
+          {[-1, 1].map((s) => <mesh key={s} geometry={geo.cyl(0.22, 0.24, 0.14, 12)} material={mat(n % 2 ? '#f7c9b4' : C.pink)} position={[s * 0.15, 0, -0.08]} />)}
+          <mesh geometry={geo.box(0.36, 0.14, 0.36)} material={mat(n % 2 ? '#f7c9b4' : C.pink)} position={[0, 0, 0.1]} rotation={[0, Math.PI / 4, 0]} />
+        </group>
+      );
+    case 'treatjar':
+      return (
+        <group>
+          <mesh geometry={geo.cyl(0.18, 0.18, 0.4, 10)} material={mat('#e6f3f5')} position={[0, 0.2, 0]} />
+          <mesh geometry={geo.cyl(0.2, 0.2, 0.08, 10)} material={mat(C.coral)} position={[0, 0.44, 0]} />
+          {[0, 1, 2].map((i) => <mesh key={i} geometry={geo.box(0.16, 0.05, 0.06)} material={mat('#d9a35f')} position={[Math.sin(i * 2) * 0.07, 0.1 + i * 0.08, Math.cos(i * 2) * 0.07]} rotation={[0, i, 0.3]} />)}
+        </group>
+      );
     default:
       return <mesh geometry={geo.box(0.4, 0.4, 0.4)} material={mat(C.cream)} position={[0, 0.2, 0]} />;
   }

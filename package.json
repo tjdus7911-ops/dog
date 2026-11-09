@@ -13,7 +13,8 @@
     "start": "npm run start -w server",
     "test:multi": "npm run test:multi -w server",
     "test:ai": "npm run test:ai -w server",
-    "test": "npm run test:ai -w server && npm run test:multi -w server && npm run test:persist -w server"
+    "test": "npm run test:ai -w server && npm run test:multi -w server && npm run test:community -w server && npm run test:persist -w server",
+    "test:community": "npm run test:community -w server"
   },
   "devDependencies": {
     "concurrently": "^9.0.0"

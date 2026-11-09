@@ -2,7 +2,7 @@ import { Canvas } from '@react-three/fiber';
 import { AdaptiveDpr, PerformanceMonitor } from '@react-three/drei';
 import { useState } from 'react';
 import { World } from './World';
-import { HomeFurniture, HomeRoom, LobbySpace } from './Interiors';
+import { CafeSpace, HomeFurniture, HomeRoom, LobbySpace, ShopSpace } from './Interiors';
 import { BigScreen } from './BigScreen';
 import { CameraRig } from './CameraRig';
 import { ClickToMove } from './ClickToMove';
@@ -35,6 +35,8 @@ export function Scene() {
       {kind === 'park' && <><World /><BigScreen /></>}
       {kind === 'lobby' && <LobbySpace />}
       {kind === 'home' && <><HomeRoom /><HomeFurniture /></>}
+      {kind === 'cafe' && <CafeSpace />}
+      {kind === 'shop' && <ShopSpace />}
       <CameraRig />
       <ClickToMove key={park?.id ?? 'none'} />
       {me && park && <LocalPlayer key={`${park.id}-${me.id}-${JSON.stringify(me.human)}-${JSON.stringify(me.dog)}`} profile={me} />}

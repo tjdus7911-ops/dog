@@ -44,7 +44,7 @@ export interface ParkInfo {
   name: string;
   count: number;
   capacity: number;
-  kind: 'park' | 'lobby' | 'home';
+  kind: 'park' | 'lobby' | 'home' | 'cafe' | 'shop';
   icon: string;
   /** 개인 집이면 집주인 id */
   ownerId?: number;

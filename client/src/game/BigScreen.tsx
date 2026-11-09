@@ -2,7 +2,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { BIG_SCREEN, PHOTO_ZONE } from '@shared/world';
+import { BIG_SCREEN, MEETING_BOARD, PHOTO_ZONE } from '@shared/world';
+import type { MeetupView } from '@shared/community';
+import { openCommunity } from '../ui/Community';
 import type { ScreenSlide } from '@shared/screen';
 import { api } from '../lib/api';
 import { set, useStore } from '../store';
@@ -50,11 +52,11 @@ function draw(g: CanvasRenderingContext2D, s: ScreenSlide | null, img: HTMLImage
     const sc = Math.max(pw / img.naturalWidth, ph / img.naturalHeight);
     const w = img.naturalWidth * sc, h = img.naturalHeight * sc;
     g.drawImage(img, px + (pw - w) / 2, py + (ph - h) / 2, w, h);
-  } else { g.fillStyle = s.kind === 'notice' ? '#e3efdc' : '#fde3d6'; g.fillRect(px, py, pw, ph); g.font = font('400', 160); g.textAlign = 'center'; g.fillStyle = '#f39a7b'; g.fillText(s.kind === 'notice' ? '📢' : '🐶', px + pw / 2, py + ph / 2 + 55); g.textAlign = 'left'; }
+  } else { g.fillStyle = s.kind === 'notice' ? '#e3efdc' : s.kind === 'meetup' ? '#e2f1f6' : '#fde3d6'; g.fillRect(px, py, pw, ph); g.font = font('400', 160); g.textAlign = 'center'; g.fillStyle = '#f39a7b'; g.fillText(s.kind === 'notice' ? '📢' : s.kind === 'meetup' ? '🗓️' : '🐶', px + pw / 2, py + ph / 2 + 55); g.textAlign = 'left'; }
   g.restore();
   // 오른쪽 내용
   const x = 540, w = TW - x - 40;
-  g.fillStyle = s.kind === 'notice' ? '#a9cfa0' : '#f39a7b';
+  g.fillStyle = s.kind === 'notice' ? '#a9cfa0' : s.kind === 'meetup' ? '#6fb3d2' : '#f39a7b';
   g.font = font('400', 30);
   const lw = g.measureText(s.label).width + 40;
   roundRect(g, x, 50, lw, 52, 26); g.fill();
@@ -64,7 +66,7 @@ function draw(g: CanvasRenderingContext2D, s: ScreenSlide | null, img: HTMLImage
   g.fillStyle = '#7a5a4b'; g.font = font('400', 32);
   wrap(g, s.text, x, 310, w, 42, 3);
   g.fillStyle = '#a3857a'; g.font = font('400', 28);
-  g.fillText(s.kind === 'notice' ? '멍글마을 운영팀' : `${s.author}${s.dogName ? ` · 🐶 ${s.dogName}` : ''}`, x, TH - 70);
+  g.fillText(s.kind === 'notice' ? '멍글마을 운영팀' : s.kind === 'meetup' ? `모임장 ${s.author} · 눌러서 참가 신청` : `${s.author}${s.dogName ? ` · 🐶 ${s.dogName}` : ''}`, x, TH - 70);
   // 페이지 점
   for (let i = 0; i < total; i++) { g.fillStyle = i === idx ? '#f39a7b' : '#ead8c8'; g.beginPath(); g.arc(x + i * 26 + 8, TH - 36, 7, 0, Math.PI * 2); g.fill(); }
 }
@@ -130,6 +132,7 @@ export function BigScreen() {
         ))}
       </group>
       <PhotoZone />
+      <MeetingBoard />
     </group>
   );
 }
@@ -151,6 +154,66 @@ function PhotoZone() {
         <mesh key={i} geometry={geo.cyl(0.11, 0.11, 0.05, 8)} material={mat(['#f6c453', '#a9cfa0', '#8fd3e8', '#f39a7b'][i])} position={[x, y, 0.11]} rotation={[Math.PI / 2, 0, 0]} />
       ))}
       <mesh geometry={geo.circle(1.3, 20)} material={mat('#f7c9b4')} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 1.3]} />
+    </group>
+  );
+}
+
+/** 광장 동네 모임 게시판: 다가오는 모임(실제 DB)을 나무 게시판에 표시, 누르면 멍글 동네 > 산책 모임 */
+function MeetingBoard() {
+  const M = MEETING_BOARD;
+  const version = useStore((s) => s.communityVersion);
+  const [list, setList] = useState<MeetupView[]>([]);
+  const { canvas, tex } = useMemo(() => {
+    const c = document.createElement('canvas'); c.width = 512; c.height = 400;
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+    return { canvas: c, tex: t };
+  }, []);
+  const boardMat = useMemo(() => new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }), [tex]);
+  useEffect(() => {
+    const load = () => api<{ meetups: MeetupView[] }>('/api/meetups?scope=upcoming').then((r) => setList(r.meetups.filter((m) => m.startsAt > Date.now()).slice(0, 4))).catch(() => setList([]));
+    void load();
+    const id = window.setInterval(load, 60_000);
+    return () => window.clearInterval(id);
+  }, [version]);
+  useEffect(() => {
+    const paint = () => {
+      const g = canvas.getContext('2d')!;
+      const font = (n: number) => `400 ${n}px Jua, "Gowun Dodum", sans-serif`;
+      g.fillStyle = '#fff6e8'; g.fillRect(0, 0, 512, 400);
+      g.fillStyle = '#f39a7b'; g.fillRect(0, 0, 512, 70);
+      g.fillStyle = '#ffffff'; g.font = font(38); g.textAlign = 'center'; g.fillText('📋 동네 모임 게시판', 256, 50);
+      g.textAlign = 'left';
+      if (!list.length) {
+        g.fillStyle = '#7a5a4b'; g.font = font(30); g.textAlign = 'center';
+        g.fillText('아직 예정된 모임이 없어요', 256, 200);
+        g.fillStyle = '#a3857a'; g.font = font(24); g.fillText('눌러서 첫 산책 모임을 만들어 보세요!', 256, 250);
+        g.textAlign = 'left';
+      }
+      list.forEach((m, i) => {
+        const y = 92 + i * 76;
+        g.fillStyle = i % 2 ? '#fdeedd' : '#ffffff'; g.fillRect(16, y, 480, 68);
+        g.fillStyle = m.kind === 'online' ? '#6f9a6a' : '#ec7f5c'; g.font = font(20);
+        const when = new Date(m.startsAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        g.fillText(`${m.kind === 'online' ? '💻 온라인' : '🌳 ' + m.region} · ${when}`, 28, y + 26);
+        g.fillStyle = '#5a4033'; g.font = font(28);
+        const t = Array.from(m.title); g.fillText(t.length > 15 ? t.slice(0, 14).join('') + '…' : m.title, 28, y + 58);
+        g.fillStyle = '#a3857a'; g.font = font(20); g.textAlign = 'right'; g.fillText(`${m.approvedCount}/${m.capacity}명`, 484, y + 58); g.textAlign = 'left';
+      });
+      tex.needsUpdate = true;
+    };
+    paint();
+    void document.fonts?.ready.then(paint);
+  }, [list, canvas, tex]);
+  return (
+    <group position={[M.x - BIG_SCREEN.x, 0, M.z - BIG_SCREEN.z]} rotation={[0, M.rot, 0]}
+      onClick={(e) => { if (e.delta > 8) return; e.stopPropagation(); openCommunity('meetups'); }}
+      onPointerOver={(e) => { e.stopPropagation(); document.body.style.cursor = 'pointer'; }} onPointerOut={() => { document.body.style.cursor = ''; }}>
+      {[-1.05, 1.05].map((x) => <mesh key={x} geometry={geo.cyl(0.08, 0.1, 2.3, 6)} material={mat('#a8794f')} position={[x, 1.15, -0.05]} />)}
+      <mesh geometry={geo.box(2.3, 1.85, 0.14)} material={mat('#c99a6b')} position={[0, 1.45, 0]} />
+      <mesh position={[0, 1.45, 0.075]} material={boardMat}><planeGeometry args={[2.05, 1.6]} /></mesh>
+      {/* 작은 지붕 */}
+      {[-1, 1].map((s) => <mesh key={s} geometry={geo.box(1.4, 0.08, 0.5)} material={mat('#8fb88a')} position={[s * 0.6, 2.5, 0]} rotation={[0, 0, -s * 0.32]} />)}
+      <mesh geometry={geo.circle(1.1, 18)} material={mat('#e3efdc')} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 1.1]} />
     </group>
   );
 }

@@ -6,6 +6,7 @@ import { DogBadge } from './common';
 import { logout } from './App';
 import { DEMO, resetDemo } from '../demo';
 import { residenceLabel } from '@shared/apartment';
+import { openCommunity } from './Community';
 
 export function TopBar() {
   const me = useStore((s) => s.me)!;
@@ -31,6 +32,7 @@ export function TopBar() {
       {DEMO && <span className="name-tag !text-xs !px-3 !py-1.5 pointer-events-auto hidden sm:inline">👀 미리보기 · 혼자 산책 모드</span>}
       {/* 장소 선택: 공원 · 멍글 아파트 (장소가 늘면 서버 장소 목록에 추가) */}
       <PlacePicker />
+      <CommunityButton />
       {!DEMO && <button className="btn btn-ghost w-11 h-11 shrink-0 relative pointer-events-auto" onClick={() => { toggle('notifications'); }} aria-label="알림">
         🔔{notifUnread > 0 && <Badge n={notifUnread} />}
       </button>}
@@ -45,6 +47,7 @@ export function TopBar() {
             <div className="px-3 py-2 text-sm"><b className="font-display">{me.nickname}</b> · 🐶 {me.dogName}
               <div className="text-xs text-cocoa-soft mt-0.5">🏠 {me.residence ? residenceLabel(me.residence) : '아직 입주 전'}</div>
             </div>
+            <MenuItem onClick={() => openCommunity('meetups')}>🏘️ 멍글 동네 (모임·자랑)</MenuItem>
             <MenuItem onClick={() => { set({ panel: 'none', benchMenu: null }); void joinPark('lobby-1'); }}>🏢 아파트 로비</MenuItem>
             {!DEMO && <MenuItem onClick={() => set({ screenSubmit: {} })}>📺 광장 스크린에 올리기</MenuItem>}
             <MenuItem onClick={() => set({ panel: 'avatar' })}>✨ 아바타·강아지 꾸미기</MenuItem>
@@ -57,6 +60,17 @@ export function TopBar() {
         )}
       </div>
     </div>
+  );
+}
+
+/** 메인 메뉴 '멍글 동네' 버튼 (열려 있으면 다시 누르면 닫힘) */
+function CommunityButton() {
+  const open = useStore((s) => !!s.community);
+  return (
+    <button className={`btn ${open ? 'btn-peach' : 'btn-ghost'} h-11 px-3 md:px-4 shrink-0 pointer-events-auto whitespace-nowrap`} aria-label="멍글 동네" aria-pressed={open}
+      onClick={() => (open ? set({ community: null }) : openCommunity('meetups'))}>
+      🏘️ <span className="hidden sm:inline">멍글 동네</span>
+    </button>
   );
 }
 
@@ -79,8 +93,9 @@ function PlacePicker() {
   const curLabel = park ? `${park.icon ?? '📍'} ${park.name}` : '입장 중…';
   async function go(id: string) {
     setBusy(id);
-    const fromLobby = park?.kind !== 'park' && id.startsWith('central');
-    if (await joinPark(id, fromLobby && park?.kind === 'lobby' ? 'lobby' : undefined)) setOpen(false);
+    // 건물(로비·카페·샵)에서 공원으로 나가면 그 건물 입구 앞에서 시작
+    const door = id.startsWith('central') && (park?.kind === 'lobby' || park?.kind === 'cafe' || park?.kind === 'shop') ? park.kind : undefined;
+    if (await joinPark(id, door)) setOpen(false);
     setBusy(null);
   }
   return (

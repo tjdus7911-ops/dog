@@ -9,7 +9,8 @@ import { api } from '../lib/api';
 import { setSpace } from '../game/space';
 import { cam } from '../game/CameraRig';
 import { PLACES, SPAWNS, homeSpaceId } from '@shared/spaces';
-import { APARTMENT_ENTRANCE } from '@shared/world';
+import { APARTMENT_ENTRANCE, CAFE_ENTRANCE, SHOP_ENTRANCE } from '@shared/world';
+import type { MeetupMessage } from '@shared/community';
 import type { HomeView } from '@shared/home';
 import type {
   ChatMessage, DirectMessage, FriendEntry, FriendStatus, NetState, ParkInfo, PlayerSnapshot, PublicProfile, SeatMap,
@@ -81,6 +82,21 @@ export function connect() {
   });
   s.on('screen:updated', () => set((x) => ({ screenVersion: x.screenVersion + 1 })));
   s.on('screen:decided', (v: { title: string; approved: boolean }) => toast(v.approved ? `📺 '${v.title}'이(가) 광장 스크린에 올라갔어요!` : `'${v.title}' 스크린 신청이 반려되었어요`));
+  // ---------- 멍글 동네 ----------
+  s.on('community:notice', (v: { text: string }) => {
+    notify({ id: `cm-${Date.now()}-${Math.random()}`, kind: 'system', fromId: 0, fromNickname: '멍글 동네', text: v.text, ts: Date.now() });
+    toast(`🏘️ ${v.text}`);
+    set((x) => ({ communityVersion: x.communityVersion + 1 }));
+  });
+  s.on('meetup:message', (v: { meetupId: number; title: string; message: MeetupMessage }) => {
+    const c = get().community;
+    if (c?.tab === 'meetups' && c.meetupId === v.meetupId) set((x) => ({ meetupLive: [...x.meetupLive, { meetupId: v.meetupId, message: v.message }] }));
+    else toast(`💬 [${v.title}] ${v.message.user.nickname}: ${v.message.text.slice(0, 24)}`);
+  });
+  s.on('meetup:starting', (v: { meetupId: number; title: string; kind: string; park: string | null; place: string }) => {
+    notify({ id: `ms-${v.meetupId}`, kind: 'system', fromId: 0, fromNickname: '멍글 동네', text: `'${v.title}' 모임이 곧 시작해요! (${v.place})`, ts: Date.now() });
+    set({ meetupAlert: v });
+  });
   s.on('seats', (seats: SeatMap) => {
     set({ seats });
     // 서버에서 내 자리가 해제됐다면(멀리 이동 등) 로컬 상태도 정리
@@ -172,14 +188,15 @@ export function disconnect() {
  * @param from 'lobby' 이면 공원의 아파트 입구 앞에서 시작
  */
 let joining = false;
-export async function joinPark(parkId?: string, from?: 'lobby', quiet = false): Promise<boolean> {
+export type DoorFrom = 'lobby' | 'cafe' | 'shop';
+export async function joinPark(parkId?: string, from?: DoorFrom, quiet = false): Promise<boolean> {
   if (joining) return false; // 이동 중 중복 요청 방지
   joining = true;
   try {
     return await doJoin(parkId, from, quiet);
   } finally { joining = false; }
 }
-async function doJoin(parkId: string | undefined, from: 'lobby' | undefined, quiet: boolean) {
+async function doJoin(parkId: string | undefined, from: DoorFrom | undefined, quiet: boolean) {
   if (DEMO) return demoJoin(parkId ?? 'central-1', from);
   const res = await request<{ park: ParkInfo; spawn: NetState; players: PlayerSnapshot[]; seats?: SeatMap }>('park:join', parkId ? { parkId, from } : undefined);
   if (!res.ok) {
@@ -205,20 +222,22 @@ function enterSpace(park: ParkInfo, spawn: NetState) {
   local.jumpY = 0; local.jumpV = 0;
   cam.pendingReset = park.kind;
   setSpace(park.kind);
-  set({ park, players: {}, chat: [], bubbles: {}, seats: {}, seated: null, benchMenu: null, home: null, homeEdit: false, lobbyPanel: park.kind === 'lobby' });
+  const moved = get().park?.id !== park.id;
+  set({ park, players: {}, chat: [], bubbles: {}, seats: {}, seated: null, benchMenu: null, home: null, homeEdit: false, lobbyPanel: park.kind === 'lobby', shopOpen: false, ...(moved ? { community: null } : {}) });
   if (park.kind === 'home' && park.ownerId) void loadHome(park.ownerId);
 }
 
 /** 미리보기: 서버 없이 장소 전환 (내 집만 들어갈 수 있음) */
-function demoJoin(id: string, from?: 'lobby') {
+function demoJoin(id: string, from?: DoorFrom) {
   const place = PLACES.find((p) => p.id === id);
   const me = get().me!;
   let park: ParkInfo;
   if (place) park = { ...place, count: 1, capacity: 1 };
   else if (id === `home-${me.id}` && me.residence) park = { id, name: `${me.nickname}네 집 (${me.residence.unit}호)`, kind: 'home', icon: '🏠', ownerId: me.id, count: 1, capacity: 1 };
   else { toast('미리보기에서는 다른 집에 들어갈 수 없어요.', 'error'); return false; }
-  const [x, z] = park.kind === 'park' ? (from === 'lobby' ? [APARTMENT_ENTRANCE.x, APARTMENT_ENTRANCE.z + 2.2] : [0.6, 10]) : SPAWNS[park.kind];
-  const face = park.kind === 'park' && from !== 'lobby' ? Math.PI : 0;
+  const door = from === 'lobby' ? APARTMENT_ENTRANCE : from === 'cafe' ? CAFE_ENTRANCE : from === 'shop' ? SHOP_ENTRANCE : null;
+  const [x, z] = park.kind === 'park' ? (door ? [door.x, door.z + 2.2] : [0.6, 10]) : SPAWNS[park.kind];
+  const face = park.kind === 'park' && !door ? Math.PI : 0;
   enterSpace(park, [x, z, face, 0, x + 0.7, z + 0.3, face, 0]);
   return true;
 }

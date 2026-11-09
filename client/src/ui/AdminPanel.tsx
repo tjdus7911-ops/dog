@@ -6,7 +6,7 @@ import { Modal, PanelHeader, timeLabel } from './common';
 
 interface Report {
   id: number; reporter_nickname: string; target_nickname: string; target_id: number; target_banned_until: number;
-  reason: string; detail: string; context: string; status: string; created_at: number;
+  reason: string; detail: string; context: string; status: string; created_at: number; target_type?: string; target_ref?: number | null;
 }
 
 export default function AdminPanel() {
@@ -103,6 +103,10 @@ function Reports() {
               {r.detail && <p className="text-sm mt-1">{r.detail}</p>}
               {r.context && <pre className="text-xs bg-cream-2 rounded-xl p-2 mt-2 whitespace-pre-wrap font-body">{r.context}</pre>}
               <div className="flex flex-wrap gap-1.5 mt-2 text-xs">
+                {r.target_type === 'post' && r.target_ref && <button className="btn btn-ghost px-3 py-1" onClick={() => {
+                  if (!confirm('이 자랑 글을 숨길까요? (광장 스크린에서도 내려가요)')) return;
+                  void api(`/api/admin/posts/${r.target_ref}/hide`, { body: {} }).then(() => toast('글을 숨겼어요')).catch((e) => toast(e.message, 'error'));
+                }}>📝 글 숨기기</button>}
                 <button className="btn btn-ghost px-3 py-1" onClick={() => ban(r.target_id, 24, r.target_nickname)}>24시간 정지</button>
                 <button className="btn btn-ghost px-3 py-1" onClick={() => ban(r.target_id, 24 * 7, r.target_nickname)}>7일 정지</button>
                 {r.target_banned_until > Date.now() && <button className="btn btn-ghost px-3 py-1" onClick={() => ban(r.target_id, 0, r.target_nickname)}>정지 해제</button>}

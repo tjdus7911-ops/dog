@@ -6,12 +6,9 @@ import { HOME_VISIBILITY } from '@shared/home';
 import type { MyProfile, PublicProfile } from '@shared/protocol';
 import type { DogAvatar } from '@shared/avatar';
 import { api } from '../lib/api';
-import { get, set, toast, useStore } from '../store';
-import { local } from '../game/local';
-import { APARTMENT_ENTRANCE } from '@shared/world';
+import { set, toast, useStore } from '../store';
 import { homeSpaceId } from '@shared/spaces';
 import { DEMO } from '../demo';
-import { isTouchDevice } from '../game/input';
 import { joinPark, openProfile } from '../net/socket';
 import { Modal } from './common';
 
@@ -322,22 +319,3 @@ export function LobbyPanel() {
   );
 }
 
-/** 공원에서 아파트 입구에 가까이 가면 '로비 들어가기' 버튼 */
-export function EntrancePrompt() {
-  const [near, setNear] = useState(false);
-  const isPark = useStore((s) => s.park?.kind === 'park');
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      const d = Math.hypot(local.x - APARTMENT_ENTRANCE.x, local.z - APARTMENT_ENTRANCE.z);
-      setNear(d < APARTMENT_ENTRANCE.r && get().park?.kind === 'park');
-    }, 250);
-    return () => window.clearInterval(id);
-  }, []);
-  const mobileChat = useStore((s) => s.chatOpen) && isTouchDevice();
-  if (!near || !isPark || mobileChat) return null;
-  return (
-    <div className="absolute z-20 left-1/2 -translate-x-1/2 bottom-24 pop" style={{ bottom: isTouchDevice() ? 'calc(var(--safe-b) + 176px)' : undefined }}>
-      <button className="btn btn-coral px-6 py-3 text-lg shadow-lg" onClick={() => void joinPark('lobby-1')}>🏢 아파트 로비 들어가기</button>
-    </div>
-  );
-}

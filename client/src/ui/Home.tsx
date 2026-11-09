@@ -61,7 +61,9 @@ export function HomeEditor() {
   if (!home) return null;
 
   const placed = new Set(draft.map(itemKey));
-  const storage = FURNITURE.flatMap((f) => Array.from({ length: f.count }, (_, n) => ({ f, n }))).filter(({ f, n }) => !placed.has(itemKey({ type: f.id, n })));
+  // 기본 가구 + 애견샵에서 받은 가구
+  const owned = new Set(home.owned ?? []);
+  const storage = FURNITURE.filter((f) => !f.shop || owned.has(f.id)).flatMap((f) => Array.from({ length: f.count }, (_, n) => ({ f, n }))).filter(({ f, n }) => !placed.has(itemKey({ type: f.id, n })));
   const selItem = draft.find((i) => itemKey(i) === sel) ?? null;
   const close = () => set({ homeEdit: false });
   function update(key: string, patch: Partial<PlacedItem>) { setDraft((d) => d.map((i) => (itemKey(i) === key ? { ...i, ...patch } : i))); }

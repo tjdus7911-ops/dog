@@ -16,6 +16,10 @@ export interface FurnitureType {
   count: number;
   /** 바닥에서 차지하는 반지름 (배치 검증용) */
   r: number;
+  /** 애견샵에서 받아야 쓸 수 있는 가구 */
+  shop?: boolean;
+  /** 애견샵 소개 문구 */
+  desc?: string;
 }
 
 /** 입주 선물로 받는 기본 가구 세트 */
@@ -31,7 +35,13 @@ export const FURNITURE: FurnitureType[] = [
   { id: 'ball', label: '공 장난감', icon: '🎾', count: 2, r: 0.15 },
   { id: 'bone', label: '뼈다귀 장난감', icon: '🦴', count: 1, r: 0.2 },
   { id: 'bowl', label: '밥그릇', icon: '🥣', count: 1, r: 0.2 },
+  // ---- 애견샵에서 무료로 받는 가구 ----
+  { id: 'doghouse', label: '빨간 지붕 강아지 집', icon: '🏠', count: 1, r: 0.6, shop: true, desc: '우리 강아지만의 아늑한 집' },
+  { id: 'toybox', label: '장난감 상자', icon: '🧸', count: 1, r: 0.4, shop: true, desc: '공·인형이 가득한 상자' },
+  { id: 'cushion', label: '하트 방석', icon: '💗', count: 2, r: 0.4, shop: true, desc: '푹신한 하트 모양 방석' },
+  { id: 'treatjar', label: '간식 항아리', icon: '🍪', count: 1, r: 0.25, shop: true, desc: '뼈다귀 쿠키가 든 유리 항아리' },
 ];
+export const SHOP_ITEMS = FURNITURE.filter((f) => f.shop).map(({ id, label, icon, desc }) => ({ id, label, icon, desc: desc ?? '' }));
 export const FURNITURE_BY_ID = new Map(FURNITURE.map((f) => [f.id, f]));
 
 /** 방 크기 (바닥 중심 기준 반폭) */
@@ -63,7 +73,7 @@ export const DEFAULT_LAYOUT: PlacedItem[] = [
 ];
 
 /** 배치 데이터 검증: 보유 개수·방 범위·형식. 올바르면 정리된 배치를, 아니면 null */
-export function validateLayout(v: unknown): PlacedItem[] | null {
+export function validateLayout(v: unknown, owned?: ReadonlySet<string>): PlacedItem[] | null {
   if (!Array.isArray(v) || v.length > 40) return null;
   const seen = new Set<string>();
   const out: PlacedItem[] = [];
@@ -73,6 +83,7 @@ export function validateLayout(v: unknown): PlacedItem[] | null {
     const f = typeof it.type === 'string' ? FURNITURE_BY_ID.get(it.type) : undefined;
     const n = Number(it.n), x = Number(it.x), z = Number(it.z), rot = Number(it.rot);
     if (!f || !Number.isInteger(n) || n < 0 || n >= f.count) return null;
+    if (f.shop && owned && !owned.has(f.id)) return null;
     if (![x, z].every(Number.isFinite) || Math.abs(x) > ROOM_HALF_W || Math.abs(z) > ROOM_HALF_D) return null;
     if (!Number.isInteger(rot) || rot < 0 || rot > 3) return null;
     const key = itemKey({ type: f.id, n });
@@ -103,6 +114,8 @@ export interface HomeView {
   likes: number;
   likedByMe: boolean;
   isOwner: boolean;
+  /** 집주인이 애견샵에서 받은 가구 id (집주인에게만) */
+  owned: string[];
   guestbook: GuestbookEntry[];
 }
 
