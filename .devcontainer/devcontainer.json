@@ -1,0 +1,13 @@
+{
+  // GitHub Codespaces에서 멍글마을 서버를 바로 띄우는 설정
+  // 열리면 자동으로 설치·빌드 후 서버(3001 포트)를 실행합니다.
+  // 친구가 접속하려면 '포트' 탭에서 3001 포트를 Public(공개)으로 바꿔 주세요.
+  "name": "멍글마을",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "forwardPorts": [3001],
+  "portsAttributes": {
+    "3001": { "label": "멍글마을", "onAutoForward": "openBrowser" }
+  },
+  "postCreateCommand": "npm ci && npm run build",
+  "postAttachCommand": "npm start"
+}
