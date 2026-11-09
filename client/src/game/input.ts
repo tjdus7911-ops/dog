@@ -3,6 +3,8 @@ export const input = {
   keys: new Set<string>(),
   joy: { x: 0, y: 0, active: false },
   runToggle: false,
+  /** 점프 요청 (스페이스 키 / 점프 버튼) — 다음 프레임에 처리 */
+  jump: false,
 };
 
 const isTyping = () => {
@@ -16,6 +18,10 @@ export function installKeyboard() {
   installed = true;
   window.addEventListener('keydown', (e) => {
     if (isTyping()) return;
+    if (e.code === 'Space') {
+      e.preventDefault(); // 페이지 스크롤·버튼 눌림 방지
+      if (!e.repeat) input.jump = true;
+    }
     input.keys.add(e.code);
   });
   window.addEventListener('keyup', (e) => input.keys.delete(e.code));

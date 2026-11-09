@@ -181,7 +181,7 @@ export function setupRealtime(io: Server) {
       const dd = Math.hypot(dx - x, dz - z);
       if (dd > 4) { dx = x + ((dx - x) / dd) * 4; dz = z + ((dz - z) / dd) * 4; }
       const round = (v: number) => Math.round(v * 100) / 100;
-      p.state = [round(x), round(z), round(rot), ha >= 0 && ha <= 3 ? ha | 0 : 0, round(dx), round(dz), round(drot), da >= 0 && da <= 5 ? da | 0 : 0];
+      p.state = [round(x), round(z), round(rot), ha >= 0 && ha <= 4 ? ha | 0 : 0, round(dx), round(dz), round(drot), da >= 0 && da <= 5 ? da | 0 : 0];
       p.lastTs = now;
       p.dirty = true;
     });

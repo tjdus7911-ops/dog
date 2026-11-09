@@ -40,12 +40,13 @@ export function ActionBar() {
     <div className="absolute z-10 right-2 md:right-3 bottom-3 flex flex-col items-end gap-2">
       {!touch && (
         <div className="name-tag !text-[11px] !px-3 !py-1.5 opacity-90 hidden md:block">
-          WASD 이동 · Shift 달리기 · 드래그 카메라 회전 · 휠 확대/축소{DEMO ? '' : ' · Enter 채팅'}
+          WASD·바닥 클릭 이동 · Space 점프 · Shift 달리기 · 드래그 카메라 회전 · 휠 확대/축소{DEMO ? '' : ' · Enter 채팅'}
         </div>
       )}
       <div className="flex gap-2">
         <Action icon="👋" label="인사하기" onClick={() => { local.waveUntil = performance.now() + 1800; }} />
         <Action icon="🐕" label="앉아!" onClick={() => { local.sitUntil = performance.now() + 6000; }} />
+        <Action icon="⤴️" label="점프" onClick={() => { input.jump = true; }} />
         {touch && <Action icon="🏃" label={run ? '달리는 중' : '달리기'} active={run} onClick={() => { input.runToggle = !run; setRun(!run); }} />}
       </div>
     </div>

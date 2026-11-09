@@ -2,13 +2,13 @@
 import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { BUBBLE_RANGE, DogAnim, HumanAnim, RUN_SPEED, WALK_SPEED, type NetState, type PublicProfile } from '@shared/protocol';
+import { BUBBLE_RANGE, DogAnim, GRAVITY, HumanAnim, JUMP_VELOCITY, RUN_SPEED, WALK_SPEED, type NetState, type PublicProfile } from '@shared/protocol';
 import { resolveCollision } from '@shared/world';
 import { AvatarPair, type PairRefs } from './AvatarPair';
 import { HUMAN_STEP, newHumanDriver } from './models/Human';
 import { DOG_SCALE, DOG_STEP, newDogDriver } from './models/Dog';
 import { DogBrain, turnToward } from './dogBrain';
-import { readMove } from './input';
+import { input, readMove } from './input';
 import { cam } from './CameraRig';
 import { local } from './local';
 import { rendered, sample } from '../net/remote';
@@ -43,7 +43,7 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
     b.place(local.dogX, local.dogZ, local.dogRot);
     return b;
   }, []);
-  const motion = useRef({ speed: 0, sendTimer: 0, lastSent: '' , heartbeat: 0 });
+  const motion = useRef({ speed: 0, sendTimer: 0, lastSent: '', heartbeat: 0, stuck: 0, lastDist: Infinity });
   const dogScale = DOG_SCALE[profile.dog.size];
 
   useFrame((_, rawDt) => {
@@ -64,7 +64,30 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
     const fx = -Math.sin(cam.yaw), fz = -Math.cos(cam.yaw);
     const rx = -fz, rz = fx;
     let dx = fx * mv.y + rx * mv.x, dz = fz * mv.y + rz * mv.x;
-    const mag = Math.min(1, Math.hypot(dx, dz));
+    let mag = Math.min(1, Math.hypot(dx, dz));
+    // 바닥 클릭 이동: 직접 조작하면 취소, 도착하거나 막혀서 못 가면 멈춤
+    if (mag > 0.05) local.moveTarget = null;
+    else if (local.moveTarget) {
+      const tx = local.moveTarget.x - local.x, tz = local.moveTarget.z - local.z;
+      const dist = Math.hypot(tx, tz);
+      if (dist < 0.25) { local.moveTarget = null; m.stuck = 0; m.lastDist = Infinity; }
+      else {
+        m.stuck = dist < m.lastDist - 0.004 ? 0 : m.stuck + dt;
+        m.lastDist = dist;
+        if (m.stuck > 0.6) { local.moveTarget = null; m.stuck = 0; m.lastDist = Infinity; }
+        else { dx = tx; dz = tz; mag = Math.min(1, dist / 0.6); }
+      }
+    }
+    // 점프 (땅에 있을 때만)
+    if (input.jump) {
+      input.jump = false;
+      if (local.jumpY <= 0) local.jumpV = JUMP_VELOCITY;
+    }
+    if (local.jumpV !== 0 || local.jumpY > 0) {
+      local.jumpV -= GRAVITY * dt;
+      local.jumpY += local.jumpV * dt;
+      if (local.jumpY <= 0) { local.jumpY = 0; local.jumpV = 0; }
+    }
     const target = mag < 0.05 ? 0 : (mv.run ? RUN_SPEED : WALK_SPEED) * Math.max(mag, 0.55);
     m.speed += (target - m.speed) * Math.min(1, dt * (target > m.speed ? 8 : 10));
 
@@ -86,7 +109,8 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
     hd.phase = advancePhase(hd.phase, moved, realSpeed, HUMAN_STEP.walk, HUMAN_STEP.run);
     const now = performance.now();
     const waving = now < local.waveUntil;
-    hd.anim = realSpeed > WALK_SPEED * 1.3 ? HumanAnim.Run : realSpeed > 0.15 ? HumanAnim.Walk : waving ? HumanAnim.Wave : HumanAnim.Idle;
+    hd.jumpY = local.jumpY;
+    hd.anim = local.jumpY > 0 ? HumanAnim.Jump : realSpeed > WALK_SPEED * 1.3 ? HumanAnim.Run : realSpeed > 0.15 ? HumanAnim.Walk : waving ? HumanAnim.Wave : HumanAnim.Idle;
     hd.wave = waving ? 1 : 0;
     local.humanAnim = hd.anim;
 
@@ -128,6 +152,7 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
 export function RemotePlayer({ profile }: { profile: PublicProfile }) {
   const refs = usePairRefs();
   const prev = useRef<{ x: number; z: number; dx: number; dz: number } | null>(null);
+  const jump = useRef({ y: 0, v: 0, lastAnim: 0 });
   const blocked = useStore((s) => s.blocked.some((b) => b.id === profile.id));
 
   useFrame((_, rawDt) => {
@@ -143,7 +168,16 @@ export function RemotePlayer({ profile }: { profile: PublicProfile }) {
 
     const hd = refs.humanDriver.current;
     hd.phase = advancePhase(hd.phase, moved, moved / dt, HUMAN_STEP.walk, HUMAN_STEP.run);
-    hd.anim = ha;
+    // 점프: 상태가 점프로 바뀌는 순간 같은 궤적으로 재생
+    const j = jump.current;
+    if (ha === HumanAnim.Jump && j.lastAnim !== HumanAnim.Jump && j.y <= 0) j.v = JUMP_VELOCITY;
+    j.lastAnim = ha;
+    if (j.v !== 0 || j.y > 0) {
+      j.v -= GRAVITY * dt; j.y += j.v * dt;
+      if (j.y <= 0) { j.y = 0; j.v = 0; }
+    }
+    hd.jumpY = j.y;
+    hd.anim = ha === HumanAnim.Jump ? (moved / dt > WALK_SPEED * 1.3 ? HumanAnim.Run : moved / dt > 0.15 ? HumanAnim.Walk : HumanAnim.Idle) : ha;
     hd.wave = ha === HumanAnim.Wave ? 1 : 0;
     const dd = refs.dogDriver.current;
     dd.phase = advancePhase(dd.phase, dmoved, dmoved / dt, DOG_STEP.walk * scale, DOG_STEP.run * scale);

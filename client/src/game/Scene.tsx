@@ -3,6 +3,7 @@ import { AdaptiveDpr, PerformanceMonitor } from '@react-three/drei';
 import { useState } from 'react';
 import { World } from './World';
 import { CameraRig } from './CameraRig';
+import { ClickToMove } from './ClickToMove';
 import { LocalPlayer, RemotePlayer } from './Players';
 import { useStore } from '../store';
 
@@ -28,6 +29,7 @@ export function Scene() {
       <ambientLight intensity={0.25} />
       <World />
       <CameraRig />
+      <ClickToMove />
       {me && <LocalPlayer key={`${me.id}-${JSON.stringify(me.human)}-${JSON.stringify(me.dog)}`} profile={me} />}
       {Object.values(players).map((p) => <RemotePlayer key={p.id} profile={p} />)}
     </Canvas>

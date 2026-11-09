@@ -15,9 +15,11 @@ export interface HumanDriver {
   wave: number;
   /** 목줄을 쥐고 있는지 */
   leash: boolean;
+  /** 점프 높이 (0이면 땅 위) */
+  jumpY: number;
 }
 
-export const newHumanDriver = (): HumanDriver => ({ anim: HumanAnim.Idle, phase: 0, wave: 0, leash: true });
+export const newHumanDriver = (): HumanDriver => ({ anim: HumanAnim.Idle, phase: 0, wave: 0, leash: true, jumpY: 0 });
 
 /** 한 걸음(반 주기)당 이동 거리 — 다리 길이에 맞춘 값 */
 export const HUMAN_STEP = { walk: 0.34, run: 0.6 };
@@ -25,7 +27,7 @@ export const HUMAN_STEP = { walk: 0.34, run: 0.6 };
 export function Human({ avatar, driver, handRef }: { avatar: HumanAvatar; driver: MutableRefObject<HumanDriver>; handRef?: MutableRefObject<THREE.Object3D | null> }) {
   const key = JSON.stringify(avatar);
   const rig = useMemo(() => createHuman(avatar), [key]); // eslint-disable-line react-hooks/exhaustive-deps
-  const sm = useRef({ walk: 0, run: 0, wave: 0 });
+  const sm = useRef({ walk: 0, run: 0, wave: 0, air: 0 });
 
   useLayoutEffect(() => {
     if (handRef) handRef.current = rig.hand;
@@ -39,6 +41,7 @@ export function Human({ avatar, driver, handRef }: { avatar: HumanAvatar; driver
     s.walk += ((d.anim === HumanAnim.Walk || d.anim === HumanAnim.Run ? 1 : 0) - s.walk) * k;
     s.run += ((d.anim === HumanAnim.Run ? 1 : 0) - s.run) * k;
     s.wave += ((d.anim === HumanAnim.Wave || d.wave > 0 ? 1 : 0) - s.wave) * k;
+    s.air += ((d.jumpY > 0.02 ? 1 : 0) - s.air) * (1 - Math.exp(-dt * 16));
 
     const swing = Math.sin(d.phase);
     const legAmp = 0.6 + s.run * 0.3;
@@ -61,6 +64,15 @@ export function Human({ avatar, driver, handRef }: { avatar: HumanAvatar; driver
     rig.torso.rotation.x = s.run * 0.16;
     rig.head.rotation.z = Math.sin(t * 1.3) * 0.04 * (1 - s.walk) + s.wave * Math.sin(t * 6) * 0.06;
     rig.head.rotation.x = -s.run * 0.12 + Math.sin(d.phase * 2) * 0.03 * s.walk;
+
+    // 점프: 몸 전체를 띄우고 다리는 살짝 접고 팔은 위로
+    rig.root.position.y = d.jumpY;
+    if (s.air > 0.01) {
+      rig.legL.rotation.x = THREE.MathUtils.lerp(rig.legL.rotation.x, -0.55, s.air);
+      rig.legR.rotation.x = THREE.MathUtils.lerp(rig.legR.rotation.x, 0.35, s.air);
+      rig.armL.rotation.z = THREE.MathUtils.lerp(rig.armL.rotation.z, 1.1, s.air);
+      if (!d.leash) rig.armR.rotation.z = THREE.MathUtils.lerp(rig.armR.rotation.z, -1.1, s.air);
+    }
   });
 
   return <primitive object={rig.root} />;

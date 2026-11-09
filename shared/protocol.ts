@@ -42,7 +42,10 @@ export interface ParkInfo {
 }
 
 /** 사람 애니메이션 상태 */
-export const HumanAnim = { Idle: 0, Walk: 1, Run: 2, Wave: 3 } as const;
+export const HumanAnim = { Idle: 0, Walk: 1, Run: 2, Wave: 3, Jump: 4 } as const;
+/** 점프: 초기 속도(m/s)·중력 — 내 화면과 다른 사람 화면이 같은 궤적을 그리도록 공용 */
+export const JUMP_VELOCITY = 4.4;
+export const GRAVITY = 15;
 /** 강아지 애니메이션 상태 */
 export const DogAnim = { Stand: 0, Walk: 1, Run: 2, Sit: 3, Look: 4, Greet: 5 } as const;
 
