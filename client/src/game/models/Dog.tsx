@@ -52,7 +52,7 @@ export function Dog({ avatar, driver, anchorRef }: { avatar: DogAvatar; driver: 
 
     const bob = Math.abs(Math.sin(p)) * (0.018 * s.move + 0.045 * s.run);
     const hop = s.greet * Math.max(0, Math.sin(t * 9)) * 0.05;
-    rig.body.position.y = bob + hop - s.sit * 0.05 + Math.sin(t * 3) * 0.004;
+    rig.body.position.y = rig.baseY + bob + hop - s.sit * 0.05 + Math.sin(t * 3) * 0.004;
     rig.body.position.z = -s.sit * 0.04;
     rig.body.rotation.x = -s.sit * 0.5 + Math.sin(p * 2) * 0.05 * s.run;
 

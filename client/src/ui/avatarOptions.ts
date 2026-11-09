@@ -15,6 +15,11 @@ export const LABEL: Record<string, string> = {
 };
 export const SNOUT_LABEL: Record<string, string> = { short: '짧은 주둥이', medium: '보통 주둥이', long: '긴 주둥이' };
 export const FUR_LABEL: Record<string, string> = { short: '단모', long: '장모' };
+export const MARKING_LABEL: Record<string, string> = { none: '없음', blaze: '이마 흰 줄', eyepatch: '한쪽 눈 얼룩', darkmask: '검은 주둥이·눈가' };
+export const EAR_SIZE_LABEL: Record<string, string> = { small: '작은 귀', medium: '보통 귀', large: '큰 귀' };
+export const BUILD_LABEL: Record<string, string> = { slim: '날씬', normal: '보통', chubby: '통통' };
+export const BODY_LEN_LABEL: Record<string, string> = { short: '짧은 몸', normal: '보통 몸', long: '긴 몸' };
+export const LEG_LEN_LABEL: Record<string, string> = { short: '짧은 다리', normal: '보통 다리', long: '긴 다리' };
 export const TAIL_LABEL: Record<string, string> = { ...LABEL, short: '짧은 꼬리' };
 
 export const TOP_PRESETS: { top: TopStyle; topColor: string }[] = [

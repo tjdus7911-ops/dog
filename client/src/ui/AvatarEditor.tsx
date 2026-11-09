@@ -1,7 +1,7 @@
 // 아바타 만들기 / 수정 — 왼쪽: 3D 미리보기 + 아바타 예시 / 오른쪽: 항목별 실제 3D 썸네일 커스터마이징
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  ACCESSORIES, BREED_PRESETS, CLOTH_COLORS, COAT_COLORS, DOG_EARS, DOG_FUR, DOG_PATTERNS, DOG_SIZES, DOG_SNOUTS,
+  ACCESSORIES, BREED_PRESETS, CLOTH_COLORS, COAT_COLORS, DOG_BUILDS, DOG_EAR_SIZES, DOG_LENGTHS, DOG_MARKINGS, DOG_EARS, DOG_FUR, DOG_PATTERNS, DOG_SIZES, DOG_SNOUTS,
   DOG_TAILS, HAIR_COLORS, HAIR_STYLES, HARNESS_COLORS, HAT_STYLES, SKIN_TONES,
   type Accessory, type DogAvatar, type HatStyle, type HumanAvatar,
 } from '@shared/avatar';
@@ -12,7 +12,7 @@ import { get, set, toast } from '../store';
 import { useDogThumb, useHumanThumb, type DogView, type HumanView } from '../game/thumbs';
 import { AvatarStage, type StageFocus } from './AvatarStage';
 import { DogAiPanel } from './DogAiPanel';
-import { BOTTOM_PRESETS, EXAMPLES, FUR_LABEL, LABEL, SHOE_PRESETS, SNOUT_LABEL, TAIL_LABEL, THUMB_BASE, TOP_PRESETS } from './avatarOptions';
+import { BOTTOM_PRESETS, EXAMPLES, FUR_LABEL, LABEL, SHOE_PRESETS, SNOUT_LABEL, TAIL_LABEL, THUMB_BASE, TOP_PRESETS, MARKING_LABEL, EAR_SIZE_LABEL, BUILD_LABEL, BODY_LEN_LABEL, LEG_LEN_LABEL } from './avatarOptions';
 
 // ---------- 공통 조각 ----------
 function OptionRow({ icon, label, children, extra }: { icon: string; label: string; children: ReactNode; extra?: ReactNode }) {
@@ -225,9 +225,16 @@ export default function AvatarEditor({ mode }: { mode: 'onboarding' | 'edit' }) 
       <OptionRow icon="🐾" label="주요 무늬" extra={dog.pattern !== 'none' && <SmallSwatches list={withPhotoColor(dog.secondary)} value={dog.secondary} onChange={(secondary) => d({ secondary })} />}>
         {DOG_PATTERNS.map((s) => <DogThumb key={s} d={{ ...dog, pattern: s }} view="full" label={LABEL[s]} selected={dog.pattern === s} onClick={() => d({ pattern: s })} />)}
       </OptionRow>
+      <OptionRow icon="😺" label="얼굴 무늬">
+        {DOG_MARKINGS.map((s) => <DogThumb key={s} d={{ ...dog, marking: s }} view="head" label={MARKING_LABEL[s]} selected={dog.marking === s} onClick={() => d({ marking: s })} />)}
+      </OptionRow>
       <OptionRow icon="👂" label="귀 모양">
         {DOG_EARS.map((s) => <DogThumb key={s} d={{ ...dog, ear: s }} view="head" label={LABEL[s]} selected={dog.ear === s} onClick={() => d({ ear: s })} />)}
       </OptionRow>
+      <OptionRow icon="🔍" label="귀 크기"><Chips list={DOG_EAR_SIZES} value={dog.earSize} onChange={(earSize) => d({ earSize })} labels={EAR_SIZE_LABEL} /></OptionRow>
+      <OptionRow icon="🍙" label="몸매"><Chips list={DOG_BUILDS} value={dog.build} onChange={(build) => d({ build })} labels={BUILD_LABEL} /></OptionRow>
+      <OptionRow icon="↔️" label="몸 길이"><Chips list={DOG_LENGTHS} value={dog.bodyLen} onChange={(bodyLen) => d({ bodyLen })} labels={BODY_LEN_LABEL} /></OptionRow>
+      <OptionRow icon="🦵" label="다리 길이"><Chips list={DOG_LENGTHS} value={dog.legLen} onChange={(legLen) => d({ legLen })} labels={LEG_LEN_LABEL} /></OptionRow>
       <OptionRow icon="👃" label="주둥이">
         {DOG_SNOUTS.map((s) => <DogThumb key={s} d={{ ...dog, snout: s }} view="side" label={SNOUT_LABEL[s]} selected={dog.snout === s} onClick={() => d({ snout: s })} />)}
       </OptionRow>

@@ -46,6 +46,10 @@ async function main() {
   check('사진 속 실제 털색(#rrggbb) 그대로 사용', photoColor.ok && photoColor.result.avatar.coat === '#e39b4c' && photoColor.result.avatar.secondary === '#ffffff');
   const badColor = interpretDogFeatures({ ...goodInput, coat: 'orange' });
   check('잘못된 털색은 기본 색으로 대체', badColor.ok && /^#[0-9a-f]{6}$/.test(badColor.result.avatar.coat));
+  const detail = interpretDogFeatures({ ...goodInput, marking: 'blaze', ear_size: 'large', build: 'chubby', body_length: 'long', leg_length: 'normal' });
+  check('세부 특징(얼굴 무늬·귀 크기·몸매·몸/다리 길이) 반영', detail.ok && detail.result.avatar.marking === 'blaze' && detail.result.avatar.earSize === 'large' && detail.result.avatar.build === 'chubby' && detail.result.avatar.bodyLen === 'long' && detail.result.avatar.legLen === 'normal');
+  const noDetail = interpretDogFeatures({ ...goodInput, marking: 'stripes' });
+  check('세부 특징이 없거나 이상하면 기본값', noDetail.ok && noDetail.result.avatar.marking === 'none' && noDetail.result.avatar.legLen === 'short');
   check('미리보기용 JSON 질문에 사진 종류·항목 포함', jsonPrompt(['front', 'side']).includes('정면 사진, 측면 사진') && jsonPrompt(['front']).includes('ear: string'));
   check('추정 견종·요약·신뢰도', r.breedGuess === '웰시코기' && r.summary.length > 0 && r.confidence === 0.86);
   check('결과에 하네스 색 미포함 (사용자 설정 유지)', !('harness' in r.avatar));

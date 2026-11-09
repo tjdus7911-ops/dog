@@ -76,6 +76,9 @@ async function main() {
     check('이전 형식 아바타(신발 종류 없음) 저장 시 기본값 보정', upOld.status === 200 && upOld.body.profile.human.shoes === 'sneaker');
     const upNew = await api('/api/me/profile', { nickname: '앨리스', dogName: '사슴이', dogIntro: '', human: { ...oldHuman, hairStyle: 'twin', top: 'overalls', hat: 'headphones', accessory: 'crossbag', shoes: 'boots' }, dog: { ...me0.dog, breed: 'corgi' } }, a.token, 'PUT');
     check('새 옵션(양갈래·멜빵·헤드폰·크로스백·부츠·코기형) 저장', upNew.status === 200 && upNew.body.profile.human.hat === 'headphones');
+    const { marking: _m, earSize: _e, build: _b, bodyLen: _bl, legLen: _ll, ...oldDog } = me0.dog;
+    const upOldDog = await api('/api/me/profile', { nickname: '앨리스', dogName: '사슴이', dogIntro: '', human: oldHuman, dog: oldDog }, a.token, 'PUT');
+    check('이전 형식 강아지(세부 특징 없음) 저장 시 기본값 보정', upOldDog.status === 200 && upOldDog.body.profile.dog.legLen === 'short' && upOldDog.body.profile.dog.marking === 'none');
     const upBad = await api('/api/me/profile', { nickname: '앨리스', dogName: '사슴이', dogIntro: '', human: { ...oldHuman, hat: 'crown' }, dog: me0.dog }, a.token, 'PUT');
     check('허용 목록 밖의 아바타 값 거부', upBad.status === 400);
     const aiOff = await api('/api/dog-analysis', { photos: [] }, a.token);

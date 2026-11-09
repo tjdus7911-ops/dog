@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { BREED_PRESETS, type DogAvatar } from '@shared/avatar';
 import { api } from '../lib/api';
 import { toast } from '../store';
-import { FUR_LABEL, LABEL, SNOUT_LABEL, TAIL_LABEL } from './avatarOptions';
+import { BODY_LEN_LABEL, BUILD_LABEL, EAR_SIZE_LABEL, FUR_LABEL, LABEL, LEG_LEN_LABEL, MARKING_LABEL, SNOUT_LABEL, TAIL_LABEL } from './avatarOptions';
 import { resizeImage } from '../lib/image';
 
 type Slot = 'front' | 'side' | 'full';
@@ -67,6 +67,11 @@ export function DogAiPanel({ current, onApply, onUseAsProfile }: { current: DogA
     ['꼬리', TAIL_LABEL[result.avatar.tail]],
     ['주둥이', SNOUT_LABEL[result.avatar.snout]],
     ['무늬', LABEL[result.avatar.pattern]],
+    ['얼굴', MARKING_LABEL[result.avatar.marking]],
+    ['귀 크기', EAR_SIZE_LABEL[result.avatar.earSize]],
+    ['몸매', BUILD_LABEL[result.avatar.build]],
+    ['몸 길이', BODY_LEN_LABEL[result.avatar.bodyLen]],
+    ['다리', LEG_LEN_LABEL[result.avatar.legLen]],
   ] : [];
 
   return (
@@ -77,7 +82,7 @@ export function DogAiPanel({ current, onApply, onUseAsProfile }: { current: DogA
         {available === false && <span className="text-[11px] rounded-full bg-white px-2 py-0.5 text-cocoa-soft">사용 불가</span>}
       </div>
       <p className="text-[13px] text-cocoa-soft mt-1 leading-relaxed">
-        우리 강아지 사진을 올리면 AI가 견종 유형·털색·털 길이·귀·꼬리·체형·무늬를 분석해 닮은 3D 강아지로 맞춰 드려요.
+        우리 강아지 사진을 올리면 AI가 견종 유형·털색·얼굴 무늬·귀 모양과 크기·꼬리·몸매·다리 길이를 분석해 닮은 3D 강아지로 맞춰 드려요.
       </p>
 
       <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ''; }} />

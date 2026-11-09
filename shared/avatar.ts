@@ -51,6 +51,11 @@ export const DOG_EARS = ['floppy', 'pointy', 'fold'] as const;
 export const DOG_TAILS = ['curl', 'straight', 'fluffy', 'short'] as const;
 export const DOG_FUR = ['short', 'long'] as const;
 export const DOG_SNOUTS = ['short', 'medium', 'long'] as const;
+/** v3 세부 특징 (사진 분석으로 더 닮게) — 이전 데이터에는 없을 수 있어 기본값으로 채움 */
+export const DOG_MARKINGS = ['none', 'blaze', 'eyepatch', 'darkmask'] as const;
+export const DOG_EAR_SIZES = ['small', 'medium', 'large'] as const;
+export const DOG_BUILDS = ['slim', 'normal', 'chubby'] as const;
+export const DOG_LENGTHS = ['short', 'normal', 'long'] as const;
 
 export type DogSize = (typeof DOG_SIZES)[number];
 export type DogPattern = (typeof DOG_PATTERNS)[number];
@@ -58,6 +63,10 @@ export type DogEar = (typeof DOG_EARS)[number];
 export type DogTail = (typeof DOG_TAILS)[number];
 export type DogFur = (typeof DOG_FUR)[number];
 export type DogSnout = (typeof DOG_SNOUTS)[number];
+export type DogMarking = (typeof DOG_MARKINGS)[number];
+export type DogEarSize = (typeof DOG_EAR_SIZES)[number];
+export type DogBuild = (typeof DOG_BUILDS)[number];
+export type DogLength = (typeof DOG_LENGTHS)[number];
 
 /** 미리 정의된 파츠 조합. AI 분석 결과도 이 구조로만 출력되어 파츠 조합 방식을 유지한다. */
 export interface DogAvatar {
@@ -70,8 +79,19 @@ export interface DogAvatar {
   tail: DogTail;
   fur: DogFur;
   snout: DogSnout;
+  /** 얼굴 무늬: blaze=이마~코 흰 줄, eyepatch=한쪽 눈 얼룩, darkmask=어두운 주둥이·눈가 */
+  marking: DogMarking;
+  earSize: DogEarSize;
+  build: DogBuild;
+  /** 몸통 길이 / 다리 길이 (short가 기본 SD 비율) */
+  bodyLen: DogLength;
+  legLen: DogLength;
   harness: string;
 }
+
+export type DogDetail = Pick<DogAvatar, 'marking' | 'earSize' | 'build' | 'bodyLen' | 'legLen'>;
+export const DOG_DETAIL_DEFAULT: DogDetail = { marking: 'none', earSize: 'medium', build: 'normal', bodyLen: 'normal', legLen: 'short' };
+type PresetDog = Omit<DogAvatar, 'harness' | keyof DogDetail> & Partial<DogDetail>;
 
 export const DEFAULT_HUMAN: HumanAvatar = {
   skin: SKIN_TONES[0],
@@ -89,18 +109,22 @@ export const DEFAULT_HUMAN: HumanAvatar = {
 };
 
 /** 견종 프리셋 — 수동 커스터마이징의 출발점. (AI 분석은 아직 연결되지 않음) */
-export const BREED_PRESETS: Record<string, { label: string; dog: Omit<DogAvatar, 'harness'> }> = {
-  shiba: { label: '시바/진도형', dog: { breed: 'shiba', size: 'medium', coat: '#d98c4a', secondary: '#f7f1e6', pattern: 'mask', ear: 'pointy', tail: 'curl', fur: 'short', snout: 'medium' } },
-  maltese: { label: '말티즈형', dog: { breed: 'maltese', size: 'small', coat: '#f7f1e6', secondary: '#f7f1e6', pattern: 'none', ear: 'floppy', tail: 'fluffy', fur: 'long', snout: 'short' } },
+const RAW_PRESETS: Record<string, { label: string; dog: PresetDog }> = {
+  shiba: { label: '시바/진도형', dog: { breed: 'shiba', size: 'medium', coat: '#d98c4a', secondary: '#f7f1e6', pattern: 'mask', ear: 'pointy', tail: 'curl', fur: 'short', snout: 'medium', legLen: 'normal' } },
+  maltese: { label: '말티즈형', dog: { breed: 'maltese', size: 'small', coat: '#f7f1e6', secondary: '#f7f1e6', pattern: 'none', ear: 'floppy', tail: 'fluffy', fur: 'long', snout: 'short', earSize: 'small', build: 'chubby' } },
   poodle: { label: '푸들형', dog: { breed: 'poodle', size: 'small', coat: '#b8703a', secondary: '#b8703a', pattern: 'none', ear: 'floppy', tail: 'fluffy', fur: 'long', snout: 'medium' } },
-  husky: { label: '허스키형', dog: { breed: 'husky', size: 'large', coat: '#9a9aa2', secondary: '#f7f1e6', pattern: 'mask', ear: 'pointy', tail: 'fluffy', fur: 'short', snout: 'long' } },
-  retriever: { label: '리트리버형', dog: { breed: 'retriever', size: 'large', coat: '#e6b47a', secondary: '#e6b47a', pattern: 'none', ear: 'floppy', tail: 'straight', fur: 'short', snout: 'long' } },
-  beagle: { label: '비글형', dog: { breed: 'beagle', size: 'medium', coat: '#f7f1e6', secondary: '#b8703a', pattern: 'saddle', ear: 'floppy', tail: 'straight', fur: 'short', snout: 'medium' } },
-  corgi: { label: '웰시코기형', dog: { breed: 'corgi', size: 'small', coat: '#eea54e', secondary: '#fbefd9', pattern: 'socks', ear: 'pointy', tail: 'short', fur: 'short', snout: 'medium' } },
-  pomeranian: { label: '포메라니안형', dog: { breed: 'pomeranian', size: 'small', coat: '#e6b47a', secondary: '#f7f1e6', pattern: 'mask', ear: 'pointy', tail: 'fluffy', fur: 'long', snout: 'short' } },
-  dachshund: { label: '닥스훈트형', dog: { breed: 'dachshund', size: 'small', coat: '#7a4a2c', secondary: '#d98c4a', pattern: 'mask', ear: 'floppy', tail: 'straight', fur: 'short', snout: 'long' } },
+  husky: { label: '허스키형', dog: { breed: 'husky', size: 'large', coat: '#9a9aa2', secondary: '#f7f1e6', pattern: 'mask', ear: 'pointy', tail: 'fluffy', fur: 'short', snout: 'long', legLen: 'long', build: 'normal' } },
+  retriever: { label: '리트리버형', dog: { breed: 'retriever', size: 'large', coat: '#e6b47a', secondary: '#e6b47a', pattern: 'none', ear: 'floppy', tail: 'straight', fur: 'short', snout: 'long', legLen: 'long', earSize: 'large', build: 'chubby' } },
+  beagle: { label: '비글형', dog: { breed: 'beagle', size: 'medium', coat: '#f7f1e6', secondary: '#b8703a', pattern: 'saddle', ear: 'floppy', tail: 'straight', fur: 'short', snout: 'medium', marking: 'blaze', legLen: 'normal', earSize: 'large' } },
+  corgi: { label: '웰시코기형', dog: { breed: 'corgi', size: 'small', coat: '#eea54e', secondary: '#fbefd9', pattern: 'socks', ear: 'pointy', tail: 'short', fur: 'short', snout: 'medium', marking: 'blaze', earSize: 'large', bodyLen: 'long' } },
+  pomeranian: { label: '포메라니안형', dog: { breed: 'pomeranian', size: 'small', coat: '#e6b47a', secondary: '#f7f1e6', pattern: 'mask', ear: 'pointy', tail: 'fluffy', fur: 'long', snout: 'short', earSize: 'small', build: 'chubby' } },
+  dachshund: { label: '닥스훈트형', dog: { breed: 'dachshund', size: 'small', coat: '#7a4a2c', secondary: '#d98c4a', pattern: 'mask', ear: 'floppy', tail: 'straight', fur: 'short', snout: 'long', bodyLen: 'long', earSize: 'large' } },
   mix: { label: '믹스/기타', dog: { breed: 'mix', size: 'medium', coat: '#7a4a2c', secondary: '#f7f1e6', pattern: 'patch', ear: 'fold', tail: 'straight', fur: 'short', snout: 'medium' } },
 };
+
+export const BREED_PRESETS: Record<string, { label: string; dog: Omit<DogAvatar, 'harness'> }> = Object.fromEntries(
+  Object.entries(RAW_PRESETS).map(([k, p]) => [k, { label: p.label, dog: { ...DOG_DETAIL_DEFAULT, ...p.dog } }]),
+);
 
 export const DEFAULT_DOG: DogAvatar = { ...BREED_PRESETS.shiba.dog, harness: HARNESS_COLORS[0] };
 
@@ -132,16 +156,20 @@ export function validateHuman(input: any): HumanAvatar | null {
 export const normalizeHuman = (v: unknown): HumanAvatar => validateHuman(v) ?? { ...DEFAULT_HUMAN };
 export const normalizeDog = (v: unknown): DogAvatar => validateDog(v) ?? { ...DEFAULT_DOG };
 
-export function validateDog(v: any): DogAvatar | null {
-  if (!v || typeof v !== 'object') return null;
+export function validateDog(input: any): DogAvatar | null {
+  if (!input || typeof input !== 'object') return null;
+  const v = { ...DOG_DETAIL_DEFAULT, ...input };
   const ok =
     typeof v.breed === 'string' && v.breed in BREED_PRESETS && oneOf(DOG_SIZES, v.size) &&
     isCoatColor(v.coat) && isCoatColor(v.secondary) && oneOf(DOG_PATTERNS, v.pattern) &&
     oneOf(DOG_EARS, v.ear) && oneOf(DOG_TAILS, v.tail) && oneOf(DOG_FUR, v.fur) &&
-    oneOf(DOG_SNOUTS, v.snout) && oneOf(HARNESS_COLORS, v.harness);
+    oneOf(DOG_SNOUTS, v.snout) && oneOf(HARNESS_COLORS, v.harness) &&
+    oneOf(DOG_MARKINGS, v.marking) && oneOf(DOG_EAR_SIZES, v.earSize) && oneOf(DOG_BUILDS, v.build) &&
+    oneOf(DOG_LENGTHS, v.bodyLen) && oneOf(DOG_LENGTHS, v.legLen);
   if (!ok) return null;
   return {
     breed: v.breed, size: v.size, coat: v.coat, secondary: v.secondary, pattern: v.pattern, ear: v.ear,
     tail: v.tail, fur: v.fur, snout: v.snout, harness: v.harness,
+    marking: v.marking, earSize: v.earSize, build: v.build, bodyLen: v.bodyLen, legLen: v.legLen,
   };
 }
