@@ -2,6 +2,7 @@
 import { useRef, useState } from 'react';
 import { input, isTouchDevice } from '../game/input';
 import { local } from '../game/local';
+import { DEMO } from '../demo';
 
 export function Joystick() {
   const [knob, setKnob] = useState({ x: 0, y: 0 });
@@ -39,7 +40,7 @@ export function ActionBar() {
     <div className="absolute z-10 right-2 md:right-3 bottom-3 flex flex-col items-end gap-2">
       {!touch && (
         <div className="name-tag !text-[11px] !px-3 !py-1.5 opacity-90 hidden md:block">
-          WASD 이동 · Shift 달리기 · 드래그 카메라 회전 · 휠 확대/축소 · Enter 채팅
+          WASD 이동 · Shift 달리기 · 드래그 카메라 회전 · 휠 확대/축소{DEMO ? '' : ' · Enter 채팅'}
         </div>
       )}
       <div className="flex gap-2">

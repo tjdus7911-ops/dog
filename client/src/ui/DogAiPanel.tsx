@@ -23,6 +23,7 @@ interface Analysis {
 
 export function DogAiPanel({ current, onApply, onUseAsProfile }: { current: DogAvatar; onApply: (d: DogAvatar) => void; onUseAsProfile: (dataUrl: string) => void }) {
   const [available, setAvailable] = useState<boolean | null>(null);
+  const [demo, setDemo] = useState(false);
   const [photos, setPhotos] = useState<Partial<Record<Slot, string>>>({});
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Analysis | null>(null);
@@ -31,7 +32,7 @@ export function DogAiPanel({ current, onApply, onUseAsProfile }: { current: DogA
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    api<{ available: boolean }>('/api/dog-analysis/status').then((r) => setAvailable(r.available)).catch(() => setAvailable(false));
+    api<{ available: boolean; demo?: boolean }>('/api/dog-analysis/status').then((r) => { setAvailable(r.available); setDemo(!!r.demo); }).catch(() => setAvailable(false));
   }, []);
 
   async function onFile(f: File | undefined) {
@@ -94,8 +95,9 @@ export function DogAiPanel({ current, onApply, onUseAsProfile }: { current: DogA
 
       {available === false ? (
         <p className="text-xs mt-3 rounded-xl bg-white/80 px-3 py-2 leading-relaxed">
+          {demo ? <>⚠️ 미리보기에서는 AI 분석을 사용할 수 없어요. 아래에서 견종 유형과 특징을 직접 골라 주세요.</> : <>
           ⚠️ 서버에 AI 분석 키가 설정되지 않아 지금은 분석할 수 없어요. 아래에서 견종 유형과 특징을 직접 골라 주세요.
-          <span className="block text-cocoa-soft mt-0.5">(운영자: 서버 환경 변수 <code>ANTHROPIC_API_KEY</code> 설정 시 활성화)</span>
+          <span className="block text-cocoa-soft mt-0.5">(운영자: 서버 환경 변수 <code>ANTHROPIC_API_KEY</code> 설정 시 활성화)</span></>}
         </p>
       ) : (
         <button type="button" className="btn btn-coral w-full py-2.5 mt-3" disabled={!photos.front || busy || available === null} onClick={analyze}>

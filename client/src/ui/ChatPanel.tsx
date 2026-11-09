@@ -5,8 +5,24 @@ import { sendChat, openProfile } from '../net/socket';
 import { set, useStore } from '../store';
 import { isTouchDevice } from '../game/input';
 import { timeLabel } from './common';
+import { DEMO } from '../demo';
 
 export function ChatPanel() {
+  if (DEMO) return <DemoNotice />;
+  return <LiveChatPanel />;
+}
+
+function DemoNotice() {
+  const touch = isTouchDevice();
+  return (
+    <div className={`absolute z-10 left-2 md:left-3 ${touch ? 'bottom-[172px] w-[min(86vw,320px)]' : 'bottom-3 w-[320px]'} panel p-3 text-[13px] leading-relaxed`}>
+      <div className="font-display text-[15px] mb-1">👀 미리보기 · 혼자 산책 모드</div>
+      서버 없이 아바타와 산책만 체험하는 화면이에요. 실시간 멀티플레이·공원 채팅·친구·1:1 대화·AI 사진 분석은 게임 서버를 실행하면 동작해요.
+    </div>
+  );
+}
+
+function LiveChatPanel() {
   const chat = useStore((s) => s.chat);
   const meId = useStore((s) => s.me?.id);
   const open = useStore((s) => s.chatOpen);

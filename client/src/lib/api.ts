@@ -1,3 +1,5 @@
+import { DEMO, demoApi } from '../demo';
+
 const TOKEN_KEY = 'mungle.token';
 
 export const tokenStore = {
@@ -10,6 +12,7 @@ export class ApiError extends Error {
 }
 
 export async function api<T = any>(path: string, opts: { method?: string; body?: unknown; token?: string | null } = {}): Promise<T> {
+  if (DEMO) return demoApi(path, opts) as Promise<T>;
   const token = opts.token === undefined ? tokenStore.get() : opts.token;
   const res = await fetch(path, {
     method: opts.method ?? (opts.body ? 'POST' : 'GET'),

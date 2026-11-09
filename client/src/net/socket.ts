@@ -4,6 +4,7 @@ import { get, notify, set, toast } from '../store';
 import { tokenStore } from '../lib/api';
 import { clearRemotes, pushSnapshot, removeRemote } from './remote';
 import { local } from '../game/local';
+import { DEMO } from '../demo';
 import type {
   ChatMessage, DirectMessage, FriendEntry, FriendStatus, NetState, ParkInfo, PlayerSnapshot, PublicProfile,
 } from '@shared/protocol';
@@ -26,6 +27,11 @@ export function sendState(s: NetState) {
 }
 
 export function connect() {
+  if (DEMO) {
+    // 미리보기: 서버 연결 없이 혼자 산책
+    set({ connection: 'online', park: { id: 'demo', name: '미리보기 공원', count: 1, capacity: 1 }, parks: [], players: {} });
+    return;
+  }
   disconnect();
   const token = tokenStore.get();
   if (!token) return;

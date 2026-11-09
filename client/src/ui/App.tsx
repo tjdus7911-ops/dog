@@ -6,6 +6,7 @@ import { installKeyboard } from '../game/input';
 import { AuthScreen } from './AuthScreen';
 import { ErrorBoundary, Toasts } from './common';
 import type { MyProfile } from '@shared/protocol';
+import { DEMO, loadDemoProfile } from '../demo';
 
 const Game = lazy(() => import('./Game'));
 const AvatarEditor = lazy(() => import('./AvatarEditor'));
@@ -13,10 +14,16 @@ const AvatarEditor = lazy(() => import('./AvatarEditor'));
 export function App() {
   const me = useStore((s) => s.me);
   const onboarding = useStore((s) => s.onboarding);
-  const [booting, setBooting] = useState(!!tokenStore.get());
+  const [booting, setBooting] = useState(!DEMO && !!tokenStore.get());
 
   useEffect(() => {
     installKeyboard();
+    if (DEMO) {
+      // 미리보기: 로그인 없이 바로 시작 (처음이면 아바타 만들기부터)
+      const { profile, fresh } = loadDemoProfile();
+      set({ me: profile, onboarding: fresh });
+      return;
+    }
     if (!tokenStore.get()) return;
     api<{ profile: MyProfile }>('/api/me')
       .then((r) => set({ me: r.profile }))

@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:demo": "tsc --noEmit && vite build --base ./ --outDir dist-demo"
   },
   "dependencies": {
     "@react-three/drei": "^9.117.0",

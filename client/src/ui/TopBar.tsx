@@ -3,6 +3,7 @@ import { set, useStore } from '../store';
 import { joinPark } from '../net/socket';
 import { DogBadge } from './common';
 import { logout } from './App';
+import { DEMO, resetDemo } from '../demo';
 
 export function TopBar() {
   const me = useStore((s) => s.me)!;
@@ -28,8 +29,9 @@ export function TopBar() {
 
       <div className="flex-1" />
 
+      {DEMO && <span className="name-tag !text-xs !px-3 !py-1.5 pointer-events-auto hidden sm:inline">👀 미리보기 · 혼자 산책 모드</span>}
       {/* 공원 선택 (실제 접속 인원 표시) */}
-      <div className="relative pointer-events-auto">
+      {!DEMO && <div className="relative pointer-events-auto">
         <button className="btn btn-ghost px-3 md:px-4 h-11 text-sm whitespace-nowrap" onClick={() => setParkOpen(!parkOpen)}>
           📍 <span className="hidden sm:inline">{park?.name ?? '입장 중…'}</span><span className="sm:hidden">{park ? `공원${park.name.slice(-1)}` : '…'}</span> ▾
         </button>
@@ -46,14 +48,14 @@ export function TopBar() {
             ))}
           </div>
         )}
-      </div>
+      </div>}
 
-      <button className="btn btn-ghost w-11 h-11 shrink-0 relative pointer-events-auto" onClick={() => { toggle('notifications'); }} aria-label="알림">
+      {!DEMO && <button className="btn btn-ghost w-11 h-11 shrink-0 relative pointer-events-auto" onClick={() => { toggle('notifications'); }} aria-label="알림">
         🔔{notifUnread > 0 && <Badge n={notifUnread} />}
-      </button>
-      <button className={`btn ${panel === 'friends' ? 'btn-peach' : 'btn-ghost'} h-11 px-3 md:px-4 relative pointer-events-auto`} onClick={() => toggle('friends')} aria-label="친구">
+      </button>}
+      {!DEMO && <button className={`btn ${panel === 'friends' ? 'btn-peach' : 'btn-ghost'} h-11 px-3 md:px-4 relative pointer-events-auto`} onClick={() => toggle('friends')} aria-label="친구">
         👥 <span className="hidden md:inline">친구</span>{friendBadge > 0 && <Badge n={friendBadge} />}
-      </button>
+      </button>}
 
       <div className="relative pointer-events-auto">
         <button className="rounded-full" onClick={() => setMenuOpen(!menuOpen)} aria-label="내 메뉴"><DogBadge profile={me} size={44} /></button>
@@ -61,9 +63,11 @@ export function TopBar() {
           <div className="absolute right-0 mt-2 panel p-2 w-52 pop" onClick={() => setMenuOpen(false)}>
             <div className="px-3 py-2 text-sm"><b className="font-display">{me.nickname}</b> · 🐶 {me.dogName}</div>
             <MenuItem onClick={() => set({ panel: 'avatar' })}>✨ 아바타·강아지 꾸미기</MenuItem>
-            <MenuItem onClick={() => set({ panel: 'settings' })}>🔒 개인정보·차단 설정</MenuItem>
-            {me.role === 'admin' && <MenuItem onClick={() => set({ panel: 'admin' })}>🛡️ 신고 관리 (운영)</MenuItem>}
-            <MenuItem onClick={logout}>🚪 로그아웃</MenuItem>
+            {DEMO ? <MenuItem onClick={resetDemo}>🔄 처음부터 다시 만들기</MenuItem> : <>
+              <MenuItem onClick={() => set({ panel: 'settings' })}>🔒 개인정보·차단 설정</MenuItem>
+              {me.role === 'admin' && <MenuItem onClick={() => set({ panel: 'admin' })}>🛡️ 신고 관리 (운영)</MenuItem>}
+              <MenuItem onClick={logout}>🚪 로그아웃</MenuItem>
+            </>}
           </div>
         )}
       </div>
