@@ -1,0 +1,16 @@
+{
+  "name": "mungle-village",
+  "private": true,
+  "version": "0.2.0",
+  "description": "멍글마을 — 로우폴리 3D 반려견 산책 커뮤니티",
+  "workspaces": ["client", "server"],
+  "scripts": {
+    "dev": "concurrently -n server,client -c green,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
+    "build": "npm run build -w client && npm run typecheck -w server",
+    "start": "npm run start -w server",
+    "test:multi": "npm run test:multi -w server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}
