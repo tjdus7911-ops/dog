@@ -1,7 +1,9 @@
 // 미리보기(데모) 모드 — 서버 없이 아바타 만들기와 혼자 산책만 체험하는 빌드 (VITE_DEMO=1)
-// 실시간 멀티플레이·채팅·친구·AI 분석처럼 서버가 필요한 기능은 화면에서 숨기고 안내한다.
+// 실시간 멀티플레이·채팅·친구처럼 서버가 필요한 기능은 화면에서 숨기고 안내한다.
+// AI 강아지 사진 분석은 Claude 앱 안에서 열었을 때 보는 사람의 Claude로 실행한다 (sample 기능).
 import { DEFAULT_DOG, DEFAULT_HUMAN, validateDog, validateHuman } from '@shared/avatar';
 import { DEFAULT_PRIVACY, type MyProfile } from '@shared/protocol';
+import { interpretDogFeatures, jsonPrompt, type DogPhotoKind } from '@shared/dogAnalysis';
 
 export const DEMO = import.meta.env.VITE_DEMO === '1';
 
@@ -55,6 +57,63 @@ export async function demoApi(path: string, opts: { method?: string; body?: any 
     saveDemoProfile(next);
     return { profile: next };
   }
-  if (path === '/api/dog-analysis/status') return { available: false, demo: true };
+  if (path === '/api/dog-analysis/status') return { available: !!(await getSample()), demo: true };
+  if (path === '/api/dog-analysis') return { result: await analyzeInClaude(opts.body?.photos ?? []) };
   throw new Error('미리보기에서는 서버 기능을 사용할 수 없어요.');
+}
+
+// ---------- AI 사진 분석 (Claude 앱 안에서 열린 미리보기 전용) ----------
+type Sample = {
+  json: (input: string, opts?: { images?: Blob[] }) => Promise<unknown>;
+  limits: () => Promise<{ images?: { maxCount: number } }>;
+};
+let samplePromise: Promise<Sample | null> | null = null;
+function getSample() {
+  samplePromise ??= (async () => {
+    const c = (window as unknown as { claude?: { use?: (n: string) => Promise<unknown> } }).claude;
+    if (!c?.use) return null;
+    try {
+      const s = (await c.use('sample')) as Sample | null;
+      if (!s) return null;
+      const lim = await s.limits().catch(() => null);
+      return lim?.images ? s : null;
+    } catch { return null; }
+  })();
+  return samplePromise;
+}
+
+function dataUrlToBlob(url: string) {
+  const m = /^data:([^;]+);base64,(.*)$/.exec(url);
+  if (!m) throw new Error('사진을 읽지 못했어요.');
+  const bin = atob(m[2]);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: m[1] });
+}
+
+const SAMPLE_ERRORS: Record<string, string> = {
+  not_granted: 'AI 사용을 허용해야 분석할 수 있어요. 페이지를 새로 고친 뒤 다시 시도하면 허용 창이 다시 떠요.',
+  rate_limited: 'AI 사용량이 잠시 많아요. 조금 뒤에 다시 시도해 주세요.',
+  image_rejected: '이 사진은 분석할 수 없어요. 다른 사진(JPG·PNG)으로 시도해 주세요.',
+  refused: '이 사진은 분석할 수 없어요. 강아지가 잘 보이는 다른 사진으로 시도해 주세요.',
+  invalid_json: 'AI 답변을 읽지 못했어요. 다시 시도해 주세요.',
+  session_expired: 'Claude 로그인이 만료되었어요. 다시 로그인해 주세요.',
+  images_unavailable: '이 화면에서는 사진을 AI로 보낼 수 없어요.',
+};
+
+async function analyzeInClaude(photos: { kind: DogPhotoKind; dataUrl: string }[]) {
+  const s = await getSample();
+  if (!s) throw new Error('이 미리보기를 Claude 앱 안에서 열어야 AI 분석을 쓸 수 있어요.');
+  const valid = photos.filter((p) => p && typeof p.dataUrl === 'string').slice(0, 3);
+  if (!valid.length) throw new Error('정면 사진을 먼저 올려 주세요.');
+  let raw: unknown;
+  try {
+    raw = await s.json(jsonPrompt(valid.map((p) => p.kind)), { images: valid.map((p) => dataUrlToBlob(p.dataUrl)) });
+  } catch (e) {
+    const code = (e as { code?: string })?.code ?? '';
+    throw new Error(SAMPLE_ERRORS[code] ?? 'AI 분석 중 문제가 생겼어요. 다시 시도해 주세요.');
+  }
+  const r = interpretDogFeatures(raw);
+  if (!r.ok) throw new Error(r.error);
+  return r.result;
 }

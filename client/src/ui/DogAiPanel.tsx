@@ -95,14 +95,17 @@ export function DogAiPanel({ current, onApply, onUseAsProfile }: { current: DogA
 
       {available === false ? (
         <p className="text-xs mt-3 rounded-xl bg-white/80 px-3 py-2 leading-relaxed">
-          {demo ? <>⚠️ 미리보기에서는 AI 분석을 사용할 수 없어요. 아래에서 견종 유형과 특징을 직접 골라 주세요.</> : <>
+          {demo ? <>⚠️ 이 미리보기를 Claude 앱(claude.ai) 안에서 열면 AI 분석을 쓸 수 있어요. 지금은 아래에서 견종 유형과 특징을 직접 골라 주세요.</> : <>
           ⚠️ 서버에 AI 분석 키가 설정되지 않아 지금은 분석할 수 없어요. 아래에서 견종 유형과 특징을 직접 골라 주세요.
           <span className="block text-cocoa-soft mt-0.5">(운영자: 서버 환경 변수 <code>ANTHROPIC_API_KEY</code> 설정 시 활성화)</span></>}
         </p>
       ) : (
+        <>
+        {demo && available && <p className="text-[11px] text-cocoa-soft mt-2">사진은 분석할 때만 지금 보고 계신 분의 Claude로 보내져요. 처음 한 번은 허용 창이 떠요.</p>}
         <button type="button" className="btn btn-coral w-full py-2.5 mt-3" disabled={!photos.front || busy || available === null} onClick={analyze}>
-          {busy ? '🔍 사진을 분석하는 중… (10~20초)' : photos.front ? 'AI로 분석하기' : '정면 사진을 먼저 올려 주세요'}
+          {busy ? `🔍 사진을 분석하는 중… (${demo ? '최대 1분' : '10~20초'})` : photos.front ? 'AI로 분석하기' : '정면 사진을 먼저 올려 주세요'}
         </button>
+        </>
       )}
       {error && <p className="text-sm text-[#c4553a] bg-[#fff0ec] rounded-xl px-3 py-2 mt-2">{error}</p>}
 

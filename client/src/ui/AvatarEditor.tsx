@@ -60,6 +60,9 @@ const HumanThumb = (p: { a: HumanAvatar; view: HumanView; selected: boolean; onC
 const DogThumb = (p: { d: DogAvatar; view: DogView; selected: boolean; onClick: () => void; label: string }) =>
   <Thumb src={useDogThumb(p.d, p.view)} selected={p.selected} onClick={p.onClick} label={p.label} />;
 
+/** 사진 분석으로 정해진 털색이 기본 팔레트에 없으면 맨 앞에 함께 보여 준다 */
+const withPhotoColor = (c: string): readonly string[] => ((COAT_COLORS as readonly string[]).includes(c) ? COAT_COLORS : [c, ...COAT_COLORS]);
+
 function Swatches({ list, value, onChange, square }: { list: readonly string[]; value: string; onChange: (v: string) => void; square?: boolean }) {
   return (
     <>
@@ -218,8 +221,8 @@ export default function AvatarEditor({ mode }: { mode: 'onboarding' | 'edit' }) 
       </OptionRow>
       <OptionRow icon="📏" label="체형"><Chips list={DOG_SIZES} value={dog.size} onChange={(size) => d({ size })} /></OptionRow>
       <OptionRow icon="〰️" label="털 길이"><Chips list={DOG_FUR} value={dog.fur} onChange={(fur) => d({ fur })} labels={FUR_LABEL} /></OptionRow>
-      <OptionRow icon="🎨" label="털색"><Swatches list={COAT_COLORS} value={dog.coat} onChange={(coat) => d({ coat })} /></OptionRow>
-      <OptionRow icon="🐾" label="주요 무늬" extra={dog.pattern !== 'none' && <SmallSwatches list={COAT_COLORS} value={dog.secondary} onChange={(secondary) => d({ secondary })} />}>
+      <OptionRow icon="🎨" label="털색"><Swatches list={withPhotoColor(dog.coat)} value={dog.coat} onChange={(coat) => d({ coat })} /></OptionRow>
+      <OptionRow icon="🐾" label="주요 무늬" extra={dog.pattern !== 'none' && <SmallSwatches list={withPhotoColor(dog.secondary)} value={dog.secondary} onChange={(secondary) => d({ secondary })} />}>
         {DOG_PATTERNS.map((s) => <DogThumb key={s} d={{ ...dog, pattern: s }} view="full" label={LABEL[s]} selected={dog.pattern === s} onClick={() => d({ pattern: s })} />)}
       </OptionRow>
       <OptionRow icon="👂" label="귀 모양">

@@ -104,6 +104,9 @@ export const BREED_PRESETS: Record<string, { label: string; dog: Omit<DogAvatar,
 
 export const DEFAULT_DOG: DogAvatar = { ...BREED_PRESETS.shiba.dog, harness: HARNESS_COLORS[0] };
 
+/** 털색: 기본 팔레트 또는 사진에서 뽑은 임의의 색(#rrggbb) */
+export const isCoatColor = (v: unknown): v is string => typeof v === 'string' && /^#[0-9a-f]{6}$/.test(v);
+
 const oneOf = <T extends readonly string[]>(list: T, v: unknown): v is T[number] =>
   typeof v === 'string' && (list as readonly string[]).includes(v);
 
@@ -133,7 +136,7 @@ export function validateDog(v: any): DogAvatar | null {
   if (!v || typeof v !== 'object') return null;
   const ok =
     typeof v.breed === 'string' && v.breed in BREED_PRESETS && oneOf(DOG_SIZES, v.size) &&
-    oneOf(COAT_COLORS, v.coat) && oneOf(COAT_COLORS, v.secondary) && oneOf(DOG_PATTERNS, v.pattern) &&
+    isCoatColor(v.coat) && isCoatColor(v.secondary) && oneOf(DOG_PATTERNS, v.pattern) &&
     oneOf(DOG_EARS, v.ear) && oneOf(DOG_TAILS, v.tail) && oneOf(DOG_FUR, v.fur) &&
     oneOf(DOG_SNOUTS, v.snout) && oneOf(HARNESS_COLORS, v.harness);
   if (!ok) return null;

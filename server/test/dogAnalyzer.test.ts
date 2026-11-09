@@ -1,5 +1,6 @@
 // AI 강아지 분석기 단위 테스트 — 실제 API 대신 가짜 fetch로 요청 형식과 결과 변환을 검증한다.
 // 실행: npm run test:ai
+import { interpretDogFeatures, jsonPrompt } from '../../shared/dogAnalysis';
 import { createDogAnalyzer, AnalysisError, type DogPhoto } from '../src/dogAnalyzer';
 
 let passed = 0, failed = 0;
@@ -41,6 +42,11 @@ async function main() {
   check('도구 호출 강제 (파츠 값만 받도록)', body.tool_choice?.name === 'report_dog_features' && body.tools[0].input_schema.properties.ear.enum.includes('pointy'));
   check('사진 2장이 이미지 블록으로 전송', body.messages[0].content.filter((c: any) => c.type === 'image').length === 2 && body.messages[0].content[1].source.media_type === 'image/jpeg');
   check('결과를 파츠 값으로 변환', r.avatar.breed === 'corgi' && r.avatar.pattern === 'socks' && r.avatar.ear === 'pointy' && r.avatar.coat === '#d98c4a');
+  const photoColor = interpretDogFeatures({ ...goodInput, coat: '#E39B4C', secondary: '#fff', pattern: 'mask' });
+  check('사진 속 실제 털색(#rrggbb) 그대로 사용', photoColor.ok && photoColor.result.avatar.coat === '#e39b4c' && photoColor.result.avatar.secondary === '#ffffff');
+  const badColor = interpretDogFeatures({ ...goodInput, coat: 'orange' });
+  check('잘못된 털색은 기본 색으로 대체', badColor.ok && /^#[0-9a-f]{6}$/.test(badColor.result.avatar.coat));
+  check('미리보기용 JSON 질문에 사진 종류·항목 포함', jsonPrompt(['front', 'side']).includes('정면 사진, 측면 사진') && jsonPrompt(['front']).includes('ear: string'));
   check('추정 견종·요약·신뢰도', r.breedGuess === '웰시코기' && r.summary.length > 0 && r.confidence === 0.86);
   check('결과에 하네스 색 미포함 (사용자 설정 유지)', !('harness' in r.avatar));
 
