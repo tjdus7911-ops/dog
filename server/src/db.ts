@@ -111,6 +111,43 @@ CREATE TABLE IF NOT EXISTS guestbook (
 );
 CREATE INDEX IF NOT EXISTS idx_guestbook_home ON guestbook(home_id, created_at);
 `);
+// 이웃(같은 동 주민끼리 신청·수락) / 집 방문 신청
+db.exec(`
+CREATE TABLE IF NOT EXISTS neighbors (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  neighbor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, neighbor_id)
+);
+CREATE TABLE IF NOT EXISTS neighbor_requests (
+  from_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  to_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (from_id, to_id)
+);
+CREATE TABLE IF NOT EXISTS visit_requests (
+  home_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  visitor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (home_id, visitor_id)
+);
+`);
+// 광장 대형 스크린 콘텐츠 (강아지 자랑 신청 / 운영 공지)
+db.exec(`
+CREATE TABLE IF NOT EXISTS screen_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  author_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  text TEXT NOT NULL DEFAULT '',
+  image TEXT,
+  owns_image INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at INTEGER NOT NULL
+);
+`);
 // 마이그레이션: 약관 동의 시각 (기존 계정은 0 = 동의 기록 없음)
 try { db.exec('ALTER TABLE users ADD COLUMN agreed_at INTEGER NOT NULL DEFAULT 0'); } catch { /* 이미 있음 */ }
 
@@ -217,6 +254,58 @@ export function addGuestbook(homeId: number, authorId: number, text: string) {
 export const getGuestbookEntry = (id: number) => one('SELECT * FROM guestbook WHERE id = ?', id);
 export const deleteGuestbook = (id: number) => run('DELETE FROM guestbook WHERE id = ?', id);
 
+// ---------- 광장 스크린 ----------
+const SCREEN_SELECT = `SELECT s.*, p.nickname, p.dog_name FROM screen_items s JOIN profiles p ON p.user_id = s.author_id`;
+export const listScreen = (status: string, limit: number) => all(`${SCREEN_SELECT} WHERE s.status = ? ORDER BY s.created_at DESC LIMIT ?`, status, limit);
+export const listScreenByAuthor = (id: number) => all(`${SCREEN_SELECT} WHERE s.author_id = ? AND s.kind = 'dog' ORDER BY s.created_at DESC LIMIT 20`, id);
+export const countPendingScreen = (id: number) => Number(one(`SELECT COUNT(*) AS n FROM screen_items WHERE author_id = ? AND status = 'pending'`, id)?.n ?? 0);
+export const getScreen = (id: number) => one('SELECT * FROM screen_items WHERE id = ?', id);
+export const setScreenStatus = (id: number, status: string) => run('UPDATE screen_items SET status = ? WHERE id = ?', status, id);
+export const deleteScreen = (id: number) => run('DELETE FROM screen_items WHERE id = ?', id);
+export function addScreen(i: { kind: string; authorId: number; title: string; text: string; image: string | null; status: string; ownsImage: boolean }) {
+  run('INSERT INTO screen_items (kind, author_id, title, text, image, owns_image, status, created_at) VALUES (?,?,?,?,?,?,?,?)',
+    i.kind, i.authorId, i.title, i.text, i.image, i.ownsImage ? 1 : 0, i.status, Date.now());
+}
+
+// ---------- 이웃 ----------
+export const areNeighbors = (a: number, b: number) => !!one('SELECT 1 FROM neighbors WHERE user_id=? AND neighbor_id=?', a, b);
+export const neighborIds = (id: number) => all('SELECT neighbor_id FROM neighbors WHERE user_id=?', id).map((r) => r.neighbor_id as number);
+export const hasNeighborRequest = (from: number, to: number) => !!one('SELECT 1 FROM neighbor_requests WHERE from_id=? AND to_id=?', from, to);
+export const addNeighborRequest = (from: number, to: number) => run('INSERT OR IGNORE INTO neighbor_requests (from_id, to_id, created_at) VALUES (?,?,?)', from, to, Date.now());
+export const removeNeighborRequest = (from: number, to: number) => run('DELETE FROM neighbor_requests WHERE from_id=? AND to_id=?', from, to);
+export const incomingNeighborRequests = (id: number) => all('SELECT from_id, created_at FROM neighbor_requests WHERE to_id=? ORDER BY created_at DESC', id);
+export const outgoingNeighborRequests = (id: number) => all('SELECT to_id FROM neighbor_requests WHERE from_id=?', id).map((r) => r.to_id as number);
+export function makeNeighbors(a: number, b: number) {
+  const now = Date.now();
+  run('INSERT OR IGNORE INTO neighbors (user_id, neighbor_id, created_at) VALUES (?,?,?)', a, b, now);
+  run('INSERT OR IGNORE INTO neighbors (user_id, neighbor_id, created_at) VALUES (?,?,?)', b, a, now);
+  removeNeighborRequest(a, b); removeNeighborRequest(b, a);
+}
+export function removeNeighbor(a: number, b: number) {
+  run('DELETE FROM neighbors WHERE (user_id=? AND neighbor_id=?) OR (user_id=? AND neighbor_id=?)', a, b, b, a);
+  removeNeighborRequest(a, b); removeNeighborRequest(b, a);
+}
+
+// ---------- 집 방문 신청 ----------
+export const VISIT_PASS_MS = 2 * 3600_000;
+export function getVisitRequest(homeId: number, visitorId: number) {
+  return one('SELECT * FROM visit_requests WHERE home_id=? AND visitor_id=?', homeId, visitorId);
+}
+export function hasVisitPass(homeId: number, visitorId: number) {
+  const r = getVisitRequest(homeId, visitorId);
+  return !!r && r.status === 'approved' && r.expires_at > Date.now();
+}
+export function requestVisit(homeId: number, visitorId: number) {
+  run(`INSERT INTO visit_requests (home_id, visitor_id, status, created_at, expires_at) VALUES (?,?, 'pending', ?, 0)
+    ON CONFLICT(home_id, visitor_id) DO UPDATE SET status='pending', created_at=excluded.created_at, expires_at=0`, homeId, visitorId, Date.now());
+}
+export function decideVisit(homeId: number, visitorId: number, approve: boolean) {
+  run('UPDATE visit_requests SET status=?, expires_at=? WHERE home_id=? AND visitor_id=?',
+    approve ? 'approved' : 'declined', approve ? Date.now() + VISIT_PASS_MS : 0, homeId, visitorId);
+}
+export const pendingVisits = (homeId: number) => all(`SELECT v.visitor_id, v.created_at, p.nickname, p.dog_name FROM visit_requests v
+  JOIN profiles p ON p.user_id = v.visitor_id WHERE v.home_id=? AND v.status='pending' ORDER BY v.created_at`, homeId);
+
 // ---------- profiles ----------
 function toPublic(r: Row): PublicProfile {
   return {
@@ -255,6 +344,9 @@ export function block(blocker: number, blocked: number) {
   // 차단 시 친구 관계와 대기 중인 신청 정리
   removeFriend(blocker, blocked);
   run('DELETE FROM friend_requests WHERE (from_id=? AND to_id=?) OR (from_id=? AND to_id=?)', blocker, blocked, blocked, blocker);
+  // 이웃 관계·방문 허가도 정리
+  removeNeighbor(blocker, blocked);
+  run('DELETE FROM visit_requests WHERE (home_id=? AND visitor_id=?) OR (home_id=? AND visitor_id=?)', blocker, blocked, blocked, blocker);
 }
 export const unblock = (blocker: number, blocked: number) => run('DELETE FROM blocks WHERE blocker_id=? AND blocked_id=?', blocker, blocked);
 export const blockedIds = (blocker: number) => all('SELECT blocked_id FROM blocks WHERE blocker_id=?', blocker).map((r) => r.blocked_id as number);

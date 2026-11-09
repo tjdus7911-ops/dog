@@ -49,7 +49,17 @@ export function isOnPath(x: number, z: number, margin = 0) {
   return false;
 }
 
+/** 광장 대형 스크린 (방사형 길 위에 기둥 2개로 세움, 화면은 광장 쪽을 봄) */
+export const BIG_SCREEN = { x: 0, z: -11.4, w: 5.4, h: 3.0, y: 3.4, postX: 2.9 };
+/** 포토존: 광장 가장자리의 하트·발바닥 배경판 (서 있는 자리 = stand) */
+const PZ_ANGLE = Math.PI * 1.5 - 0.45;
+export const PHOTO_ZONE = {
+  x: Math.sin(PZ_ANGLE) * 6.3, z: Math.cos(PZ_ANGLE) * 6.3, rot: PZ_ANGLE + Math.PI,
+  standX: Math.sin(PZ_ANGLE) * 5.0, standZ: Math.cos(PZ_ANGLE) * 5.0, r: 1.6,
+};
+
 function insideBuilding(x: number, z: number, margin: number) {
+  if (Math.abs(x - BIG_SCREEN.x) < BIG_SCREEN.postX + margin && Math.abs(z - BIG_SCREEN.z) < 0.6 + margin) return true;
   return BUILDINGS.some((b) => Math.abs(x - b.x) < b.w / 2 + margin && Math.abs(z - b.z) < b.d / 2 + margin);
 }
 
@@ -132,6 +142,10 @@ export const COLLIDERS_CIRCLE: Circle[] = [
   ...TREES.map((t) => ({ x: t.x, z: t.z, r: 0.45 * t.scale })),
   ...LAMPS.map((l) => ({ x: l.x, z: l.z, r: 0.25 })),
   ...BENCHES.map((b) => ({ x: b.x, z: b.z, r: 0.75 })),
+  // 대형 스크린 기둥, 포토존 배경판
+  { x: BIG_SCREEN.x - BIG_SCREEN.postX, z: BIG_SCREEN.z, r: 0.3 },
+  { x: BIG_SCREEN.x + BIG_SCREEN.postX, z: BIG_SCREEN.z, r: 0.3 },
+  { x: PHOTO_ZONE.x, z: PHOTO_ZONE.z, r: 0.55 },
 ];
 
 export const COLLIDERS_BOX: Box[] = BUILDINGS.map((b) => ({ x: b.x, z: b.z, hw: b.w / 2 + 0.1, hd: b.d / 2 + 0.1 }));

@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { Server } from 'socket.io';
 import * as repo from './db';
 import * as persist from './persist';
+import { canVisit } from './access';
 import { APARTMENT_BUILDINGS, isValidUnit, unitsOf, type UnitInfo } from '../../shared/apartment';
 import { GUESTBOOK_MAX_LEN, HOME_VISIBILITY, validateLayout, type HomeView, type HomeVisibility } from '../../shared/home';
 import { hashPassword, issueToken, requireAdmin, requireAuth, revokeToken, verifyPassword, type AuthedRequest } from './auth';
@@ -122,6 +123,25 @@ app.put('/api/me/privacy', requireAuth, (req, res) => {
 
 // 강아지 사진: data URL로 받아 형식(매직 바이트)과 크기를 검증한 뒤 무작위 파일명으로 저장
 const MAGIC: [string, number[]][] = [['png', [0x89, 0x50, 0x4e, 0x47]], ['jpg', [0xff, 0xd8, 0xff]], ['webp', [0x52, 0x49, 0x46, 0x46]]];
+/** data URL 이미지를 검증해 저장하고 '/uploads/파일명' 을 돌려준다 */
+function saveImage(dataUrl: unknown): { url: string } | { error: string } {
+  const m = typeof dataUrl === 'string' ? /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl) : null;
+  if (!m) return { error: 'PNG, JPG, WEBP 사진만 올릴 수 있어요.' };
+  const buf = Buffer.from(m[2], 'base64');
+  if (buf.length > 2 * 1024 * 1024) return { error: '사진은 2MB 이하로 올려 주세요.' };
+  const kind = MAGIC.find(([, sig]) => sig.every((b, i) => buf[i] === b));
+  if (!kind || (kind[0] === 'webp' && buf.subarray(8, 12).toString() !== 'WEBP')) return { error: '이미지 파일이 아니에요.' };
+  const file = `${crypto.randomBytes(16).toString('hex')}.${kind[0]}`;
+  fs.writeFileSync(path.join(repo.UPLOAD_DIR, file), buf);
+  persist.saveUpload(file, buf);
+  return { url: `/uploads/${file}` };
+}
+function removeImage(url: string | null | undefined) {
+  if (!url || !url.startsWith('/uploads/')) return;
+  const f = path.basename(url);
+  fs.rm(path.join(repo.UPLOAD_DIR, f), { force: true }, () => {});
+  persist.removeUpload(f);
+}
 app.post('/api/me/dog-photo', requireAuth, (req, res) => {
   const id = (req as AuthedRequest).userId;
   const m = typeof req.body?.dataUrl === 'string' ? /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/.exec(req.body.dataUrl) : null;
@@ -197,6 +217,7 @@ app.get('/api/apartment', requireAuth, (req, res) => {
         resident: r && !hiddenRes ? {
           id: r.user_id, nickname: r.nickname, dogName: r.dog_name, dogCoat: (JSON.parse(r.dog)?.coat as string) ?? '#e6b47a',
           dogPhoto: r.dog_photo ?? null, mine: r.user_id === me,
+          visibility: repo.getHome(r.user_id).visibility, neighbor: neighborStatus(me, r.user_id),
         } : null,
       };
     });
@@ -218,19 +239,6 @@ app.post('/api/apartment/move-in', requireAuth, (req, res) => {
 
 // ---------- 개인 집 (꾸미기·방문·좋아요·방명록) ----------
 const guestbookLimiter = new RateLimiter(6, 60_000);
-/** 방문 가능 여부: 집주인 / 차단 / 공개 범위(전체·친구·이웃=같은 동 주민·비공개) */
-function canVisit(viewer: number, owner: number): { ok: true } | { ok: false; status: number; error: string } {
-  const res = repo.getResidence(owner);
-  if (!res) return { ok: false, status: 404, error: '아직 입주하지 않은 사용자예요.' };
-  if (viewer === owner) return { ok: true };
-  if (repo.eitherBlocked(viewer, owner)) return { ok: false, status: 403, error: '방문할 수 없는 집이에요.' };
-  const vis = repo.getHome(owner).visibility;
-  if (vis === 'public') return { ok: true };
-  if (vis === 'friends' && repo.areFriends(viewer, owner)) return { ok: true };
-  if (vis === 'neighbors' && repo.getResidence(viewer)?.building === res.building) return { ok: true };
-  const why = vis === 'friends' ? '친구에게만 공개된 집이에요.' : vis === 'neighbors' ? '같은 동 이웃에게만 공개된 집이에요.' : '비공개 집이에요.';
-  return { ok: false, status: 403, error: why };
-}
 function homeView(viewer: number, owner: number): HomeView | null {
   const p = repo.getPublicProfile(owner);
   const res = repo.getResidence(owner);
@@ -264,6 +272,7 @@ app.put('/api/home/me/layout', requireAuth, (req, res) => {
   const layout = validateLayout(req.body?.layout);
   if (!layout) return res.status(400).json({ error: '가구 배치 정보가 올바르지 않아요.' });
   repo.saveHome(me, { layout });
+  rt.homeUpdated(me);
   res.json({ home: homeView(me, me) });
 });
 app.put('/api/home/me/visibility', requireAuth, (req, res) => {
@@ -272,7 +281,110 @@ app.put('/api/home/me/visibility', requireAuth, (req, res) => {
   if (!HOME_VISIBILITY.some((x) => x.id === v)) return res.status(400).json({ error: '공개 범위가 올바르지 않아요.' });
   if (!repo.getResidence(me)) return res.status(400).json({ error: '입주한 뒤 설정할 수 있어요.' });
   repo.saveHome(me, { visibility: v });
+  rt.recheckHome(me);
+  rt.homeUpdated(me);
   res.json({ home: homeView(me, me) });
+});
+
+// 방문 권한 확인 (로비 호실 카드: 입장 / 방문 신청 / 불가)
+app.get('/api/home/:userId/access', requireAuth, (req, res) => {
+  const me = (req as AuthedRequest).userId, owner = homeOwnerParam(req);
+  const p = repo.getPublicProfile(owner);
+  const r = repo.getResidence(owner);
+  if (!p || !r || (owner !== me && repo.eitherBlocked(me, owner))) return res.status(404).json({ error: '방문할 수 없는 집이에요.' });
+  const c = canVisit(me, owner);
+  const vr = repo.getVisitRequest(owner, me);
+  res.json({
+    allowed: c.ok, reason: c.ok ? null : c.error, canRequest: !c.ok && c.canRequest,
+    request: vr ? (vr.status === 'approved' && vr.expires_at < Date.now() ? 'expired' : vr.status) : null,
+    visibility: repo.getHome(owner).visibility,
+    owner: { id: owner, nickname: p.nickname, dogName: p.dogName, dogIntro: p.dogIntro, dogPhoto: p.dogPhoto, dog: p.dog, residence: r },
+    neighbor: neighborStatus(me, owner),
+  });
+});
+const visitLimiter = new RateLimiter(20, 3600_000);
+app.post('/api/home/:userId/visit-request', requireAuth, (req, res) => {
+  const me = (req as AuthedRequest).userId, owner = homeOwnerParam(req);
+  if (owner === me) return res.status(400).json({ error: '내 집이에요.' });
+  const c = canVisit(me, owner);
+  if (c.ok) return res.status(400).json({ error: '바로 들어갈 수 있는 집이에요.' });
+  if (!c.canRequest) return res.status(c.status).json({ error: c.error });
+  if (!visitLimiter.allow(String(me))) return res.status(429).json({ error: '방문 신청을 너무 많이 보냈어요. 잠시 후 다시 시도해 주세요.' });
+  repo.requestVisit(owner, me);
+  const p = repo.getPublicProfile(me)!;
+  rt.notify(owner, 'visit:request', { fromId: me, nickname: p.nickname, dogName: p.dogName });
+  res.json({ ok: true, request: 'pending' });
+});
+app.get('/api/home/me/visit-requests', requireAuth, (req, res) => {
+  const me = (req as AuthedRequest).userId;
+  res.json({ requests: repo.pendingVisits(me).map((v) => ({ visitorId: v.visitor_id, nickname: v.nickname, dogName: v.dog_name, ts: v.created_at })) });
+});
+app.post('/api/home/me/visit-requests/:visitorId', requireAuth, (req, res) => {
+  const me = (req as AuthedRequest).userId, visitor = Number(req.params.visitorId);
+  const vr = repo.getVisitRequest(me, visitor);
+  if (!vr || vr.status !== 'pending') return res.status(404).json({ error: '처리할 방문 신청이 없어요.' });
+  const approve = req.body?.approve === true;
+  repo.decideVisit(me, visitor, approve);
+  const p = repo.getPublicProfile(me)!;
+  rt.notify(visitor, 'visit:decided', { homeId: me, nickname: p.nickname, approve });
+  res.json({ requests: repo.pendingVisits(me).map((v) => ({ visitorId: v.visitor_id, nickname: v.nickname, dogName: v.dog_name, ts: v.created_at })) });
+});
+
+// ---------- 이웃 (같은 아파트 동 주민끼리 신청·수락) ----------
+type NeighborStatus = 'none' | 'outgoing' | 'incoming' | 'neighbors' | 'unavailable';
+function neighborStatus(me: number, other: number): NeighborStatus {
+  if (me === other) return 'unavailable';
+  const a = repo.getResidence(me), b = repo.getResidence(other);
+  if (!a || !b || a.building !== b.building || repo.eitherBlocked(me, other)) return 'unavailable';
+  if (repo.areNeighbors(me, other)) return 'neighbors';
+  if (repo.hasNeighborRequest(me, other)) return 'outgoing';
+  if (repo.hasNeighborRequest(other, me)) return 'incoming';
+  return 'none';
+}
+const neighborLimiter = new RateLimiter(30, 60_000);
+app.get('/api/neighbors', requireAuth, (req, res) => {
+  const me = (req as AuthedRequest).userId;
+  res.json({
+    neighbors: repo.neighborIds(me).map((id) => repo.getPublicProfile(id)).filter(Boolean),
+    incoming: repo.incomingNeighborRequests(me).map((r) => repo.getPublicProfile(r.from_id)).filter(Boolean),
+    outgoing: repo.outgoingNeighborRequests(me).map((id) => repo.getPublicProfile(id)).filter(Boolean),
+  });
+});
+app.post('/api/neighbors/:userId/:action', requireAuth, (req, res) => {
+  const me = (req as AuthedRequest).userId, other = Number(req.params.userId);
+  if (!neighborLimiter.allow(String(me))) return res.status(429).json({ error: '잠시 후 다시 시도해 주세요.' });
+  const st = neighborStatus(me, other);
+  if (st === 'unavailable') return res.status(400).json({ error: '같은 아파트 동 주민끼리만 이웃이 될 수 있어요.' });
+  const meP = repo.getPublicProfile(me)!;
+  switch (req.params.action) {
+    case 'request':
+      if (st === 'incoming') { repo.makeNeighbors(me, other); rt.notify(other, 'neighbor:update', { kind: 'accepted', nickname: meP.nickname }); break; }
+      if (st !== 'none') return res.status(400).json({ error: st === 'neighbors' ? '이미 이웃이에요.' : '이미 신청했어요.' });
+      repo.addNeighborRequest(me, other);
+      rt.notify(other, 'neighbor:update', { kind: 'request', nickname: meP.nickname });
+      break;
+    case 'accept':
+      if (st !== 'incoming') return res.status(400).json({ error: '받은 이웃 신청이 없어요.' });
+      repo.makeNeighbors(me, other);
+      rt.notify(other, 'neighbor:update', { kind: 'accepted', nickname: meP.nickname });
+      break;
+    case 'decline':
+      if (st !== 'incoming') return res.status(400).json({ error: '받은 이웃 신청이 없어요.' });
+      repo.removeNeighborRequest(other, me);
+      break;
+    case 'cancel':
+      if (st !== 'outgoing') return res.status(400).json({ error: '보낸 이웃 신청이 없어요.' });
+      repo.removeNeighborRequest(me, other);
+      break;
+    case 'remove':
+      if (st !== 'neighbors') return res.status(400).json({ error: '이웃이 아니에요.' });
+      repo.removeNeighbor(me, other);
+      rt.recheckHome(me); rt.recheckHome(other);
+      break;
+    default:
+      return res.status(400).json({ error: '잘못된 요청이에요.' });
+  }
+  res.json({ status: neighborStatus(me, other) });
 });
 
 app.post('/api/home/:userId/like', requireAuth, (req, res) => {
@@ -302,6 +414,76 @@ app.delete('/api/home/:userId/guestbook/:id', requireAuth, (req, res) => {
   repo.deleteGuestbook(g.id);
   const c = canVisit(me, owner);
   res.json({ home: c.ok ? homeView(me, owner) : null });
+});
+
+// ---------- 광장 대형 스크린 (작성자 공개 동의 + 운영자 승인 후 노출) ----------
+const screenLimiter = new RateLimiter(5, 3600_000);
+function screenFeed() {
+  const items = repo.listScreen('approved', 30);
+  const dogs = items.filter((i) => i.kind === 'dog');
+  const notices = items.filter((i) => i.kind === 'notice');
+  // 오늘의 강아지: 승인된 강아지 중 날짜마다 한 마리씩 돌아가며
+  const day = Math.floor((Date.now() + 9 * 3600_000) / 86400_000);
+  const today = dogs.length ? dogs[day % dogs.length] : null;
+  const slides = [
+    ...(today ? [{ ...toScreen(today), label: '오늘의 강아지' }] : []),
+    ...dogs.filter((d) => d !== today).slice(0, 6).map((d) => ({ ...toScreen(d), label: '우리 강아지 자랑' })),
+    ...notices.slice(0, 3).map((n) => ({ ...toScreen(n), label: '운영 공지' })),
+  ];
+  return slides;
+}
+function toScreen(r: Record<string, any>) {
+  return { id: r.id as number, kind: r.kind as string, title: r.title as string, text: r.text as string, image: (r.image as string | null) ?? null,
+    author: r.kind === 'notice' ? '멍글마을 운영팀' : (r.nickname as string), dogName: (r.dog_name as string | null) ?? null, authorId: r.author_id as number, ts: r.created_at as number };
+}
+app.get('/api/screen', requireAuth, (_req, res) => res.json({ slides: screenFeed() }));
+app.get('/api/screen/mine', requireAuth, (req, res) => {
+  res.json({ items: repo.listScreenByAuthor((req as AuthedRequest).userId).map((r) => ({ ...toScreen(r), status: r.status })) });
+});
+app.post('/api/screen', requireAuth, (req, res) => {
+  const me = (req as AuthedRequest).userId;
+  if (req.body?.consent !== true) return res.status(400).json({ error: '광장 스크린 공개에 동의해야 신청할 수 있어요.' });
+  const title = sanitize(req.body?.title, 30);
+  const text = sanitize(req.body?.text ?? '', 80) ?? '';
+  if (!title) return res.status(400).json({ error: '제목을 입력해 주세요.' });
+  if (filterProfanity(title).flagged || filterProfanity(text).flagged) return res.status(400).json({ error: '부적절한 표현이 있어요.' });
+  if (repo.countPendingScreen(me) >= 3) return res.status(400).json({ error: '검토 중인 신청이 3개 있어요. 승인된 뒤 다시 신청해 주세요.' });
+  if (!screenLimiter.allow(String(me))) return res.status(429).json({ error: '잠시 후 다시 신청해 주세요.' });
+  let image: string | null = null;
+  if (req.body?.useProfilePhoto) image = repo.getDogPhoto(me);
+  else if (req.body?.photo) { const r = saveImage(req.body.photo); if ('error' in r) return res.status(400).json({ error: r.error }); image = r.url; }
+  if (!image) return res.status(400).json({ error: '강아지 사진을 올려 주세요.' });
+  repo.addScreen({ kind: 'dog', authorId: me, title, text, image, status: 'pending', ownsImage: !req.body?.useProfilePhoto });
+  res.json({ ok: true });
+});
+app.delete('/api/screen/:id', requireAuth, (req, res) => {
+  const me = (req as AuthedRequest).userId;
+  const it = repo.getScreen(Number(req.params.id));
+  if (!it || it.author_id !== me || it.kind !== 'dog') return res.status(404).json({ error: '찾을 수 없어요.' });
+  repo.deleteScreen(it.id);
+  if (it.owns_image) removeImage(it.image);
+  rt.screenUpdated();
+  res.json({ ok: true });
+});
+app.get('/api/admin/screen', requireAuth, requireAdmin, (_req, res) => {
+  res.json({ items: [...repo.listScreen('pending', 50), ...repo.listScreen('approved', 50)].map((r) => ({ ...toScreen(r), status: r.status })) });
+});
+app.post('/api/admin/screen/:id', requireAuth, requireAdmin, (req, res) => {
+  const it = repo.getScreen(Number(req.params.id));
+  const action = req.body?.action;
+  if (!it || !['approve', 'reject', 'hide'].includes(action)) return res.status(400).json({ error: '잘못된 요청' });
+  repo.setScreenStatus(it.id, action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : 'hidden');
+  rt.screenUpdated();
+  if (it.kind === 'dog') rt.notify(it.author_id, 'screen:decided', { title: it.title, approved: action === 'approve' });
+  res.json({ ok: true });
+});
+app.post('/api/admin/notices', requireAuth, requireAdmin, (req, res) => {
+  const title = sanitize(req.body?.title, 30);
+  const text = sanitize(req.body?.text ?? '', 80) ?? '';
+  if (!title) return res.status(400).json({ error: '제목을 입력해 주세요.' });
+  repo.addScreen({ kind: 'notice', authorId: (req as AuthedRequest).userId, title, text, image: null, status: 'approved', ownsImage: false });
+  rt.screenUpdated();
+  res.json({ ok: true });
 });
 
 // ---------- 운영 ----------

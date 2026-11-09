@@ -5,6 +5,12 @@ import { tokenStore } from '../lib/api';
 import { clearRemotes, pushSnapshot, removeRemote } from './remote';
 import { local } from '../game/local';
 import { DEMO } from '../demo';
+import { api } from '../lib/api';
+import { setSpace } from '../game/space';
+import { cam } from '../game/CameraRig';
+import { PLACES, SPAWNS, homeSpaceId } from '@shared/spaces';
+import { APARTMENT_ENTRANCE } from '@shared/world';
+import type { HomeView } from '@shared/home';
 import type {
   ChatMessage, DirectMessage, FriendEntry, FriendStatus, NetState, ParkInfo, PlayerSnapshot, PublicProfile, SeatMap,
 } from '@shared/protocol';
@@ -29,7 +35,8 @@ export function sendState(s: NetState) {
 export function connect() {
   if (DEMO) {
     // 미리보기: 서버 연결 없이 혼자 산책
-    set({ connection: 'online', park: { id: 'demo', name: '미리보기 공원', count: 1, capacity: 1 }, parks: [], players: {} });
+    set({ connection: 'online', parks: PLACES.map((p) => ({ ...p, count: p.kind === 'park' && p.id === 'central-1' ? 1 : 0, capacity: 1 })), players: {} });
+    void joinPark('central-1');
     return;
   }
   disconnect();
@@ -44,7 +51,8 @@ export function connect() {
     const prevPark = get().park?.id;
     await refreshFriends();
     await refreshBlocked();
-    await joinPark(prevPark);
+    // 재접속: 있던 장소로 돌아가되, 들어갈 수 없게 됐으면(집 공개 범위 변경 등) 공원으로
+    if (!(await joinPark(prevPark, undefined, true))) await joinPark();
   });
   s.on('disconnect', () => {
     if (get().connection !== 'kicked') set({ connection: 'connecting' });
@@ -57,6 +65,22 @@ export function connect() {
       set({ connection: 'kicked', kickReason: e.message === 'banned' ? '이용이 정지된 계정이에요.' : '로그인이 만료되었어요. 다시 로그인해 주세요.' });
     }
   });
+  s.on('space:kicked', ({ reason }: { reason: string }) => { toast(reason); void joinPark('lobby-1'); });
+  s.on('home:updated', ({ ownerId }: { ownerId: number }) => { if (get().park?.ownerId === ownerId) void loadHome(ownerId); });
+  s.on('visit:request', (v: { fromId: number; nickname: string; dogName: string }) => {
+    notify({ id: `visit-${v.fromId}-${Date.now()}`, kind: 'system', fromId: v.fromId, fromNickname: v.nickname, text: `${v.nickname}님이 우리 집 방문을 신청했어요. 집 정보에서 승인할 수 있어요.`, ts: Date.now() });
+    toast(`🏠 ${v.nickname}님이 우리 집 방문을 신청했어요`);
+    set((x) => ({ visitRequestsVersion: x.visitRequestsVersion + 1 }));
+  });
+  s.on('visit:decided', (v: { homeId: number; nickname: string; approve: boolean }) => {
+    toast(v.approve ? `✅ ${v.nickname}님이 방문을 승인했어요! 로비에서 입장할 수 있어요` : `${v.nickname}님이 이번 방문 신청을 거절했어요`);
+  });
+  s.on('neighbor:update', (v: { kind: 'request' | 'accepted'; nickname: string }) => {
+    toast(v.kind === 'request' ? `🏘️ ${v.nickname}님이 이웃 신청을 보냈어요` : `🏘️ ${v.nickname}님과 이웃이 되었어요`);
+    set((x) => ({ visitRequestsVersion: x.visitRequestsVersion + 1 }));
+  });
+  s.on('screen:updated', () => set((x) => ({ screenVersion: x.screenVersion + 1 })));
+  s.on('screen:decided', (v: { title: string; approved: boolean }) => toast(v.approved ? `📺 '${v.title}'이(가) 광장 스크린에 올라갔어요!` : `'${v.title}' 스크린 신청이 반려되었어요`));
   s.on('seats', (seats: SeatMap) => {
     set({ seats });
     // 서버에서 내 자리가 해제됐다면(멀리 이동 등) 로컬 상태도 정리
@@ -143,25 +167,76 @@ export function disconnect() {
 }
 
 // ---------- 동작 ----------
-export async function joinPark(parkId?: string) {
-  const res = await request<{ park: ParkInfo; spawn: NetState; players: PlayerSnapshot[]; seats?: SeatMap }>('park:join', parkId ? { parkId } : undefined);
+/**
+ * 장소 이동 (공원 / 아파트 로비 / 개인 집). 서버가 권한·정원을 확인하고, 한 사람은 한 장소에만 있게 한다.
+ * @param from 'lobby' 이면 공원의 아파트 입구 앞에서 시작
+ */
+let joining = false;
+export async function joinPark(parkId?: string, from?: 'lobby', quiet = false): Promise<boolean> {
+  if (joining) return false; // 이동 중 중복 요청 방지
+  joining = true;
+  try {
+    return await doJoin(parkId, from, quiet);
+  } finally { joining = false; }
+}
+async function doJoin(parkId: string | undefined, from: 'lobby' | undefined, quiet: boolean) {
+  if (DEMO) return demoJoin(parkId ?? 'central-1', from);
+  const res = await request<{ park: ParkInfo; spawn: NetState; players: PlayerSnapshot[]; seats?: SeatMap }>('park:join', parkId ? { parkId, from } : undefined);
   if (!res.ok) {
-    toast(res.error, 'error');
-    if (!get().park) {
-      // 지정 공원 입장 실패 시 자동 배정 재시도
-      if (parkId) return joinPark();
-    }
+    if (!quiet) toast(res.error, 'error');
+    if (!get().park && parkId && !quiet) return doJoin(undefined, undefined, true); // 지정 장소 입장 실패 시 빈 공원으로
     return false;
   }
-  clearRemotes();
+  if (local.seated) void request('seat:leave');
+  enterSpace(res.park, res.spawn);
   const players: Record<number, PublicProfile> = {};
   for (const p of res.players) { players[p.profile.id] = p.profile; pushSnapshot(p.profile.id, p.state); }
-  local.teleport = res.spawn;
-  local.seated = null; local.seatGoal = null;
-  set({ park: res.park, players, chat: [], bubbles: {}, seats: res.seats ?? {}, seated: null, benchMenu: null });
+  set({ players, seats: res.seats ?? {} });
   const list = await request<{ parks: ParkInfo[] }>('park:list');
   if (list.ok) set({ parks: list.parks });
   return true;
+}
+
+/** 새 공간에 들어갈 때 공통 처리: 이전 공간 아바타 정리, 이동 규칙·카메라 초기화, 사람·강아지 함께 이동 */
+function enterSpace(park: ParkInfo, spawn: NetState) {
+  clearRemotes();
+  local.teleport = spawn;
+  local.seated = null; local.seatGoal = null; local.moveTarget = null;
+  local.jumpY = 0; local.jumpV = 0;
+  cam.pendingReset = park.kind;
+  setSpace(park.kind);
+  set({ park, players: {}, chat: [], bubbles: {}, seats: {}, seated: null, benchMenu: null, home: null, homeEdit: false, lobbyPanel: park.kind === 'lobby' });
+  if (park.kind === 'home' && park.ownerId) void loadHome(park.ownerId);
+}
+
+/** 미리보기: 서버 없이 장소 전환 (내 집만 들어갈 수 있음) */
+function demoJoin(id: string, from?: 'lobby') {
+  const place = PLACES.find((p) => p.id === id);
+  const me = get().me!;
+  let park: ParkInfo;
+  if (place) park = { ...place, count: 1, capacity: 1 };
+  else if (id === `home-${me.id}` && me.residence) park = { id, name: `${me.nickname}네 집 (${me.residence.unit}호)`, kind: 'home', icon: '🏠', ownerId: me.id, count: 1, capacity: 1 };
+  else { toast('미리보기에서는 다른 집에 들어갈 수 없어요.', 'error'); return false; }
+  const [x, z] = park.kind === 'park' ? (from === 'lobby' ? [APARTMENT_ENTRANCE.x, APARTMENT_ENTRANCE.z + 2.2] : [0.6, 10]) : SPAWNS[park.kind];
+  const face = park.kind === 'park' && from !== 'lobby' ? Math.PI : 0;
+  enterSpace(park, [x, z, face, 0, x + 0.7, z + 0.3, face, 0]);
+  return true;
+}
+
+/** 개인 집 정보(가구·집주인) 불러오기 → 가구 충돌 반영 */
+export async function loadHome(ownerId: number) {
+  try {
+    const r = await api<{ home: HomeView }>(`/api/home/${ownerId === get().me?.id ? 'me' : ownerId}`);
+    if (get().park?.ownerId !== ownerId) return;
+    set({ home: r.home });
+    setSpace('home', r.home.layout);
+  } catch (e) { toast((e as Error).message, 'error'); }
+}
+
+/** 다른 사람 집 방문: 권한 확인 후 입장 */
+export async function visitHome(ownerId: number) {
+  if (await joinPark(homeSpaceId(ownerId))) return true;
+  return false;
 }
 
 /** 벤치 좌석에 앉기 (서버가 거리·빈자리 확인) */

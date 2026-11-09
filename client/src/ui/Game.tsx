@@ -12,8 +12,9 @@ import { NotificationsPanel } from './NotificationsPanel';
 import { SettingsPanel } from './SettingsPanel';
 import { ConnectionOverlay } from './ConnectionOverlay';
 import { BenchMenu } from './BenchMenu';
-import { EntrancePrompt, Lobby } from './Apartment';
-import { Home } from './Home';
+import { PhotoModeBar, PhotoZonePrompt, ScreenDetail, ScreenSubmit } from './Photo';
+import { EntrancePrompt, LobbyPanel } from './Apartment';
+import { HomeEditor, HomePanel } from './Home';
 
 const AvatarEditor = lazy(() => import('./AvatarEditor'));
 const AdminPanel = lazy(() => import('./AdminPanel'));
@@ -23,26 +24,26 @@ export default function Game() {
   const popup = useStore((s) => s.profilePopup);
   const report = useStore((s) => s.reportTarget);
   const dmWith = useStore((s) => s.dmWith);
-  const view = useStore((s) => s.view);
-  if (view === 'lobby' || view === 'home') {
-    return (
-      <div className="relative h-full w-full overflow-hidden">
-        {view === 'lobby' ? <Lobby /> : <Home />}
-        {dmWith && <DmWindow profile={dmWith} />}
-        <ConnectionOverlay />
-      </div>
-    );
-  }
+  const kind = useStore((s) => s.park?.kind ?? 'park');
+  const homeEdit = useStore((s) => s.homeEdit);
+  const photo = useStore((s) => s.photoMode);
   return (
     <div className="relative h-full w-full overflow-hidden">
       <div className="absolute inset-0"><Scene /></div>
-      <TopBar />
-      <MiniMap />
-      <ChatPanel />
-      <ActionBar />
-      <Joystick />
-      <BenchMenu />
-      <EntrancePrompt />
+      {!photo && <>
+        <TopBar />
+        {kind === 'park' && <MiniMap />}
+        <ChatPanel />
+        <ActionBar />
+        <Joystick />
+        {kind === 'park' && <><BenchMenu /><EntrancePrompt /><PhotoZonePrompt /></>}
+        {kind === 'lobby' && <LobbyPanel />}
+        {kind === 'home' && <HomePanel />}
+      </>}
+      {photo && <PhotoModeBar />}
+      {homeEdit && <HomeEditor />}
+      <ScreenDetail />
+      <ScreenSubmit />
       {panel === 'friends' && <FriendsPanel />}
       {panel === 'notifications' && <NotificationsPanel />}
       {panel === 'settings' && <SettingsPanel />}

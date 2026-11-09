@@ -1,6 +1,6 @@
 // 내 강아지의 산책 행동 — 보호자를 따라 걷기/달리기, 멈추면 주변 살피기 → 앉기, 다른 강아지와 인사
 import { DogAnim, RUN_SPEED, WALK_SPEED } from '@shared/protocol';
-import { resolveCollision } from '@shared/world';
+import { space } from './space';
 import { LEASH_LENGTH } from './Leash';
 
 const MAX_DIST = LEASH_LENGTH - 0.25; // 목줄이 팽팽해지는 거리
@@ -120,15 +120,15 @@ export class DogBrain {
     }
 
     // 장애물 · 목줄 길이 제한 (멀어지거나 걸리지 않게)
-    [this.x, this.z] = resolveCollision(this.x, this.z, 0.22 * scale);
+    [this.x, this.z] = space.collide(this.x, this.z, 0.22 * scale);
     let od = Math.hypot(this.x - ox, this.z - oz);
     if (od > MAX_DIST) {
       this.x = ox + ((this.x - ox) / od) * MAX_DIST;
       this.z = oz + ((this.z - oz) / od) * MAX_DIST;
-      [this.x, this.z] = resolveCollision(this.x, this.z, 0.22 * scale);
+      [this.x, this.z] = space.collide(this.x, this.z, 0.22 * scale);
       od = Math.hypot(this.x - ox, this.z - oz);
       // 장애물 때문에 여전히 멀다면 보호자 곁으로 이동 (끼임 방지)
-      if (od > MAX_DIST + 0.4) { this.x = tx; this.z = tz; [this.x, this.z] = resolveCollision(this.x, this.z, 0.22 * scale); }
+      if (od > MAX_DIST + 0.4) { this.x = tx; this.z = tz; [this.x, this.z] = space.collide(this.x, this.z, 0.22 * scale); }
     }
 
     // 애니메이션 상태

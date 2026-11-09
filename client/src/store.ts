@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import type { HomeView } from '@shared/home';
+import type { ScreenSlide } from '@shared/screen';
 import type {
   ChatMessage, DirectMessage, FriendEntry, FriendStatus, MyProfile, NotificationItem, ParkInfo, PublicProfile, SeatMap,
 } from '@shared/protocol';
@@ -40,10 +42,22 @@ interface State {
   seats: SeatMap;
   benchMenu: number | null;
   seated: string | null;
-  /** 지금 보는 화면: 공원 / 아파트 로비 */
-  view: 'park' | 'lobby' | 'home';
-  /** 보고 있는 집의 주인 id (view === 'home') */
-  homeOwner: number | null;
+  /** 개인 집에 있을 때 그 집 정보 (가구·집주인) */
+  home: HomeView | null;
+  /** 집 꾸미기 편집 화면 열림 */
+  homeEdit: boolean;
+  /** 로비 호실 안내판 패널 열림 */
+  lobbyPanel: boolean;
+  /** 집 정보 패널 열림 */
+  homePanel: boolean;
+  /** 방문·이웃 신청 갱신 신호 / 광장 스크린 갱신 신호 */
+  visitRequestsVersion: number;
+  screenVersion: number;
+  /** 사진 촬영 모드 (UI 숨김) */
+  photoMode: boolean;
+  /** 광장 스크린: 상세 보기 / 올리기 신청 화면 */
+  screenDetail: ScreenSlide | 'empty' | null;
+  screenSubmit: { photo?: string } | null;
   /** 입주 화면을 이번 접속에서 '나중에 하기'로 넘겼는지 */
   moveInLater: boolean;
 }
@@ -74,8 +88,15 @@ export const useStore = create<State>()(() => ({
   seats: {},
   benchMenu: null,
   seated: null,
-  view: 'park',
-  homeOwner: null,
+  home: null,
+  homeEdit: false,
+  lobbyPanel: false,
+  homePanel: false,
+  visitRequestsVersion: 0,
+  screenVersion: 0,
+  photoMode: false,
+  screenDetail: null,
+  screenSubmit: null,
   moveInLater: false,
 }));
 

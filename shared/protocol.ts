@@ -38,11 +38,16 @@ export interface MyProfile extends PublicProfile {
 
 export type FriendStatus = 'none' | 'outgoing' | 'incoming' | 'friends' | 'blocked';
 
+/** 지금 있는 장소 (공원 / 아파트 로비 / 개인 집) */
 export interface ParkInfo {
   id: string;
   name: string;
   count: number;
   capacity: number;
+  kind: 'park' | 'lobby' | 'home';
+  icon: string;
+  /** 개인 집이면 집주인 id */
+  ownerId?: number;
 }
 
 /** 사람 애니메이션 상태 */
@@ -94,7 +99,7 @@ export interface FriendEntry {
 
 export interface NotificationItem {
   id: string;
-  kind: 'friend_request' | 'friend_accepted' | 'dm';
+  kind: 'friend_request' | 'friend_accepted' | 'dm' | 'system';
   fromId: number;
   fromNickname: string;
   text: string;

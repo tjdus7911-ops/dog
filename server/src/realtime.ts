@@ -6,11 +6,14 @@ import { userFromToken } from './auth';
 import { filterProfanity, RateLimiter, sanitize, SpamGuard } from './moderation';
 import {
   CHAT_MAX_LEN, HumanAnim, NET_TICK_MS, PARKS, RUN_SPEED,
-  type ChatMessage, type FriendEntry, type NetState, type PlayerSnapshot, type PublicProfile, type SeatMap,
+  type ChatMessage, type FriendEntry, type NetState, type ParkInfo, type PlayerSnapshot, type PublicProfile, type SeatMap,
 } from '../../shared/protocol';
-import { SEAT_BY_ID, SEAT_REACH, WORLD_RADIUS, spawnPoint } from '../../shared/world';
+import { APARTMENT_ENTRANCE, SEAT_BY_ID, SEAT_REACH, WORLD_RADIUS, spawnPoint } from '../../shared/world';
+import { PLACES, SPAWNS, homeSpaceId, insideSpace, parseSpace, type SpaceKind } from '../../shared/spaces';
+import { canVisit } from './access';
 
 const CAPACITY = Number(process.env.MUNGLE_PARK_CAPACITY ?? 30);
+const HOME_CAPACITY = 10;
 const REPORT_REASONS = ['욕설/비하', '도배/스팸', '불쾌한 닉네임/사진', '사칭/사기', '기타'];
 
 interface Player {
@@ -25,6 +28,10 @@ interface Player {
 interface Room {
   id: string;
   name: string;
+  kind: SpaceKind;
+  icon: string;
+  /** 개인 집이면 집주인 id */
+  ownerId?: number;
   players: Map<number, Player>;
   /** 신고 시 맥락으로 첨부할 최근 채팅 */
   recentChat: ChatMessage[];
@@ -42,7 +49,21 @@ interface Session {
 }
 
 export function setupRealtime(io: Server) {
-  const rooms = new Map<string, Room>(PARKS.map((p) => [p.id, { id: p.id, name: p.name, players: new Map(), recentChat: [], seats: new Map() }]));
+  // 상설 장소(공원·아파트 로비)는 미리 만들고, 개인 집은 누군가 들어갈 때 만들고 비면 정리한다
+  const rooms = new Map<string, Room>(PLACES.map((p) => [p.id, { id: p.id, name: p.name, kind: p.kind, icon: p.icon, players: new Map(), recentChat: [], seats: new Map() }]));
+  const capacityOf = (r: Room) => (r.kind === 'home' ? HOME_CAPACITY : CAPACITY);
+  function getOrCreateRoom(spaceId: string): Room | null {
+    const existing = rooms.get(spaceId);
+    if (existing) return existing;
+    const sp = parseSpace(spaceId);
+    if (!sp || sp.kind !== 'home' || !sp.ownerId) return null;
+    const owner = repo.getPublicProfile(sp.ownerId);
+    const res = repo.getResidence(sp.ownerId);
+    if (!owner || !res) return null;
+    const room: Room = { id: spaceId, name: `${owner.nickname}네 집 (${res.unit}호)`, kind: 'home', icon: '🏠', ownerId: sp.ownerId, players: new Map(), recentChat: [], seats: new Map() };
+    rooms.set(spaceId, room);
+    return room;
+  }
   const sessions = new Map<number, Session>();
   const spam = new SpamGuard();
   const dmSpam = new SpamGuard(8, 10000, 15000);
@@ -50,7 +71,7 @@ export function setupRealtime(io: Server) {
   const reportLimiter = new RateLimiter(10, 3600_000);
   const lookupLimiter = new RateLimiter(120, 60_000);
 
-  const parkInfo = (r: Room) => ({ id: r.id, name: r.name, count: r.players.size, capacity: CAPACITY });
+  const parkInfo = (r: Room): ParkInfo => ({ id: r.id, name: r.name, count: r.players.size, capacity: capacityOf(r), kind: r.kind, icon: r.icon, ownerId: r.ownerId });
   const hidden = (s: Session, other: number) => s.blocked.has(other) || s.blockedBy.has(other);
 
   // ---------- 인증 ----------
@@ -68,7 +89,9 @@ export function setupRealtime(io: Server) {
     const s = sessions.get(userId);
     const priv = repo.getPrivacy(userId);
     const online = priv.showOnline ? !!s : null;
-    const park = priv.showOnline && priv.showLocation && s?.parkId ? rooms.get(s.parkId)! : null;
+    const cur = s?.parkId ? rooms.get(s.parkId) : undefined;
+    // 개인 집 위치는 알리지 않음 (공원·아파트 로비만)
+    const park = priv.showOnline && priv.showLocation && cur && cur.kind !== 'home' ? cur : null;
     return { userId, online, parkId: park?.id ?? null, parkName: park?.name ?? null };
   }
   function notifyFriendsPresence(userId: number) {
@@ -92,7 +115,10 @@ export function setupRealtime(io: Server) {
     s.socket.leave(room.id);
     io.to(room.id).emit('players:leave', { id: s.userId });
     s.parkId = null;
-    io.emit('park:count', parkInfo(room));
+    if (room.kind === 'home') {
+      // 빈 집 공간은 정리
+      if (room.players.size === 0) rooms.delete(room.id);
+    } else io.emit('park:count', parkInfo(room));
   }
 
   /** 방 안에서 차단 관계를 제외하고 전송 */
@@ -137,24 +163,39 @@ export function setupRealtime(io: Server) {
     const okAck = (ack: unknown, data: object = {}) => typeof ack === 'function' && ack({ ok: true, ...data });
     const targetId = (v: unknown) => (Number.isInteger(v) && (v as number) > 0 && v !== userId ? (v as number) : null);
 
-    socket.on('park:list', (_: unknown, ack: unknown) => okAck(ack, { parks: [...rooms.values()].map(parkInfo) }));
+    socket.on('park:list', (_: unknown, ack: unknown) => okAck(ack, { parks: [...rooms.values()].filter((x) => x.kind !== 'home').map(parkInfo) }));
 
     // ---------- 공원 입장 ----------
-    socket.on('park:join', (data: { parkId?: string } | undefined, ack: unknown) => {
+    // ---------- 장소 입장 (공원 / 아파트 로비 / 개인 집) — 한 사용자는 한 공간에만 있음 ----------
+    socket.on('park:join', (data: { parkId?: string; from?: string } | undefined, ack: unknown) => {
       const profile = repo.getPublicProfile(userId);
       if (!profile) return fail(ack, '프로필을 찾을 수 없어요.');
       let room: Room | undefined;
       if (data?.parkId) {
-        room = rooms.get(data.parkId);
-        if (!room) return fail(ack, '존재하지 않는 공원이에요.');
-        if (room.id !== session.parkId && room.players.size >= CAPACITY) return fail(ack, `${room.name}은(는) 정원(${CAPACITY}명)이 가득 찼어요.`);
+        const sp = parseSpace(data.parkId);
+        if (!sp) return fail(ack, '존재하지 않는 장소예요.');
+        if (sp.kind === 'home') {
+          const c = canVisit(userId, sp.ownerId!);
+          if (!c.ok) return fail(ack, c.error);
+        }
+        room = getOrCreateRoom(data.parkId) ?? undefined;
+        if (!room) return fail(ack, '존재하지 않는 장소예요.');
+        if (room.id !== session.parkId && room.players.size >= capacityOf(room)) return fail(ack, `${room.name}은(는) 정원(${capacityOf(room)}명)이 가득 찼어요.`);
       } else {
-        room = [...rooms.values()].find((r) => r.players.size < CAPACITY);
+        room = [...rooms.values()].find((r) => r.kind === 'park' && r.players.size < CAPACITY);
         if (!room) return fail(ack, '모든 공원이 가득 찼어요. 잠시 후 다시 시도해 주세요.');
       }
+      if (room.id === session.parkId) {
+        // 같은 장소 재입장: 중복 입장 없이 현재 상태만 돌려줌
+        const others = [...room.players.values()].filter((p) => p.userId !== userId && !hidden(session, p.userId)).map((p) => ({ profile: p.profile, state: p.state }));
+        return okAck(ack, { park: parkInfo(room), spawn: room.players.get(userId)!.state, players: others, seats: Object.fromEntries(room.seats) satisfies SeatMap });
+      }
       leavePark(session);
-      const [x, z] = spawnPoint(userId + Date.now() % 1000);
-      const state: NetState = [x, z, Math.PI, 0, x + 0.9, z + 0.4, Math.PI, 0];
+      const [x, z] = room.kind === 'park'
+        ? (data?.from === 'lobby' ? [APARTMENT_ENTRANCE.x + ((userId % 5) - 2) * 0.5, APARTMENT_ENTRANCE.z + 2.2] : spawnPoint(userId + Date.now() % 1000))
+        : [SPAWNS[room.kind][0] + ((userId % 5) - 2) * 0.35, SPAWNS[room.kind][1]];
+      const face = room.kind === 'park' && data?.from !== 'lobby' ? Math.PI : 0;
+      const state: NetState = [x, z, face, 0, x + 0.7, z + 0.3, face, 0];
       const player: Player = { userId, socket, profile, state, lastTs: Date.now(), dirty: true };
       const others: PlayerSnapshot[] = [...room.players.values()]
         .filter((p) => !hidden(session, p.userId))
@@ -163,7 +204,7 @@ export function setupRealtime(io: Server) {
       socket.join(room.id);
       session.parkId = room.id;
       emitToRoomFiltered(room, userId, 'players:join', { profile, state } satisfies PlayerSnapshot);
-      io.emit('park:count', parkInfo(room));
+      if (room.kind !== 'home') io.emit('park:count', parkInfo(room));
       notifyFriendsPresence(userId);
       okAck(ack, { park: parkInfo(room), spawn: state, players: others, seats: Object.fromEntries(room.seats) satisfies SeatMap });
     });
@@ -179,9 +220,15 @@ export function setupRealtime(io: Server) {
       const now = Date.now();
       const dt = Math.min(1, (now - p.lastTs) / 1000);
       let [x, z, rot, ha, dx, dz, drot, da] = s as NetState;
-      // 월드 경계
-      const r = Math.hypot(x, z);
-      if (r > WORLD_RADIUS + 0.5) { x *= WORLD_RADIUS / r; z *= WORLD_RADIUS / r; }
+      const curRoom = rooms.get(session.parkId)!;
+      // 공간 경계 (공원: 원형 / 실내: 방 크기)
+      if (curRoom.kind === 'park') {
+        const r = Math.hypot(x, z);
+        if (r > WORLD_RADIUS + 0.5) { x *= WORLD_RADIUS / r; z *= WORLD_RADIUS / r; }
+      } else if (!insideSpace(curRoom.kind, x, z)) {
+        socket.emit('correct', p.state);
+        return;
+      }
       // 순간이동/속도 조작 방지: 이동 거리가 최대 속도를 크게 넘으면 거부하고 보정 위치 전송
       const moved = Math.hypot(x - p.state[0], z - p.state[1]);
       if (moved > RUN_SPEED * 1.6 * dt + 0.8) {
@@ -211,7 +258,7 @@ export function setupRealtime(io: Server) {
       const room = rooms.get(session.parkId)!;
       const p = room.players.get(userId);
       const seat = typeof data?.seatId === 'string' ? SEAT_BY_ID.get(data.seatId) : undefined;
-      if (!p || !seat) return fail(ack, '존재하지 않는 자리예요.');
+      if (!p || !seat || room.kind !== 'park') return fail(ack, '존재하지 않는 자리예요.');
       if (Math.hypot(p.state[0] - seat.x, p.state[1] - seat.z) > SEAT_REACH) return fail(ack, '벤치에 조금 더 가까이 가 주세요.');
       const owner = room.seats.get(seat.id);
       if (owner !== undefined && owner !== userId) return fail(ack, '이미 다른 사람이 앉아 있는 자리예요.');
@@ -438,6 +485,24 @@ export function setupRealtime(io: Server) {
       emitToRoomFiltered(room, userId, 'profile:update', profile);
     },
     privacyChanged(userId: number) { notifyFriendsPresence(userId); },
+    /** 광장 스크린 콘텐츠가 바뀌면 모두에게 알림 */
+    screenUpdated() { io.emit('screen:updated'); },
+    /** 특정 사용자에게 실시간 알림 (방문 신청·이웃 신청 등) */
+    notify(userId: number, event: string, payload: unknown) { sessions.get(userId)?.socket.emit(event, payload); },
+    /** 집 꾸미기가 바뀌면 그 집에 있는 사람들에게 알림 */
+    homeUpdated(ownerId: number) { io.to(homeSpaceId(ownerId)).emit('home:updated', { ownerId }); },
+    /** 방문 권한이 사라진 사람은 집에서 내보냄 (공개 범위 변경·차단 등) */
+    recheckHome(ownerId: number) {
+      const room = rooms.get(homeSpaceId(ownerId));
+      if (!room) return;
+      for (const pl of [...room.players.values()]) {
+        if (canVisit(pl.userId, ownerId).ok) continue;
+        const s = sessions.get(pl.userId);
+        if (!s) continue;
+        leavePark(s);
+        s.socket.emit('space:kicked', { reason: '집주인이 공개 범위를 바꿔서 로비로 나왔어요.' });
+      }
+    },
     kick(userId: number, reason: string) {
       const s = sessions.get(userId);
       if (!s) return;

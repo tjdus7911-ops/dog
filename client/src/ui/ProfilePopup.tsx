@@ -4,9 +4,10 @@ import type * as THREE from 'three';
 import type { PublicProfile } from '@shared/protocol';
 import { Human, newHumanDriver } from '../game/models/Human';
 import { set, useStore } from '../store';
-import { friendAction, openDm, report } from '../net/socket';
+import { friendAction, joinPark, openDm, report } from '../net/socket';
 import { Modal } from './common';
 import { residenceLabel } from '@shared/apartment';
+import { homeSpaceId } from '@shared/spaces';
 
 function SpinningHuman({ profile }: { profile: PublicProfile }) {
   const g = useRef<THREE.Group>(null!);
@@ -70,7 +71,7 @@ export function ProfilePopup() {
           {status !== 'friends' && status !== 'blocked' && <p className="text-xs text-cocoa-soft text-center">1:1 대화는 친구가 되면 이용할 수 있어요.</p>}
 
           {p.residence && (
-            <button className="btn btn-ghost py-2.5 border border-[#f1e2d2]" onClick={() => set({ view: 'home', homeOwner: p.id, profilePopup: null })}>
+            <button className="btn btn-ghost py-2.5 border border-[#f1e2d2]" onClick={() => { set({ profilePopup: null }); void joinPark(homeSpaceId(p.id)); }}>
               🏠 {residenceLabel(p.residence)} 집 방문하기
             </button>
           )}

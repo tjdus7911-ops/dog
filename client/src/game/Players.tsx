@@ -3,7 +3,8 @@ import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { BUBBLE_RANGE, DogAnim, GRAVITY, HumanAnim, JUMP_VELOCITY, RUN_SPEED, WALK_SPEED, type NetState, type PublicProfile } from '@shared/protocol';
-import { SEAT_BY_ID, SEAT_REACH, resolveCollision } from '@shared/world';
+import { SEAT_BY_ID, SEAT_REACH } from '@shared/world';
+import { space } from './space';
 import { AvatarPair, type PairRefs } from './AvatarPair';
 import { HUMAN_STEP, newHumanDriver } from './models/Human';
 import { DOG_SCALE, DOG_STEP, newDogDriver } from './models/Dog';
@@ -156,7 +157,7 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
       local.x = seat.x; local.z = seat.z;
       local.rot = turnToward(local.rot, seat.rot, dt * 10);
       m.speed = 0;
-    } else [local.x, local.z] = resolveCollision(local.x, local.z, 0.3);
+    } else [local.x, local.z] = space.collide(local.x, local.z, 0.3);
     const moved = Math.hypot(local.x - px, local.z - pz);
     const realSpeed = moved / Math.max(dt, 1e-4);
 

@@ -1,6 +1,6 @@
-// 멍글 아파트 개인 집 — 3D 실내, 집 꾸미기(배치·이동·회전·보관·저장), 방문·좋아요·방명록·공개 설정
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { Canvas, useFrame, type ThreeEvent } from '@react-three/fiber';
+// 멍글 아파트 개인 집 — 집 꾸미기 편집 화면, 집 정보 패널(좋아요·방명록·공개 범위·방문 신청)
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Canvas, type ThreeEvent } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import {
@@ -8,65 +8,17 @@ import {
   type HomeView, type HomeVisibility, type PlacedItem,
 } from '@shared/home';
 import { residenceLabel } from '@shared/apartment';
-import { DogAnim, HumanAnim } from '@shared/protocol';
 import { api } from '../lib/api';
 import { set, toast, useStore } from '../store';
-import { geo, mat } from '../game/lowpoly';
+import { geo } from '../game/lowpoly';
 import { FurnitureModel } from '../game/Furniture';
-import { Human, newHumanDriver } from '../game/models/Human';
-import { Dog, newDogDriver } from '../game/models/Dog';
+import { HomeRoom } from '../game/Interiors';
+import { setSpace } from '../game/space';
+import { joinPark } from '../net/socket';
 import { timeLabel } from './common';
 import { DEMO } from '../demo';
 
 const W = ROOM_HALF_W, D = ROOM_HALF_D;
-
-function Room() {
-  return (
-    <group>
-      {/* 원목 바닥 */}
-      <mesh geometry={geo.box(W * 2, 0.1, D * 2)} material={mat('#e3c39c')} position={[0, -0.05, 0]} />
-      {Array.from({ length: 8 }).map((_, i) => <mesh key={i} geometry={geo.box(0.02, 0.102, D * 2)} material={mat('#d2ae85')} position={[-W + (i + 1) * (W * 2) / 9, -0.045, 0]} />)}
-      {/* 뒷벽 + 왼쪽 벽 (앞·오른쪽은 열어 둠) */}
-      <mesh geometry={geo.box(W * 2 + 0.2, 3.2, 0.2)} material={mat('#fff1dc')} position={[0, 1.6, -D - 0.1]} />
-      <mesh geometry={geo.box(0.2, 3.2, D * 2 + 0.2)} material={mat('#fde3d6')} position={[-W - 0.1, 1.6, 0]} />
-      <mesh geometry={geo.box(W * 2 + 0.2, 0.22, 0.24)} material={mat('#f7c9b4')} position={[0, 0.11, -D - 0.08]} />
-      <mesh geometry={geo.box(0.24, 0.22, D * 2 + 0.2)} material={mat('#f7c9b4')} position={[-W - 0.08, 0.11, 0]} />
-      {/* 창문: 밖에 하늘·나무 */}
-      <group position={[1.6, 1.85, -D + 0.01]}>
-        <mesh geometry={geo.box(1.7, 1.25, 0.06)} material={mat('#ffffff')} />
-        <mesh geometry={geo.box(1.5, 1.05, 0.07)} material={mat('#bfe3f7')} />
-        <mesh geometry={geo.ico(0.28, 1)} material={mat('#8fc27a')} position={[-0.4, -0.3, 0.05]} />
-        <mesh geometry={geo.box(0.05, 1.05, 0.09)} material={mat('#ffffff')} />
-        <mesh geometry={geo.box(1.5, 0.05, 0.09)} material={mat('#ffffff')} />
-        {[-1, 1].map((s) => <mesh key={s} geometry={geo.box(0.32, 1.35, 0.05)} material={mat('#f4a6b8')} position={[s * 0.95, 0, 0.08]} />)}
-      </group>
-      {/* 벽 선반 + 발바닥 장식 */}
-      <mesh geometry={geo.box(1.2, 0.06, 0.25)} material={mat('#c99a6b')} position={[-W + 0.15, 1.9, -0.6]} rotation={[0, Math.PI / 2, 0]} />
-      <mesh geometry={geo.cyl(0.16, 0.16, 0.04, 8)} material={mat('#f39a7b')} position={[-1.8, 2.3, -D + 0.02]} rotation={[Math.PI / 2, 0, 0]} />
-    </group>
-  );
-}
-
-/** 집주인 아바타와 강아지 (강아지 침대가 있으면 그 위에서 쉼) */
-function Residents({ home, layout }: { home: HomeView; layout: PlacedItem[] }) {
-  const hd = useRef(newHumanDriver());
-  const dd = useRef(newDogDriver());
-  hd.current.leash = false;
-  const bed = layout.find((i) => i.type === 'dogbed');
-  useFrame((state) => {
-    hd.current.anim = HumanAnim.Idle;
-    dd.current.anim = bed ? DogAnim.Lie : DogAnim.Sit;
-    dd.current.look = Math.sin(state.clock.elapsedTime * 0.7) * 0.5;
-  });
-  return (
-    <>
-      <group position={[0.2, 0, 1.6]} rotation={[0, -0.3, 0]}><Human avatar={home.owner.human} driver={hd} /></group>
-      <group position={bed ? [bed.x, 0.12, bed.z] : [-0.7, 0, 1.8]} rotation={[0, bed ? bed.rot * (Math.PI / 2) + 0.4 : 0.3, 0]}>
-        <Dog avatar={home.owner.dog} driver={dd} />
-      </group>
-    </>
-  );
-}
 
 function Furniture({ item, photo, selected, editing, onSelect, onDragStart }: {
   item: PlacedItem; photo: string | null; selected: boolean; editing: boolean;
@@ -99,35 +51,21 @@ function DragFloor({ active, onMove, onEnd }: { active: boolean; onMove: (x: num
   );
 }
 
-export function Home() {
-  const ownerId = useStore((s) => s.homeOwner);
-  const me = useStore((s) => s.me)!;
-  const [home, setHome] = useState<HomeView | null>(null);
-  const [error, setError] = useState('');
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<PlacedItem[]>([]);
+/** 집 꾸미기 편집 화면 (집주인만, 전체 화면) */
+export function HomeEditor() {
+  const home = useStore((s) => s.home);
+  const [draft, setDraft] = useState<PlacedItem[]>(() => home?.layout.map((i) => ({ ...i })) ?? []);
   const [sel, setSel] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [text, setText] = useState('');
-  const isMine = ownerId === me.id;
-  const path = isMine ? 'me' : String(ownerId);
+  if (!home) return null;
 
-  useEffect(() => {
-    setHome(null); setError('');
-    api<{ home: HomeView }>(`/api/home/${path}`).then((r) => setHome(r.home)).catch((e) => setError((e as Error).message));
-  }, [path]);
-
-  const layout = editing ? draft : home?.layout ?? [];
-  const placed = new Set(layout.map(itemKey));
+  const placed = new Set(draft.map(itemKey));
   const storage = FURNITURE.flatMap((f) => Array.from({ length: f.count }, (_, n) => ({ f, n }))).filter(({ f, n }) => !placed.has(itemKey({ type: f.id, n })));
-  const selItem = layout.find((i) => itemKey(i) === sel) ?? null;
-
-  const back = () => set({ view: 'lobby', homeOwner: null });
-  function startEdit() { if (!home) return; setDraft(home.layout.map((i) => ({ ...i }))); setEditing(true); setSel(null); }
+  const selItem = draft.find((i) => itemKey(i) === sel) ?? null;
+  const close = () => set({ homeEdit: false });
   function update(key: string, patch: Partial<PlacedItem>) { setDraft((d) => d.map((i) => (itemKey(i) === key ? { ...i, ...patch } : i))); }
   function place(type: string, n: number) {
-    // 빈 곳을 찾아 놓기 (방 가운데 근처부터)
     const spots: [number, number][] = [[0, 0.5], [1.2, 0.5], [-1.2, 0.5], [0, -1], [1.2, -1], [-1.2, -1], [2.4, 1.5], [-2.4, 1.5]];
     const spot = spots.find(([x, z]) => draft.every((i) => Math.hypot(i.x - x, i.z - z) > 0.8)) ?? [0, 0.5];
     const item = { type, n, x: spot[0], z: spot[1], rot: 0 };
@@ -138,155 +76,177 @@ export function Home() {
     setSaving(true);
     try {
       const r = await api<{ home: HomeView }>('/api/home/me/layout', { method: 'PUT', body: { layout: draft } });
-      setHome(r.home); setEditing(false); setSel(null);
+      set({ home: r.home, homeEdit: false });
+      setSpace('home', r.home.layout);
       toast('집 꾸미기를 저장했어요 🏠');
     } catch (e) { toast((e as Error).message, 'error'); } finally { setSaving(false); }
   }
+
+  return (
+    <div className="absolute inset-0 z-40 flex flex-col md:flex-row bg-cream">
+      <div className="relative h-[55%] md:h-full md:flex-1 min-w-0">
+        <Canvas camera={{ position: [4.2, 5.6, 7.6], fov: 40 }} dpr={[1, 2]}>
+          <color attach="background" args={['#fff4e8']} />
+          <hemisphereLight args={['#fffaf2', '#efe2cc', 2.0]} />
+          <directionalLight position={[3, 6, 4]} intensity={1.1} color="#fff6e8" />
+          <HomeRoom />
+          {draft.map((i) => (
+            <Furniture key={itemKey(i)} item={i} photo={home.owner.dogPhoto} editing selected={sel === itemKey(i)}
+              onSelect={() => setSel(itemKey(i))} onDragStart={() => setDragging(true)} />
+          ))}
+          <DragFloor active={dragging && !!sel}
+            onMove={(x, z) => sel && update(sel, { x: THREE.MathUtils.clamp(Math.round(x * 10) / 10, -W + 0.3, W - 0.3), z: THREE.MathUtils.clamp(Math.round(z * 10) / 10, -D + 0.3, D - 0.3) })}
+            onEnd={() => setDragging(false)} />
+          <OrbitControls enabled={!dragging} enablePan={false} target={[0, 0.6, 0]} minDistance={5} maxDistance={12} minPolarAngle={0.5} maxPolarAngle={1.25}
+            minAzimuthAngle={-0.2} maxAzimuthAngle={1.3} />
+        </Canvas>
+        <div className="absolute top-3 left-3 panel !rounded-full px-4 py-2 font-display">🛠️ 집 꾸미기</div>
+        <div className="absolute inset-x-2 bottom-2 panel p-2.5">
+          {selItem ? (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-display text-sm flex-1 min-w-[100px]">{FURNITURE_BY_ID.get(selItem.type)?.icon} {FURNITURE_BY_ID.get(selItem.type)?.label}</span>
+              <span className="text-[11px] text-cocoa-soft hidden sm:inline">끌어서 옮겨요</span>
+              <button className="btn btn-ghost px-3 min-h-[44px] text-sm" onClick={() => update(itemKey(selItem), { rot: (selItem.rot + 1) % 4 })}>↻ 회전</button>
+              <button className="btn btn-ghost px-3 min-h-[44px] text-sm" onClick={() => { setDraft((d) => d.filter((i) => itemKey(i) !== sel)); setSel(null); }}>📦 보관</button>
+            </div>
+          ) : <p className="text-xs text-cocoa-soft px-1">가구를 누르면 선택돼요. 선택한 가구는 끌어서 옮기고, 회전하거나 보관함에 넣을 수 있어요.</p>}
+        </div>
+      </div>
+      <aside className="md:w-[380px] flex-1 md:flex-none min-h-0 overflow-y-auto scroll-soft p-4 bg-cream-2/60">
+        <h2 className="font-display text-xl">📦 보관함 ({storage.length})</h2>
+        <p className="text-xs text-cocoa-soft mt-0.5">눌러서 방에 놓아 보세요.</p>
+        {storage.length === 0 && <p className="text-xs text-cocoa-soft mt-2">모든 가구를 꺼내 놓았어요.</p>}
+        <div className="grid grid-cols-3 gap-2 mt-2">
+          {storage.map(({ f, n }) => (
+            <button key={`${f.id}#${n}`} className="rounded-2xl bg-white p-2 text-center border-2 border-dashed border-[#e9d8c6] hover:border-[#f4776a] min-h-[64px]" onClick={() => place(f.id, n)}>
+              <div className="text-2xl">{f.icon}</div><div className="text-[11px] mt-0.5">{f.label}</div>
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button className="btn btn-ghost flex-1 py-3" onClick={close}>취소</button>
+          <button className="btn btn-coral flex-[2] py-3" disabled={saving} onClick={save}>{saving ? '저장 중…' : '저장하기'}</button>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+/** 집 안 상단 버튼 + 집 정보 패널 (좋아요·방명록·공개 범위·방문 신청 처리) */
+export function HomePanel() {
+  const home = useStore((s) => s.home);
+  const open = useStore((s) => s.homePanel);
+  const version = useStore((s) => s.visitRequestsVersion);
+  const [text, setText] = useState('');
+  const [requests, setRequests] = useState<{ visitorId: number; nickname: string; dogName: string; ts: number }[]>([]);
+  useEffect(() => {
+    if (home?.isOwner && !DEMO) api<{ requests: typeof requests }>('/api/home/me/visit-requests').then((r) => setRequests(r.requests)).catch(() => {});
+  }, [home?.isOwner, home?.ownerId, version]);
+  if (!home) return null;
+  const close = () => set({ homePanel: false });
+  const setHome = (h: HomeView) => set({ home: h });
+
   async function setVisibility(v: HomeVisibility) {
     try { const r = await api<{ home: HomeView }>('/api/home/me/visibility', { method: 'PUT', body: { visibility: v } }); setHome(r.home); }
     catch (e) { toast((e as Error).message, 'error'); }
   }
   async function like() {
-    if (!home) return;
-    try { const r = await api<{ liked: boolean; likes: number }>(`/api/home/${home.ownerId}/like`, { body: {} }); setHome({ ...home, likedByMe: r.liked, likes: r.likes }); }
+    try { const r = await api<{ liked: boolean; likes: number }>(`/api/home/${home!.ownerId}/like`, { body: {} }); setHome({ ...home!, likedByMe: r.liked, likes: r.likes }); }
     catch (e) { toast((e as Error).message, 'error'); }
   }
   async function writeGuestbook(e: FormEvent) {
     e.preventDefault();
-    if (!home || !text.trim()) return;
-    try { const r = await api<{ home: HomeView }>(`/api/home/${home.ownerId}/guestbook`, { body: { text } }); setHome(r.home); setText(''); }
+    if (!text.trim()) return;
+    try { const r = await api<{ home: HomeView }>(`/api/home/${home!.ownerId}/guestbook`, { body: { text } }); setHome(r.home); setText(''); }
     catch (err) { toast((err as Error).message, 'error'); }
   }
   async function removeEntry(id: number) {
-    if (!home || !confirm('이 방명록을 지울까요?')) return;
-    try { const r = await api<{ home: HomeView | null }>(`/api/home/${home.ownerId}/guestbook/${id}`, { method: 'DELETE' }); if (r.home) setHome(r.home); }
+    if (!confirm('이 방명록을 지울까요?')) return;
+    try { const r = await api<{ home: HomeView | null }>(`/api/home/${home!.ownerId}/guestbook/${id}`, { method: 'DELETE' }); if (r.home) setHome(r.home); }
+    catch (e) { toast((e as Error).message, 'error'); }
+  }
+  async function decide(visitorId: number, approve: boolean) {
+    try { const r = await api<{ requests: typeof requests }>(`/api/home/me/visit-requests/${visitorId}`, { body: { approve } }); setRequests(r.requests); toast(approve ? '방문을 승인했어요' : '방문 신청을 거절했어요'); }
     catch (e) { toast((e as Error).message, 'error'); }
   }
 
-  if (error) {
-    return (
-      <div className="absolute inset-0 z-30 grid place-items-center bg-cream p-6">
-        <div className="panel p-6 text-center max-w-sm">
-          <div className="text-4xl">🔒</div>
-          <p className="mt-2">{error}</p>
-          <button className="btn btn-peach px-5 py-2.5 mt-4" onClick={back}>로비로 돌아가기</button>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="absolute inset-0 z-30 flex flex-col md:flex-row bg-cream">
-      <div className="relative h-[52%] md:h-full md:flex-1 min-w-0">
-        <Canvas camera={{ position: [4.2, 5.6, 7.6], fov: 40 }} dpr={[1, 2]}>
-          <color attach="background" args={['#fff4e8']} />
-          <hemisphereLight args={['#fffaf2', '#efe2cc', 2.0]} />
-          <directionalLight position={[3, 6, 4]} intensity={1.1} color="#fff6e8" />
-          <Room />
-          {home && layout.map((i) => (
-            <Furniture key={itemKey(i)} item={i} photo={home.owner.dogPhoto} editing={editing} selected={sel === itemKey(i)}
-              onSelect={() => setSel(itemKey(i))} onDragStart={() => setDragging(true)} />
-          ))}
-          {home && !editing && <Residents home={home} layout={layout} />}
-          {editing && (
-            <DragFloor active={dragging && !!sel}
-              onMove={(x, z) => sel && update(sel, { x: THREE.MathUtils.clamp(Math.round(x * 10) / 10, -W + 0.3, W - 0.3), z: THREE.MathUtils.clamp(Math.round(z * 10) / 10, -D + 0.3, D - 0.3) })}
-              onEnd={() => setDragging(false)} />
-          )}
-          <OrbitControls enabled={!dragging} enablePan={false} target={[0, 0.6, 0]} minDistance={5} maxDistance={12} minPolarAngle={0.5} maxPolarAngle={1.25}
-            minAzimuthAngle={-0.2} maxAzimuthAngle={1.3} />
-        </Canvas>
-        <div className="absolute top-3 left-3 panel !rounded-full px-4 py-2 font-display max-w-[60%] truncate">
-          🏠 {home ? `${home.owner.nickname}네 집 · ${residenceLabel(home.residence)}` : '집에 들어가는 중…'}
-        </div>
-        <button className="absolute top-3 right-3 btn btn-ghost px-4 h-11 text-sm" onClick={back} disabled={editing}>← 로비</button>
-        {editing && (
-          <div className="absolute inset-x-2 bottom-2 panel p-2.5">
-            {selItem ? (
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-display text-sm flex-1 min-w-[100px]">{FURNITURE_BY_ID.get(selItem.type)?.icon} {FURNITURE_BY_ID.get(selItem.type)?.label}</span>
-                <span className="text-[11px] text-cocoa-soft hidden sm:inline">끌어서 옮겨요</span>
-                <button className="btn btn-ghost px-3 min-h-[44px] text-sm" onClick={() => update(itemKey(selItem), { rot: (selItem.rot + 1) % 4 })}>↻ 회전</button>
-                <button className="btn btn-ghost px-3 min-h-[44px] text-sm" onClick={() => { setDraft((d) => d.filter((i) => itemKey(i) !== sel)); setSel(null); }}>📦 보관</button>
-              </div>
-            ) : <p className="text-xs text-cocoa-soft px-1">가구를 누르면 선택돼요. 선택한 가구는 끌어서 옮기고, 회전하거나 보관함에 넣을 수 있어요.</p>}
-          </div>
-        )}
+    <>
+      <div className="absolute z-20 left-2 md:left-3 top-[62px] md:top-[78px] flex gap-2 flex-wrap max-w-[calc(100vw-16px)]">
+        <button className="btn btn-ghost px-4 min-h-[44px] text-sm" onClick={() => void joinPark('lobby-1')}>🚪 로비로 나가기</button>
+        {!open && <button className="btn btn-coral px-4 min-h-[44px] text-sm relative" onClick={() => set({ homePanel: true })}>
+          🏠 집 정보{requests.length > 0 && <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-[#e2604f] text-white text-[11px] grid place-items-center">{requests.length}</span>}
+        </button>}
+        {home.isOwner && <button className="btn btn-ghost px-4 min-h-[44px] text-sm" onClick={() => set({ homeEdit: true, homePanel: false })}>🛠️ 꾸미기</button>}
       </div>
-
-      <aside className="md:w-[400px] flex-1 md:flex-none min-h-0 overflow-y-auto scroll-soft p-4 bg-cream-2/60">
-        {!home ? <p className="text-center text-cocoa-soft py-8">불러오는 중…</p> : editing ? (
-          <>
-            <h2 className="font-display text-xl">🛠️ 집 꾸미기</h2>
-            <p className="text-xs text-cocoa-soft mt-0.5">보관함의 가구를 눌러 방에 놓아 보세요.</p>
-            <h3 className="font-display mt-3 mb-1.5">📦 보관함 ({storage.length})</h3>
-            {storage.length === 0 && <p className="text-xs text-cocoa-soft">모든 가구를 꺼내 놓았어요.</p>}
-            <div className="grid grid-cols-3 gap-2">
-              {storage.map(({ f, n }) => (
-                <button key={`${f.id}#${n}`} className="rounded-2xl bg-white p-2 text-center border-2 border-dashed border-[#e9d8c6] hover:border-[#f4776a] min-h-[64px]" onClick={() => place(f.id, n)}>
-                  <div className="text-2xl">{f.icon}</div><div className="text-[11px] mt-0.5">{f.label}</div>
-                </button>
-              ))}
+      {open && (
+        <aside className="absolute z-30 inset-x-0 bottom-0 max-h-[70%] md:inset-x-auto md:right-3 md:top-[74px] md:bottom-3 md:w-[400px] md:max-h-none panel !rounded-b-none md:!rounded-[22px] p-4 overflow-y-auto scroll-soft pop"
+          style={{ paddingBottom: 'calc(var(--safe-b) + 16px)' }}>
+          <div className="flex items-center gap-3">
+            {home.owner.dogPhoto
+              ? <img src={home.owner.dogPhoto} alt="" className="w-14 h-14 rounded-full object-cover border-2 border-white shadow" />
+              : <span className="w-14 h-14 rounded-full grid place-items-center text-2xl border-2 border-white shadow" style={{ background: home.owner.dog.coat }}>🐶</span>}
+            <div className="flex-1 min-w-0">
+              <div className="font-display text-lg truncate">{home.owner.nickname} · 🐶 {home.owner.dogName}</div>
+              <div className="text-xs text-cocoa-soft">멍글 아파트 {residenceLabel(home.residence)}</div>
             </div>
-            <div className="flex gap-2 mt-4 sticky bottom-0">
-              <button className="btn btn-ghost flex-1 py-3" onClick={() => { setEditing(false); setSel(null); }}>취소</button>
-              <button className="btn btn-coral flex-[2] py-3" disabled={saving} onClick={save}>{saving ? '저장 중…' : '저장하기'}</button>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="flex items-center gap-3">
-              {home.owner.dogPhoto
-                ? <img src={home.owner.dogPhoto} alt="" className="w-14 h-14 rounded-full object-cover border-2 border-white shadow" />
-                : <span className="w-14 h-14 rounded-full grid place-items-center text-2xl border-2 border-white shadow" style={{ background: home.owner.dog.coat }}>🐶</span>}
-              <div className="flex-1 min-w-0">
-                <div className="font-display text-lg truncate">{home.owner.nickname} · 🐶 {home.owner.dogName}</div>
-                <div className="text-xs text-cocoa-soft">멍글 아파트 {residenceLabel(home.residence)}</div>
-              </div>
-              <button className={`btn px-3 min-h-[44px] text-sm ${home.likedByMe ? 'btn-coral' : 'btn-ghost'}`} disabled={home.isOwner || DEMO} onClick={like}
-                title={home.isOwner ? '내 집에는 누를 수 없어요' : '좋아요'}>❤️ {home.likes}</button>
-            </div>
+            <button className={`btn px-3 min-h-[44px] text-sm ${home.likedByMe ? 'btn-coral' : 'btn-ghost'}`} disabled={home.isOwner || DEMO} onClick={like}
+              title={home.isOwner ? '내 집에는 누를 수 없어요' : '좋아요'}>❤️ {home.likes}</button>
+            <button className="btn btn-ghost w-11 h-11 shrink-0" onClick={close} aria-label="집 정보 닫기">✕</button>
+          </div>
 
-            {home.isOwner && (
-              <div className="mt-4 rounded-2xl bg-white p-3">
-                <button className="btn btn-coral w-full py-3" onClick={startEdit}>🛠️ 집 꾸미기</button>
-                <div className="font-display text-sm mt-3 mb-1.5">🔐 집 공개 범위</div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {HOME_VISIBILITY.map((v) => (
-                    <button key={v.id} onClick={() => setVisibility(v.id)}
-                      className={`rounded-xl px-2 py-2 text-left border-2 min-h-[44px] ${home.visibility === v.id ? 'border-[#f4776a] bg-[#fff1ec]' : 'border-transparent bg-cream-2'}`}>
-                      <div className="font-display text-sm">{v.label}</div>
-                      <div className="text-[10px] text-cocoa-soft leading-tight">{v.desc}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <h3 className="font-display text-lg mt-5">📖 방명록</h3>
-            {DEMO ? <p className="text-xs text-cocoa-soft mt-1">미리보기에서는 방명록·좋아요를 쓸 수 없어요. (게임 서버에서 동작)</p> : (
-              <form onSubmit={writeGuestbook} className="flex gap-2 mt-2">
-                <input className="field !py-2.5 !rounded-full text-[16px] md:text-sm min-h-[44px]" value={text} maxLength={GUESTBOOK_MAX_LEN}
-                  placeholder={home.isOwner ? '방문객에게 한마디' : `${home.owner.nickname}님께 한마디 남기기`} onChange={(e) => setText(e.target.value)} />
-                <button className="btn btn-peach px-4 text-sm shrink-0 min-h-[44px]" disabled={!text.trim()}>남기기</button>
-              </form>
-            )}
-            <div className="mt-3 space-y-2">
-              {home.guestbook.length === 0 && !DEMO && <p className="text-xs text-cocoa-soft text-center py-4">아직 방명록이 없어요. 첫 인사를 남겨 보세요!</p>}
-              {home.guestbook.map((g) => (
-                <div key={g.id} className="rounded-2xl bg-white px-3 py-2">
-                  <div className="flex items-center gap-2 text-xs">
-                    <b className="font-display text-sm">{g.nickname}</b><span className="text-cocoa-soft">🐶 {g.dogName} · {timeLabel(g.ts)}</span>
-                    <span className="flex-1" />
-                    {g.canDelete && <button className="text-cocoa-soft underline min-h-[32px]" onClick={() => removeEntry(g.id)}>삭제</button>}
-                  </div>
-                  <p className="text-sm mt-0.5 break-words">{g.text}</p>
+          {home.isOwner && requests.length > 0 && (
+            <div className="mt-3 rounded-2xl bg-white p-3">
+              <div className="font-display text-sm mb-1.5">📨 받은 방문 신청</div>
+              {requests.map((r) => (
+                <div key={r.visitorId} className="flex items-center gap-2 py-1">
+                  <span className="flex-1 text-sm">{r.nickname} · 🐶 {r.dogName} <span className="text-xs text-cocoa-soft">{timeLabel(r.ts)}</span></span>
+                  <button className="btn btn-peach px-3 min-h-[40px] text-xs" onClick={() => decide(r.visitorId, true)}>승인</button>
+                  <button className="btn btn-ghost px-3 min-h-[40px] text-xs" onClick={() => decide(r.visitorId, false)}>거절</button>
                 </div>
               ))}
+              <p className="text-[10px] text-cocoa-soft mt-1">승인하면 2시간 동안 들어올 수 있어요.</p>
             </div>
-          </>
-        )}
-      </aside>
-    </div>
+          )}
+
+          {home.isOwner && (
+            <div className="mt-3 rounded-2xl bg-white p-3">
+              <div className="font-display text-sm mb-1.5">🔐 집 공개 범위</div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {HOME_VISIBILITY.map((v) => (
+                  <button key={v.id} onClick={() => setVisibility(v.id)}
+                    className={`rounded-xl px-2 py-2 text-left border-2 min-h-[44px] ${home.visibility === v.id ? 'border-[#f4776a] bg-[#fff1ec]' : 'border-transparent bg-cream-2'}`}>
+                    <div className="font-display text-sm">{v.label}</div>
+                    <div className="text-[10px] text-cocoa-soft leading-tight">{v.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <h3 className="font-display text-lg mt-4">📖 방명록</h3>
+          {DEMO ? <p className="text-xs text-cocoa-soft mt-1">미리보기에서는 방명록·좋아요를 쓸 수 없어요. (게임 서버에서 동작)</p> : (
+            <form onSubmit={writeGuestbook} className="flex gap-2 mt-2">
+              <input className="field !py-2.5 !rounded-full text-[16px] md:text-sm min-h-[44px]" value={text} maxLength={GUESTBOOK_MAX_LEN}
+                placeholder={home.isOwner ? '방문객에게 한마디' : `${home.owner.nickname}님께 한마디 남기기`} onChange={(e) => setText(e.target.value)} />
+              <button className="btn btn-peach px-4 text-sm shrink-0 min-h-[44px]" disabled={!text.trim()}>남기기</button>
+            </form>
+          )}
+          <div className="mt-3 space-y-2">
+            {home.guestbook.length === 0 && !DEMO && <p className="text-xs text-cocoa-soft text-center py-4">아직 방명록이 없어요. 첫 인사를 남겨 보세요!</p>}
+            {home.guestbook.map((g) => (
+              <div key={g.id} className="rounded-2xl bg-white px-3 py-2">
+                <div className="flex items-center gap-2 text-xs">
+                  <b className="font-display text-sm">{g.nickname}</b><span className="text-cocoa-soft">🐶 {g.dogName} · {timeLabel(g.ts)}</span>
+                  <span className="flex-1" />
+                  {g.canDelete && <button className="text-cocoa-soft underline min-h-[32px]" onClick={() => removeEntry(g.id)}>삭제</button>}
+                </div>
+                <p className="text-sm mt-0.5 break-words">{g.text}</p>
+              </div>
+            ))}
+          </div>
+        </aside>
+      )}
+    </>
   );
 }

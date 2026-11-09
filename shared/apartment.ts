@@ -33,5 +33,5 @@ export interface UnitInfo {
   floor: number;
   occupied: boolean;
   /** 입주자 정보 (빈 집이거나, 서로 차단한 사이면 null) */
-  resident: { id: number; nickname: string; dogName: string; dogCoat: string; dogPhoto: string | null; mine: boolean } | null;
+  resident: { id: number; nickname: string; dogName: string; dogCoat: string; dogPhoto: string | null; mine: boolean; visibility?: string; neighbor?: string } | null;
 }

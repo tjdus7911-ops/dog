@@ -5,8 +5,9 @@ import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { local } from './local';
 import { readMove } from './input';
+import { space } from './space';
 
-export const cam = { yaw: 0, pitch: 0.42, dist: 7.5, lastUserInput: 0 };
+export const cam = { yaw: 0, pitch: 0.42, dist: 7.5, lastUserInput: 0, pendingReset: null as null | 'park' | 'lobby' | 'home' };
 const MIN_DIST = 3.2, MAX_DIST = 16, MIN_PITCH = 0.08, MAX_PITCH = 1.25;
 
 export function CameraRig() {
@@ -72,9 +73,18 @@ export function CameraRig() {
       cam.yaw = local.rot + Math.PI;
       initialized.current = true;
     }
+    if (cam.pendingReset && !local.teleport) {
+      // 장소 전환: 카메라 위치·방향 초기화 (실내는 열린 앞쪽 대각선에서 내려다봄)
+      const kind = cam.pendingReset;
+      cam.pendingReset = null;
+      if (kind === 'park') { cam.yaw = local.rot + Math.PI; cam.pitch = 0.42; cam.dist = 7.5; }
+      else { cam.yaw = 0.55; cam.pitch = 0.62; cam.dist = kind === 'home' ? 7.2 : 7.8; }
+      cam.lastUserInput = performance.now();
+      target.current.set(local.x, 1.05, local.z);
+    }
     // 앞으로 걷는 중이고 최근에 직접 회전하지 않았다면 천천히 아바타 뒤로 정렬 (뒤에서 따라오는 카메라)
     const mv = readMove();
-    if (mv.y > 0.5 && Math.abs(mv.x) < 0.3 && performance.now() - cam.lastUserInput > 1800) {
+    if (space.kind === 'park' && mv.y > 0.5 && Math.abs(mv.x) < 0.3 && performance.now() - cam.lastUserInput > 1800) {
       const desired = local.rot + Math.PI;
       let d = desired - cam.yaw;
       d = Math.atan2(Math.sin(d), Math.cos(d));

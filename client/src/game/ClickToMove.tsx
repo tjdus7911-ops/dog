@@ -3,7 +3,8 @@
 import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { WORLD_RADIUS, resolveCollision } from '@shared/world';
+import { WORLD_RADIUS } from '@shared/world';
+import { space } from './space';
 import { local } from './local';
 import { input } from './input';
 
@@ -31,11 +32,11 @@ export function ClickToMove() {
           if (e.delta > 8) return; // 카메라를 돌린 드래그는 이동으로 보지 않음
           if (input.locked) return; // 모바일 채팅 중에는 이동하지 않음
           e.stopPropagation();
-          const [x, z] = resolveCollision(e.point.x, e.point.z, 0.3);
+          const [x, z] = space.collide(e.point.x, e.point.z, 0.3);
           local.moveTarget = { x, z };
         }}
       >
-        <circleGeometry args={[WORLD_RADIUS + 2, 48]} />
+        <circleGeometry args={[space.kind === 'park' ? WORLD_RADIUS + 2 : 12, 48]} />
       </mesh>
       <group ref={marker} visible={false}>
         <mesh ref={ring} rotation={[-Math.PI / 2, 0, 0]} material={ringMat}>
