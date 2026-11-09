@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_DOG, DEFAULT_HUMAN, normalizeDog, normalizeHuman, type DogAvatar, type HumanAvatar } from '../../shared/avatar';
-import { DEFAULT_PRIVACY, type FriendStatus, type MyProfile, type PrivacySettings, type PublicProfile } from '../../shared/protocol';
+import { DEFAULT_PRIVACY, type FriendStatus, type MyProfile, type PrivacySettings, type PublicProfile, type Residence } from '../../shared/protocol';
 
 export const DATA_DIR = process.env.MUNGLE_DATA_DIR ?? path.resolve(import.meta.dirname, '../data');
 export const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
@@ -77,6 +77,16 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages(from_id, to_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_id, read_at);
 `);
+// 멍글 아파트 입주: 사용자당 1호실, (동, 호실) 중복 불가 — DB 제약으로 동시 요청에도 중복 배정을 막는다
+db.exec(`
+CREATE TABLE IF NOT EXISTS residences (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  building TEXT NOT NULL,
+  unit TEXT NOT NULL,
+  moved_in_at INTEGER NOT NULL,
+  UNIQUE (building, unit)
+);
+`);
 // 마이그레이션: 약관 동의 시각 (기존 계정은 0 = 동의 기록 없음)
 try { db.exec('ALTER TABLE users ADD COLUMN agreed_at INTEGER NOT NULL DEFAULT 0'); } catch { /* 이미 있음 */ }
 
@@ -132,9 +142,31 @@ export const findSession = (tokenHash: string) =>
 export const deleteSession = (tokenHash: string) => run('DELETE FROM sessions WHERE token_hash = ?', tokenHash);
 export const setBan = (userId: number, until: number) => run('UPDATE users SET banned_until = ? WHERE id = ?', until, userId);
 
+// ---------- 아파트 ----------
+export function getResidence(userId: number): Residence | null {
+  const r = one('SELECT building, unit FROM residences WHERE user_id = ?', userId);
+  return r ? { building: r.building, unit: r.unit } : null;
+}
+/** 입주: 이미 입주했거나 호실이 차 있으면 이유를 돌려준다 */
+export function moveIn(userId: number, building: string, unit: string): { ok: true } | { ok: false; reason: 'already' | 'taken' } {
+  if (getResidence(userId)) return { ok: false, reason: 'already' };
+  try {
+    run('INSERT INTO residences (user_id, building, unit, moved_in_at) VALUES (?,?,?,?)', userId, building, unit, Date.now());
+    return { ok: true };
+  } catch (e) {
+    if (getResidence(userId)) return { ok: false, reason: 'already' };
+    return { ok: false, reason: 'taken' };
+  }
+}
+export function listResidents(building: string) {
+  return all(`SELECT r.unit, r.user_id, p.nickname, p.dog_name, p.dog, p.dog_photo FROM residences r
+    JOIN profiles p ON p.user_id = r.user_id WHERE r.building = ?`, building);
+}
+
 // ---------- profiles ----------
 function toPublic(r: Row): PublicProfile {
   return {
+    residence: getResidence(r.user_id),
     id: r.user_id, nickname: r.nickname, dogName: r.dog_name, dogIntro: r.dog_intro, dogPhoto: r.dog_photo ?? null,
     // 이전 버전 데이터도 새 항목 기본값으로 정규화해서 내보냄
     human: normalizeHuman(JSON.parse(r.human)), dog: normalizeDog(JSON.parse(r.dog)),

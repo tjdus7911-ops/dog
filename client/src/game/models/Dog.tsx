@@ -21,7 +21,7 @@ export const DOG_STEP = { walk: 0.19, run: 0.4 };
 export function Dog({ avatar, driver, anchorRef }: { avatar: DogAvatar; driver: MutableRefObject<DogDriver>; anchorRef?: MutableRefObject<THREE.Object3D | null> }) {
   const key = JSON.stringify(avatar);
   const rig = useMemo(() => createDog(avatar), [key]); // eslint-disable-line react-hooks/exhaustive-deps
-  const sm = useRef({ move: 0, run: 0, sit: 0, greet: 0 });
+  const sm = useRef({ move: 0, run: 0, sit: 0, greet: 0 , lie: 0 });
 
   useLayoutEffect(() => {
     if (anchorRef) anchorRef.current = rig.anchor;
@@ -36,6 +36,7 @@ export function Dog({ avatar, driver, anchorRef }: { avatar: DogAvatar; driver: 
     s.run += ((d.anim === DogAnim.Run ? 1 : 0) - s.run) * k;
     s.sit += ((d.anim === DogAnim.Sit ? 1 : 0) - s.sit) * (1 - Math.exp(-dt * 6));
     s.greet += ((d.anim === DogAnim.Greet ? 1 : 0) - s.greet) * k;
+    s.lie += ((d.anim === DogAnim.Lie ? 1 : 0) - s.lie) * (1 - Math.exp(-dt * 4));
 
     const p = d.phase;
     const walkAmp = 0.65 * s.move * (1 - s.run);
@@ -49,10 +50,15 @@ export function Dog({ avatar, driver, anchorRef }: { avatar: DogAvatar; driver: 
     br.rotation.x = THREE.MathUtils.lerp(Math.sin(p) * walkAmp + Math.sin(p + Math.PI + 0.4) * runAmp, -1.25, s.sit);
     fl.rotation.x = THREE.MathUtils.lerp(fl.rotation.x, 0.15, s.sit);
     fr.rotation.x = THREE.MathUtils.lerp(fr.rotation.x, 0.15, s.sit);
+    // 엎드리기: 앞다리는 앞으로 쭉, 뒷다리는 접고 몸을 바닥으로
+    fl.rotation.x = THREE.MathUtils.lerp(fl.rotation.x, -1.45, s.lie);
+    fr.rotation.x = THREE.MathUtils.lerp(fr.rotation.x, -1.45, s.lie);
+    bl.rotation.x = THREE.MathUtils.lerp(bl.rotation.x, 1.35, s.lie);
+    br.rotation.x = THREE.MathUtils.lerp(br.rotation.x, 1.35, s.lie);
 
     const bob = Math.abs(Math.sin(p)) * (0.018 * s.move + 0.045 * s.run);
     const hop = s.greet * Math.max(0, Math.sin(t * 9)) * 0.05;
-    rig.body.position.y = rig.baseY + bob + hop - s.sit * 0.05 + Math.sin(t * 3) * 0.004;
+    rig.body.position.y = rig.baseY + bob + hop - s.sit * 0.05 - s.lie * (0.12 + rig.baseY) + Math.sin(t * 3) * 0.004 * (1 + s.lie);
     rig.body.position.z = -s.sit * 0.04;
     rig.body.rotation.x = -s.sit * 0.5 + Math.sin(p * 2) * 0.05 * s.run;
 
@@ -61,7 +67,7 @@ export function Dog({ avatar, driver, anchorRef }: { avatar: DogAvatar; driver: 
     rig.head.rotation.z = Math.sin(t * 0.9) * 0.06 * (1 - s.move);
 
     // 꼬리 흔들기 — 반가울수록 빠르게
-    const wag = 8 + s.greet * 14 + s.run * 4;
+    const wag = 8 + s.greet * 14 + s.run * 4 - s.lie * 3;
     rig.tail.rotation.y = Math.sin(t * wag) * (0.35 + s.greet * 0.35);
     rig.tongue.visible = s.run > 0.4 || s.greet > 0.4;
   });

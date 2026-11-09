@@ -23,11 +23,13 @@ export const newHumanDriver = (): HumanDriver => ({ anim: HumanAnim.Idle, phase:
 
 /** 한 걸음(반 주기)당 이동 거리 — 다리 길이에 맞춘 값 */
 export const HUMAN_STEP = { walk: 0.34, run: 0.6 };
+/** 앉을 때 몸을 들어 올리는 높이 (엉덩이가 벤치 좌석 위에 오도록) */
+export const SIT_LIFT = 0.17;
 
 export function Human({ avatar, driver, handRef }: { avatar: HumanAvatar; driver: MutableRefObject<HumanDriver>; handRef?: MutableRefObject<THREE.Object3D | null> }) {
   const key = JSON.stringify(avatar);
   const rig = useMemo(() => createHuman(avatar), [key]); // eslint-disable-line react-hooks/exhaustive-deps
-  const sm = useRef({ walk: 0, run: 0, wave: 0, air: 0 });
+  const sm = useRef({ walk: 0, run: 0, wave: 0, air: 0, sit: 0 });
 
   useLayoutEffect(() => {
     if (handRef) handRef.current = rig.hand;
@@ -42,6 +44,7 @@ export function Human({ avatar, driver, handRef }: { avatar: HumanAvatar; driver
     s.run += ((d.anim === HumanAnim.Run ? 1 : 0) - s.run) * k;
     s.wave += ((d.anim === HumanAnim.Wave || d.wave > 0 ? 1 : 0) - s.wave) * k;
     s.air += ((d.jumpY > 0.02 ? 1 : 0) - s.air) * (1 - Math.exp(-dt * 16));
+    s.sit += ((d.anim === HumanAnim.Sit ? 1 : 0) - s.sit) * (1 - Math.exp(-dt * 7));
 
     const swing = Math.sin(d.phase);
     const legAmp = 0.6 + s.run * 0.3;
@@ -66,7 +69,17 @@ export function Human({ avatar, driver, handRef }: { avatar: HumanAvatar; driver
     rig.head.rotation.x = -s.run * 0.12 + Math.sin(d.phase * 2) * 0.03 * s.walk;
 
     // 점프: 몸 전체를 띄우고 다리는 살짝 접고 팔은 위로
-    rig.root.position.y = d.jumpY;
+    rig.root.position.y = d.jumpY + s.sit * SIT_LIFT;
+    // 벤치에 앉기: 엉덩이를 좌석 높이로, 다리는 앞으로 뻗고 손은 무릎 위에 (발을 살짝 까딱)
+    if (s.sit > 0.01) {
+      const kick = Math.sin(t * 2.4) * 0.08;
+      rig.legL.rotation.x = THREE.MathUtils.lerp(rig.legL.rotation.x, -1.4 + kick, s.sit);
+      rig.legR.rotation.x = THREE.MathUtils.lerp(rig.legR.rotation.x, -1.4 - kick, s.sit);
+      rig.armL.rotation.x = THREE.MathUtils.lerp(rig.armL.rotation.x, -0.55, s.sit);
+      rig.armR.rotation.x = THREE.MathUtils.lerp(rig.armR.rotation.x, -0.6, s.sit);
+      rig.torso.rotation.x = THREE.MathUtils.lerp(rig.torso.rotation.x, -0.06, s.sit);
+      rig.body.position.y *= 1 - s.sit;
+    }
     if (s.air > 0.01) {
       rig.legL.rotation.x = THREE.MathUtils.lerp(rig.legL.rotation.x, -0.55, s.air);
       rig.legR.rotation.x = THREE.MathUtils.lerp(rig.legR.rotation.x, 0.35, s.air);

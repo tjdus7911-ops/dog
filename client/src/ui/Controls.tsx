@@ -3,6 +3,8 @@ import { useRef, useState } from 'react';
 import { input, isTouchDevice } from '../game/input';
 import { local } from '../game/local';
 import { DEMO } from '../demo';
+import { useStore } from '../store';
+import { standUp } from '../game/Players';
 
 export function Joystick() {
   const [knob, setKnob] = useState({ x: 0, y: 0 });
@@ -36,12 +38,16 @@ export function Joystick() {
 export function ActionBar() {
   const touch = isTouchDevice();
   const [run, setRun] = useState(false);
+  const seated = useStore((s) => s.seated);
   return (
     <div className="absolute z-10 right-2 md:right-3 bottom-3 flex flex-col items-end gap-2">
       {!touch && (
         <div className="name-tag !text-[11px] !px-3 !py-1.5 opacity-90 hidden md:block">
-          WASD·바닥 클릭 이동 · Space 점프 · Shift 달리기 · 드래그 카메라 회전 · 휠 확대/축소{DEMO ? '' : ' · Enter 채팅'}
+          WASD·바닥 클릭 이동 · 벤치 클릭 앉기 · Space 점프 · Shift 달리기 · 드래그 카메라 회전 · 휠 확대/축소{DEMO ? '' : ' · Enter 채팅'}
         </div>
+      )}
+      {seated && (
+        <button className="btn btn-coral px-5 py-3 text-base shadow-lg pop" onClick={standUp}>🧍 일어나기</button>
       )}
       <div className="flex gap-2">
         <Action icon="👋" label="인사하기" onClick={() => { local.waveUntil = performance.now() + 1800; }} />

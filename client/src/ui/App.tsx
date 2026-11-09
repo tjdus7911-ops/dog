@@ -10,10 +10,13 @@ import { DEMO, loadDemoProfile } from '../demo';
 
 const Game = lazy(() => import('./Game'));
 const AvatarEditor = lazy(() => import('./AvatarEditor'));
+const MoveIn = lazy(() => import('./Apartment').then((m) => ({ default: m.MoveIn })));
 
 export function App() {
   const me = useStore((s) => s.me);
   const onboarding = useStore((s) => s.onboarding);
+  const moveInLater = useStore((s) => s.moveInLater);
+  const needMoveIn = !!me && !onboarding && !me.residence && !moveInLater;
   const [booting, setBooting] = useState(!DEMO && !!tokenStore.get());
 
   useEffect(() => {
@@ -45,7 +48,7 @@ export function App() {
       ) : (
         <ErrorBoundary>
           <Suspense fallback={<Splash />}>
-            {onboarding ? <AvatarEditor mode="onboarding" /> : <Game />}
+            {onboarding ? <AvatarEditor mode="onboarding" /> : needMoveIn ? <MoveIn onDone={() => set({ moveInLater: true })} /> : <Game />}
           </Suspense>
         </ErrorBoundary>
       )}

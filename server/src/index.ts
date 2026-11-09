@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { Server } from 'socket.io';
 import * as repo from './db';
 import * as persist from './persist';
+import { APARTMENT_BUILDINGS, isValidUnit, unitsOf, type UnitInfo } from '../../shared/apartment';
 import { hashPassword, issueToken, requireAdmin, requireAuth, revokeToken, verifyPassword, type AuthedRequest } from './auth';
 import { setupRealtime } from './realtime';
 import { filterProfanity, RateLimiter, sanitize } from './moderation';
@@ -180,6 +181,38 @@ app.post('/api/dog-analysis', requireAuth, async (req, res) => {
     console.error(e);
     res.status(500).json({ error: 'AI 분석 중 오류가 발생했어요.' });
   }
+});
+
+// ---------- 멍글 아파트 ----------
+app.get('/api/apartment', requireAuth, (req, res) => {
+  const me = (req as AuthedRequest).userId;
+  const buildings = APARTMENT_BUILDINGS.map((b) => {
+    const residents = new Map(repo.listResidents(b.id).map((r) => [r.unit as string, r]));
+    const units: UnitInfo[] = unitsOf(b).map(({ unit, floor }) => {
+      const r = residents.get(unit);
+      const hiddenRes = r && r.user_id !== me && repo.eitherBlocked(me, r.user_id);
+      return {
+        unit, floor, occupied: !!r,
+        resident: r && !hiddenRes ? {
+          id: r.user_id, nickname: r.nickname, dogName: r.dog_name, dogCoat: (JSON.parse(r.dog)?.coat as string) ?? '#e6b47a',
+          dogPhoto: r.dog_photo ?? null, mine: r.user_id === me,
+        } : null,
+      };
+    });
+    return { ...b, units };
+  });
+  res.json({ buildings, mine: repo.getResidence(me) });
+});
+
+app.post('/api/apartment/move-in', requireAuth, (req, res) => {
+  const me = (req as AuthedRequest).userId;
+  const building = String(req.body?.building ?? '');
+  const unit = String(req.body?.unit ?? '');
+  if (!isValidUnit(building, unit)) return res.status(400).json({ error: '존재하지 않는 호실이에요.' });
+  const r = repo.moveIn(me, building, unit);
+  if (!r.ok) return res.status(409).json({ error: r.reason === 'already' ? '이미 입주한 집이 있어요.' : '방금 다른 주민이 입주한 호실이에요. 다른 호실을 골라 주세요.' });
+  rt.profileChanged(me);
+  res.json({ profile: repo.getMyProfile(me) });
 });
 
 // ---------- 운영 ----------

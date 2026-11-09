@@ -3,7 +3,7 @@ import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { BUBBLE_RANGE, DogAnim, GRAVITY, HumanAnim, JUMP_VELOCITY, RUN_SPEED, WALK_SPEED, type NetState, type PublicProfile } from '@shared/protocol';
-import { resolveCollision } from '@shared/world';
+import { SEAT_BY_ID, SEAT_REACH, resolveCollision } from '@shared/world';
 import { AvatarPair, type PairRefs } from './AvatarPair';
 import { HUMAN_STEP, newHumanDriver } from './models/Human';
 import { DOG_SCALE, DOG_STEP, newDogDriver } from './models/Dog';
@@ -12,7 +12,7 @@ import { input, readMove } from './input';
 import { cam } from './CameraRig';
 import { local } from './local';
 import { rendered, sample } from '../net/remote';
-import { sendState } from '../net/socket';
+import { leaveSeat, sendState, sitOnSeat } from '../net/socket';
 import { openProfile } from '../net/socket';
 import { useStore } from '../store';
 
@@ -36,6 +36,17 @@ function advancePhase(phase: number, moved: number, speed: number, walkStep: num
   return phase + (moved / step) * Math.PI;
 }
 
+/** 벤치에서 일어나기 (버튼·이동 입력 공통) */
+export function standUp() {
+  const id = local.seated;
+  if (!id) return;
+  const seat = SEAT_BY_ID.get(id);
+  local.seated = null;
+  local.seatGoal = null;
+  if (seat && Math.hypot(local.x - seat.x, local.z - seat.z) < 0.3) { local.x = seat.frontX; local.z = seat.frontZ; }
+  void leaveSeat();
+}
+
 export function LocalPlayer({ profile }: { profile: PublicProfile }) {
   const refs = usePairRefs();
   const brain = useMemo(() => {
@@ -43,7 +54,7 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
     b.place(local.dogX, local.dogZ, local.dogRot);
     return b;
   }, []);
-  const motion = useRef({ speed: 0, sendTimer: 0, lastSent: '', heartbeat: 0, stuck: 0, lastDist: Infinity });
+  const motion = useRef({ speed: 0, sendTimer: 0, lastSent: '', heartbeat: 0, stuck: 0, lastDist: Infinity, sitPending: false, detour: 0, detourSide: 1 });
   const dogScale = DOG_SCALE[profile.dog.size];
 
   useFrame((_, rawDt) => {
@@ -65,17 +76,56 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
     const rx = -fz, rz = fx;
     let dx = fx * mv.y + rx * mv.x, dz = fz * mv.y + rz * mv.x;
     let mag = Math.min(1, Math.hypot(dx, dz));
+    // 벤치에 앉아 있는 중: 이동 입력(키·조이스틱·바닥 클릭·점프)이 들어오면 일어난다
+    let seat = local.seated ? SEAT_BY_ID.get(local.seated) ?? null : null;
+    if (seat && (mag > 0.05 || local.moveTarget || input.jump)) {
+      input.jump = false;
+      local.x = seat.frontX; local.z = seat.frontZ;
+      standUp();
+      seat = null;
+    }
+    // 앉으러 가는 중: 좌석 앞에 도착하면 서버에 자리 요청 (직접 움직이면 취소)
+    if (local.seatGoal && !seat) {
+      const goal = SEAT_BY_ID.get(local.seatGoal);
+      if (!goal || mag > 0.05) local.seatGoal = null;
+      else if (!m.sitPending) {
+        const dFront = Math.hypot(goal.frontX - local.x, goal.frontZ - local.z);
+        const dSeat = Math.hypot(goal.x - local.x, goal.z - local.z);
+        if (dFront < 0.45 || (!local.moveTarget && dSeat < SEAT_REACH - 0.4)) {
+          m.sitPending = true;
+          local.moveTarget = null;
+          const id = goal.id;
+          sitOnSeat(id).then((ok) => {
+            m.sitPending = false;
+            if (local.seatGoal !== id) return;
+            local.seatGoal = null;
+            if (ok) local.seated = id;
+          });
+        } else if (!local.moveTarget) local.seatGoal = null; // 막혀서 못 감
+      }
+    }
     // 바닥 클릭 이동: 직접 조작하면 취소, 도착하거나 막혀서 못 가면 멈춤
     if (mag > 0.05) local.moveTarget = null;
     else if (local.moveTarget) {
       const tx = local.moveTarget.x - local.x, tz = local.moveTarget.z - local.z;
       const dist = Math.hypot(tx, tz);
-      if (dist < 0.25) { local.moveTarget = null; m.stuck = 0; m.lastDist = Infinity; }
+      if (dist < 0.25) { local.moveTarget = null; m.stuck = 0; m.lastDist = Infinity; m.detour = 0; }
       else {
-        m.stuck = dist < m.lastDist - 0.004 ? 0 : m.stuck + dt;
+        // 장애물(가로등·나무 등)에 막히면 옆으로 비켜 돌아가 보고, 그래도 못 가면 멈춘다
+        const progressed = dist < m.lastDist - 0.004;
+        m.stuck = progressed ? Math.max(0, m.stuck - dt * 0.5) : m.stuck + dt;
         m.lastDist = dist;
-        if (m.stuck > 0.6) { local.moveTarget = null; m.stuck = 0; m.lastDist = Infinity; }
-        else { dx = tx; dz = tz; mag = Math.min(1, dist / 0.6); }
+        if (m.detour > 0) m.detour -= dt;
+        else if (m.stuck > 0.3) { m.detour = 0.7; m.detourSide = -m.detourSide; }
+        if (m.stuck > 3) { local.moveTarget = null; m.stuck = 0; m.lastDist = Infinity; m.detour = 0; }
+        else {
+          dx = tx; dz = tz;
+          if (m.detour > 0) {
+            const ang = 1.1 * m.detourSide, c = Math.cos(ang), sn = Math.sin(ang);
+            [dx, dz] = [dx * c + dz * sn, -dx * sn + dz * c];
+          }
+          mag = Math.min(1, dist / 0.6);
+        }
       }
     }
     // 점프 (땅에 있을 때만)
@@ -101,7 +151,12 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
       local.x += Math.sin(local.rot) * m.speed * dt;
       local.z += Math.cos(local.rot) * m.speed * dt;
     }
-    [local.x, local.z] = resolveCollision(local.x, local.z, 0.3);
+    if (seat) {
+      // 좌석에 고정 (벤치 충돌 판정은 적용하지 않음)
+      local.x = seat.x; local.z = seat.z;
+      local.rot = turnToward(local.rot, seat.rot, dt * 10);
+      m.speed = 0;
+    } else [local.x, local.z] = resolveCollision(local.x, local.z, 0.3);
     const moved = Math.hypot(local.x - px, local.z - pz);
     const realSpeed = moved / Math.max(dt, 1e-4);
 
@@ -110,7 +165,7 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
     const now = performance.now();
     const waving = now < local.waveUntil;
     hd.jumpY = local.jumpY;
-    hd.anim = local.jumpY > 0 ? HumanAnim.Jump : realSpeed > WALK_SPEED * 1.3 ? HumanAnim.Run : realSpeed > 0.15 ? HumanAnim.Walk : waving ? HumanAnim.Wave : HumanAnim.Idle;
+    hd.anim = seat ? HumanAnim.Sit : local.jumpY > 0 ? HumanAnim.Jump : realSpeed > WALK_SPEED * 1.3 ? HumanAnim.Run : realSpeed > 0.15 ? HumanAnim.Walk : waving ? HumanAnim.Wave : HumanAnim.Idle;
     hd.wave = waving ? 1 : 0;
     local.humanAnim = hd.anim;
 
@@ -118,7 +173,8 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
     const others: [number, number, number][] = [];
     rendered.forEach((r, id) => others.push([id, r.dx, r.dz]));
     const dpx = brain.x, dpz = brain.z;
-    brain.update(dt, local.x, local.z, local.rot, realSpeed, others, now < local.sitUntil, dogScale);
+    brain.update(dt, local.x, local.z, local.rot, realSpeed, others, now < local.sitUntil, dogScale,
+      seat ? { x: seat.dogX, z: seat.dogZ, rot: seat.dogRot } : null);
     const dmoved = Math.hypot(brain.x - dpx, brain.z - dpz);
     const dd = refs.dogDriver.current;
     dd.phase = advancePhase(dd.phase, dmoved, dmoved / Math.max(dt, 1e-4), DOG_STEP.walk * dogScale, DOG_STEP.run * dogScale);
@@ -182,7 +238,7 @@ export function RemotePlayer({ profile }: { profile: PublicProfile }) {
     const dd = refs.dogDriver.current;
     dd.phase = advancePhase(dd.phase, dmoved, dmoved / dt, DOG_STEP.walk * scale, DOG_STEP.run * scale);
     dd.anim = da;
-    dd.look += ((da === DogAnim.Look || da === DogAnim.Sit ? Math.sin(performance.now() / 1100) * 0.7 : 0) - dd.look) * Math.min(1, dt * 3);
+    dd.look += ((da === DogAnim.Look || da === DogAnim.Sit || da === DogAnim.Lie ? Math.sin(performance.now() / 1100) * 0.7 : 0) - dd.look) * Math.min(1, dt * 3);
 
     refs.human.current.position.set(x, 0, z);
     refs.human.current.rotation.set(0, rot, 0);

@@ -3,6 +3,7 @@
 // AI 강아지 사진 분석은 Claude 앱 안에서 열었을 때 보는 사람의 Claude로 실행한다 (sample 기능).
 import { DEFAULT_DOG, DEFAULT_HUMAN, validateDog, validateHuman } from '@shared/avatar';
 import { DEFAULT_PRIVACY, type MyProfile } from '@shared/protocol';
+import { APARTMENT_BUILDINGS, isValidUnit, unitsOf } from '@shared/apartment';
 import { interpretDogFeatures, jsonPrompt, type DogPhotoKind } from '@shared/dogAnalysis';
 
 export const DEMO = import.meta.env.VITE_DEMO === '1';
@@ -14,13 +15,13 @@ export function loadDemoProfile(): { profile: MyProfile; fresh: boolean } {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const p = JSON.parse(raw);
-      return { profile: { ...p, human: validateHuman(p.human) ?? DEFAULT_HUMAN, dog: validateDog(p.dog) ?? DEFAULT_DOG }, fresh: false };
+      return { profile: { ...p, residence: p.residence ?? null, human: validateHuman(p.human) ?? DEFAULT_HUMAN, dog: validateDog(p.dog) ?? DEFAULT_DOG }, fresh: false };
     }
   } catch { /* 저장소 사용 불가 */ }
   return {
     fresh: true,
     profile: {
-      id: 1, nickname: '멍글이', dogName: '사슴이', dogIntro: '', dogPhoto: null,
+      id: 1, nickname: '멍글이', dogName: '사슴이', dogIntro: '', dogPhoto: null, residence: null,
       human: { ...DEFAULT_HUMAN }, dog: { ...DEFAULT_DOG }, privacy: DEFAULT_PRIVACY, role: 'user',
     },
   };
@@ -54,6 +55,31 @@ export async function demoApi(path: string, opts: { method?: string; body?: any 
   }
   if (path === '/api/me/dog-photo') {
     const next = { ...cur, dogPhoto: opts.method === 'DELETE' ? null : opts.body?.dataUrl ?? null };
+    saveDemoProfile(next);
+    return { profile: next };
+  }
+  // 멍글 아파트: 미리보기에서는 다른 주민 없이 내 호실만 (브라우저에 저장)
+  if (path === '/api/apartment') {
+    const mine = cur.residence;
+    return {
+      mine,
+      buildings: APARTMENT_BUILDINGS.map((b) => ({
+        ...b,
+        units: unitsOf(b).map(({ unit, floor }) => {
+          const isMine = !!mine && mine.building === b.id && mine.unit === unit;
+          return {
+            unit, floor, occupied: isMine,
+            resident: isMine ? { id: cur.id, nickname: cur.nickname, dogName: cur.dogName, dogCoat: cur.dog.coat, dogPhoto: cur.dogPhoto, mine: true } : null,
+          };
+        }),
+      })),
+    };
+  }
+  if (path === '/api/apartment/move-in') {
+    const { building, unit } = opts.body ?? {};
+    if (!isValidUnit(String(building), String(unit))) throw new Error('존재하지 않는 호실이에요.');
+    if (cur.residence) throw new Error('이미 입주한 집이 있어요.');
+    const next = { ...cur, residence: { building: String(building), unit: String(unit) } };
     saveDemoProfile(next);
     return { profile: next };
   }

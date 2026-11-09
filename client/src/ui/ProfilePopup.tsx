@@ -6,6 +6,7 @@ import { Human, newHumanDriver } from '../game/models/Human';
 import { set, useStore } from '../store';
 import { friendAction, openDm, report } from '../net/socket';
 import { Modal } from './common';
+import { residenceLabel } from '@shared/apartment';
 
 function SpinningHuman({ profile }: { profile: PublicProfile }) {
   const g = useRef<THREE.Group>(null!);
@@ -47,6 +48,7 @@ export function ProfilePopup() {
       <div className="px-5 pt-12 pb-5">
         <div className="font-display text-2xl">{p.nickname}</div>
         <div className="mt-1 text-cocoa-soft">🐶 <b className="text-cocoa">{p.dogName}</b>와(과) 산책 중</div>
+        {p.residence && <div className="mt-0.5 text-sm text-cocoa-soft">🏢 멍글 아파트 {residenceLabel(p.residence)} 주민</div>}
         {p.dogIntro && <p className="mt-2 text-sm bg-cream-2 rounded-2xl px-3 py-2">{p.dogIntro}</p>}
 
         <div className="mt-4 grid gap-2">

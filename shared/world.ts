@@ -14,7 +14,7 @@ export interface Box { x: number; z: number; hw: number; hd: number }
 export interface TreeDef { x: number; z: number; kind: 'cherry' | 'round' | 'pine'; scale: number; rot: number }
 export interface BenchDef { x: number; z: number; rot: number }
 export interface LampDef { x: number; z: number }
-export interface BuildingDef { x: number; z: number; w: number; d: number; rot: number; kind: 'doghouse' | 'cafe' | 'shop'; roof: string; wall: string }
+export interface BuildingDef { x: number; z: number; w: number; d: number; rot: number; kind: 'apartment' | 'cafe' | 'shop'; roof: string; wall: string }
 export interface FlowerBed { x: number; z: number; r: number }
 
 function mulberry32(seed: number) {
@@ -27,7 +27,8 @@ function mulberry32(seed: number) {
 }
 
 export const BUILDINGS: BuildingDef[] = [
-  { x: 0, z: -26, w: 7, d: 5.5, rot: 0, kind: 'doghouse', roof: '#e98a5e', wall: '#fff1dc' },
+  // 멍글 아파트 1동 (기존 '강아지 집' 자리) — 입구는 광장 쪽(+z)
+  { x: 0, z: -27.5, w: 10, d: 6, rot: 0, kind: 'apartment', roof: '#f39a7b', wall: '#fff1dc' },
   { x: -22, z: -13, w: 5, d: 4.5, rot: 0, kind: 'cafe', roof: '#8fb88a', wall: '#fbe9d4' },
   { x: 22, z: -13, w: 5, d: 4.5, rot: 0, kind: 'shop', roof: '#f4a6b8', wall: '#fff6e8' },
 ];
@@ -61,6 +62,32 @@ for (const a of [Math.PI / 4, (3 * Math.PI) / 4, (5 * Math.PI) / 4, (7 * Math.PI
   const r2 = RING_RADIUS + PATH_WIDTH / 2 + 0.8;
   BENCHES.push({ x: Math.sin(a + 0.3) * r2, z: Math.cos(a + 0.3) * r2, rot: a + 0.3 + Math.PI });
 }
+
+/** 벤치 좌석 — 벤치 하나에 2자리. 좌석 위치·방향과 강아지 대기 위치를 함께 정의 (서버 검증에도 사용) */
+export interface SeatDef { id: string; bench: number; x: number; z: number; rot: number; dogX: number; dogZ: number; dogRot: number; frontX: number; frontZ: number }
+/** 벤치 기준 좌표(lx: 오른쪽, lz: 앞쪽) → 월드 좌표 */
+function benchToWorld(b: BenchDef, lx: number, lz: number): [number, number] {
+  const c = Math.cos(b.rot), s = Math.sin(b.rot);
+  return [b.x + lx * c + lz * s, b.z - lx * s + lz * c];
+}
+export const SEATS: SeatDef[] = [];
+BENCHES.forEach((b, i) => {
+  for (const [k, lx] of [[0, -0.38], [1, 0.38]] as const) {
+    const [x, z] = benchToWorld(b, lx, -0.02);
+    const side = lx < 0 ? -1 : 1;
+    const [dogX, dogZ] = benchToWorld(b, lx + side * 0.2, 1.05);
+    const [frontX, frontZ] = benchToWorld(b, lx, 1.0);
+    SEATS.push({ id: `b${i}s${k}`, bench: i, x, z, rot: b.rot, dogX, dogZ, dogRot: b.rot + side * 0.35, frontX, frontZ });
+  }
+});
+export const SEAT_BY_ID = new Map(SEATS.map((s) => [s.id, s]));
+/** 좌석에 앉으려면 이 거리 안에 있어야 함 (서버 검증) */
+export const SEAT_REACH = 2.5;
+export const SEAT_HEIGHT = 0.46;
+
+/** 아파트 입구 (로비로 들어가는 지점) */
+export const APARTMENT = BUILDINGS.find((b) => b.kind === 'apartment')!;
+export const APARTMENT_ENTRANCE = { x: APARTMENT.x, z: APARTMENT.z + APARTMENT.d / 2 + 0.9, r: 1.8 };
 
 export const LAMPS: LampDef[] = [];
 for (const a of RADIAL_ANGLES) {

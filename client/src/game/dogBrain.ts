@@ -19,6 +19,8 @@ export class DogBrain {
   private greetTimer = 0;
   private greetCooldown = new Map<number, number>();
   private time = 0;
+  /** 보호자가 벤치에 앉아 있는 동안 대기 자리에서 보낸 시간 */
+  private restTime = 0;
 
   place(x: number, z: number, rot: number) {
     this.x = x; this.z = z; this.rot = rot; this.speed = 0; this.idleTime = 0; this.wanderTarget = null;
@@ -29,8 +31,10 @@ export class DogBrain {
    * @param ospeed 보호자 현재 속도
    * @param others 주변 강아지 [id, x, z]
    * @param sitCommand '앉아' 명령 중
+   * @param rest 보호자가 벤치에 앉았을 때 강아지가 기다릴 자리 (없으면 평소 산책)
    */
-  update(dt: number, ox: number, oz: number, orot: number, ospeed: number, others: [number, number, number][], sitCommand: boolean, scale: number) {
+  update(dt: number, ox: number, oz: number, orot: number, ospeed: number, others: [number, number, number][], sitCommand: boolean, scale: number,
+    rest: { x: number; z: number; rot: number } | null = null) {
     this.time += dt;
     const ownerMoving = ospeed > 0.2;
     const ownerRunning = ospeed > WALK_SPEED * 1.25;
@@ -42,6 +46,29 @@ export class DogBrain {
     const sx = Math.cos(orot), sz = -Math.sin(orot); // 보호자 기준 오른쪽(-x 방향이 모델 오른쪽)
     tx = ox - sx * side + Math.sin(orot) * ahead;
     tz = oz - sz * side + Math.cos(orot) * ahead;
+
+    // 벤치 대기: 지정 자리로 가서 앉았다가 엎드려 쉬기, 고개는 주변을 살피고 꼬리는 천천히
+    if (rest) {
+      this.wanderTarget = null;
+      const dx = rest.x - this.x, dz = rest.z - this.z;
+      const dist = Math.hypot(dx, dz);
+      const desired = dist < 0.08 ? 0 : Math.min(WALK_SPEED * 1.1, dist * 2.4);
+      this.speed += (desired - this.speed) * Math.min(1, dt * 6);
+      if (dist > 0.001 && this.speed > 0.01) {
+        const step = Math.min(dist, this.speed * dt);
+        this.x += (dx / dist) * step; this.z += (dz / dist) * step;
+        this.rot = turnToward(this.rot, Math.atan2(dx, dz), dt * 8);
+        this.restTime = 0;
+      } else {
+        this.rot = turnToward(this.rot, rest.rot, dt * 3);
+        this.restTime += dt;
+      }
+      this.anim = this.speed > 0.15 ? DogAnim.Walk : this.restTime < 3.5 ? DogAnim.Sit : DogAnim.Lie;
+      const lookTarget = this.anim === DogAnim.Walk ? 0 : Math.sin(this.time * 0.7) * 0.6;
+      this.look += (lookTarget - this.look) * Math.min(1, dt * 3);
+      return;
+    }
+    this.restTime = 0;
 
     // 인사: 가까운 다른 강아지 발견
     if (this.greetTimer > 0) this.greetTimer -= dt;

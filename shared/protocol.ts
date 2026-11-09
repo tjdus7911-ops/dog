@@ -25,7 +25,11 @@ export interface PublicProfile {
   dogPhoto: string | null;
   human: HumanAvatar;
   dog: DogAvatar;
+  /** 멍글 아파트 동·호실 (가상 공간 정보, 미입주 시 null) */
+  residence: Residence | null;
 }
+
+export interface Residence { building: string; unit: string }
 
 export interface MyProfile extends PublicProfile {
   privacy: PrivacySettings;
@@ -42,12 +46,14 @@ export interface ParkInfo {
 }
 
 /** 사람 애니메이션 상태 */
-export const HumanAnim = { Idle: 0, Walk: 1, Run: 2, Wave: 3, Jump: 4 } as const;
+export const HumanAnim = { Idle: 0, Walk: 1, Run: 2, Wave: 3, Jump: 4, Sit: 5 } as const;
 /** 점프: 초기 속도(m/s)·중력 — 내 화면과 다른 사람 화면이 같은 궤적을 그리도록 공용 */
 export const JUMP_VELOCITY = 4.4;
 export const GRAVITY = 15;
 /** 강아지 애니메이션 상태 */
-export const DogAnim = { Stand: 0, Walk: 1, Run: 2, Sit: 3, Look: 4, Greet: 5 } as const;
+export const DogAnim = { Stand: 0, Walk: 1, Run: 2, Sit: 3, Look: 4, Greet: 5, Lie: 6 } as const;
+/** 벤치 좌석 점유 현황: 좌석 id → 사용자 id */
+export type SeatMap = Record<string, number>;
 
 /**
  * 위치 패킷 (배열로 전송해 대역폭 절약)

@@ -4,6 +4,7 @@ import { joinPark } from '../net/socket';
 import { DogBadge } from './common';
 import { logout } from './App';
 import { DEMO, resetDemo } from '../demo';
+import { residenceLabel } from '@shared/apartment';
 
 export function TopBar() {
   const me = useStore((s) => s.me)!;
@@ -61,7 +62,10 @@ export function TopBar() {
         <button className="rounded-full" onClick={() => setMenuOpen(!menuOpen)} aria-label="내 메뉴"><DogBadge profile={me} size={44} /></button>
         {menuOpen && (
           <div className="absolute right-0 mt-2 panel p-2 w-52 pop" onClick={() => setMenuOpen(false)}>
-            <div className="px-3 py-2 text-sm"><b className="font-display">{me.nickname}</b> · 🐶 {me.dogName}</div>
+            <div className="px-3 py-2 text-sm"><b className="font-display">{me.nickname}</b> · 🐶 {me.dogName}
+              <div className="text-xs text-cocoa-soft mt-0.5">🏠 {me.residence ? residenceLabel(me.residence) : '아직 입주 전'}</div>
+            </div>
+            <MenuItem onClick={() => set({ view: 'lobby', panel: 'none', benchMenu: null })}>🏢 아파트 로비</MenuItem>
             <MenuItem onClick={() => set({ panel: 'avatar' })}>✨ 아바타·강아지 꾸미기</MenuItem>
             {DEMO ? <MenuItem onClick={resetDemo}>🔄 처음부터 다시 만들기</MenuItem> : <>
               <MenuItem onClick={() => set({ panel: 'settings' })}>🔒 개인정보·차단 설정</MenuItem>

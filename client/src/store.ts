@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type {
-  ChatMessage, DirectMessage, FriendEntry, FriendStatus, MyProfile, NotificationItem, ParkInfo, PublicProfile,
+  ChatMessage, DirectMessage, FriendEntry, FriendStatus, MyProfile, NotificationItem, ParkInfo, PublicProfile, SeatMap,
 } from '@shared/protocol';
 
 export type Panel = 'none' | 'friends' | 'avatar' | 'settings' | 'admin' | 'notifications';
@@ -35,6 +35,15 @@ interface State {
   reportTarget: PublicProfile | null;
   toasts: Toast[];
   chatOpen: boolean;
+
+  /** 벤치 좌석 점유 현황 (서버) / 열린 벤치 메뉴 / 내가 앉은 좌석 */
+  seats: SeatMap;
+  benchMenu: number | null;
+  seated: string | null;
+  /** 지금 보는 화면: 공원 / 아파트 로비 */
+  view: 'park' | 'lobby';
+  /** 입주 화면을 이번 접속에서 '나중에 하기'로 넘겼는지 */
+  moveInLater: boolean;
 }
 
 export const useStore = create<State>()(() => ({
@@ -59,6 +68,11 @@ export const useStore = create<State>()(() => ({
   reportTarget: null,
   toasts: [],
   chatOpen: true,
+  seats: {},
+  benchMenu: null,
+  seated: null,
+  view: 'park',
+  moveInLater: false,
 }));
 
 export const set = useStore.setState;

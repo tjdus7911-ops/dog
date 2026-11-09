@@ -9,6 +9,7 @@ import {
   RING_RADIUS, TREES, WORLD_RADIUS, isOnPath, type BuildingDef,
 } from '@shared/world';
 import { PALETTE, geo, mat } from './lowpoly';
+import { set } from '../store';
 
 interface Inst { p: [number, number, number]; r?: [number, number, number]; s?: [number, number, number] | number; c: string }
 
@@ -238,7 +239,10 @@ function Benches() {
   return (
     <group>
       {BENCHES.map((b, i) => (
-        <group key={i} position={[b.x, 0, b.z]} rotation={[0, b.rot, 0]}>
+        <group key={i} position={[b.x, 0, b.z]} rotation={[0, b.rot, 0]}
+          onClick={(e) => { if (e.delta > 8) return; e.stopPropagation(); set({ benchMenu: i }); }}
+          onPointerOver={(e) => { e.stopPropagation(); document.body.style.cursor = 'pointer'; }}
+          onPointerOut={() => { document.body.style.cursor = ''; }}>
           <mesh geometry={geo.box(1.5, 0.08, 0.45)} material={wood} position={[0, 0.42, 0]} />
           <mesh geometry={geo.box(1.5, 0.32, 0.07)} material={wood} position={[0, 0.66, -0.22]} rotation={[-0.12, 0, 0]} />
           {[-0.6, 0.6].map((x) => <mesh key={x} geometry={geo.box(0.08, 0.42, 0.4)} material={dark} position={[x, 0.21, 0]} />)}
@@ -291,6 +295,97 @@ function Fence() {
 }
 
 function Building({ b }: { b: BuildingDef }) {
+  if (b.kind === 'apartment') return <Apartment b={b} />;
+  return <SmallBuilding b={b} />;
+}
+
+/** 멍글 아파트 1동 — 둥근 모서리의 4층 파스텔 건물, 층마다 4호실 창문·발코니, 1층 로비 입구 */
+function Apartment({ b }: { b: BuildingDef }) {
+  const FLOORS = 4, FH = 1.55, BASE = 0.3;
+  const H = FLOORS * FH;
+  const wall = mat(b.wall), band = mat('#f7c9b4'), coral = mat(b.roof), sage = mat('#a9cfa0'), win = mat('#bfe3f5');
+  const winWarm = mat('#ffe6a8'), trim = mat('#ffffff'), wood = mat(PALETTE.woodDark), glass = mat('#d6eef7');
+  const W = b.w, D = b.d;
+  const cols = [-3.6, -1.2, 1.2, 3.6];
+  return (
+    <group position={[b.x, 0, b.z]} rotation={[0, b.rot, 0]}>
+      {/* 기단 */}
+      <mesh geometry={geo.box(W + 0.4, BASE, D + 0.4)} material={mat(PALETTE.stoneDark)} position={[0, BASE / 2, 0]} />
+      {/* 본체 + 둥근 모서리 기둥 */}
+      <mesh geometry={geo.box(W - 1.0, H, D)} material={wall} position={[0, BASE + H / 2, 0]} />
+      <mesh geometry={geo.box(W, H, D - 1.0)} material={wall} position={[0, BASE + H / 2, 0]} />
+      {[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz], i) => (
+        <mesh key={i} geometry={geo.cyl(0.5, 0.5, H, 10)} material={wall} position={[sx * (W / 2 - 0.5), BASE + H / 2, sz * (D / 2 - 0.5)]} />
+      ))}
+      {/* 층 띠 */}
+      {Array.from({ length: FLOORS }).map((_, f) => (
+        <mesh key={f} geometry={geo.box(W + 0.08, 0.12, D + 0.08)} material={f === 0 ? sage : band} position={[0, BASE + f * FH + 0.02, 0]} />
+      ))}
+      {/* 지붕: 코랄색 둥근 지붕 + 발바닥 간판 */}
+      <mesh geometry={geo.box(W + 0.3, 0.3, D + 0.3)} material={coral} position={[0, BASE + H + 0.15, 0]} />
+      <mesh geometry={geo.cyl(D / 2 - 0.2, D / 2 - 0.2, W - 1.6, 14)} material={coral} position={[0, BASE + H + 0.3, 0]} rotation={[0, 0, Math.PI / 2]} scale={[1, 1, 0.55]} />
+      <group position={[0, BASE + H + 1.2, D / 2 - 0.9]}>
+        <mesh geometry={geo.cyl(0.75, 0.75, 0.12, 12)} material={mat('#fff8ef')} rotation={[Math.PI / 2, 0, 0]} />
+        <mesh geometry={geo.cyl(0.26, 0.26, 0.14, 8)} material={coral} rotation={[Math.PI / 2, 0, 0]} position={[0, -0.12, 0.02]} />
+        {[[-0.3, 0.16], [-0.12, 0.35], [0.12, 0.35], [0.3, 0.16]].map(([x, y], i) => (
+          <mesh key={i} geometry={geo.cyl(0.09, 0.09, 0.14, 6)} material={coral} rotation={[Math.PI / 2, 0, 0]} position={[x, y, 0.02]} />
+        ))}
+      </group>
+      {/* 앞면: 2~4층은 호실 창문 + 발코니, 1층은 창문 2개 + 로비 입구 */}
+      {Array.from({ length: FLOORS }).map((_, f) => cols.map((x, c) => {
+        if (f === 0 && (c === 1 || c === 2)) return null;
+        const y = BASE + f * FH + FH * 0.55;
+        const warm = (f * 4 + c) % 3 === 0;
+        return (
+          <group key={`${f}-${c}`} position={[x, y, D / 2 + 0.02]}>
+            <mesh geometry={geo.box(1.0, 0.85, 0.08)} material={trim} />
+            <mesh geometry={geo.box(0.84, 0.7, 0.1)} material={warm ? winWarm : win} />
+            <mesh geometry={geo.box(0.06, 0.7, 0.12)} material={trim} />
+            {f > 0 && (
+              <group position={[0, -0.5, 0.28]}>
+                <mesh geometry={geo.box(1.25, 0.08, 0.55)} material={trim} />
+                <mesh geometry={geo.box(1.25, 0.3, 0.05)} material={c % 2 ? sage : band} position={[0, 0.17, 0.26]} />
+                {/* 화분 */}
+                <mesh geometry={geo.cyl(0.08, 0.06, 0.12, 6)} material={mat('#d98c4a')} position={[0.42, 0.1, 0.05]} />
+                <mesh geometry={geo.ico(0.1, 0)} material={mat(PALETTE.flower[(f + c) % 5])} position={[0.42, 0.22, 0.05]} />
+              </group>
+            )}
+          </group>
+        );
+      }))}
+      {/* 옆면 창문 */}
+      {[-1, 1].map((sx) => Array.from({ length: FLOORS }).map((_, f) => (
+        <group key={`${sx}-${f}`} position={[sx * (W / 2 + 0.02), BASE + f * FH + FH * 0.55, 0]} rotation={[0, sx * Math.PI / 2, 0]}>
+          <mesh geometry={geo.box(0.9, 0.8, 0.08)} material={trim} />
+          <mesh geometry={geo.box(0.74, 0.64, 0.1)} material={win} />
+        </group>
+      )))}
+      {/* 로비 입구: 유리문 + 둥근 차양 + 계단 */}
+      <group position={[0, BASE, D / 2]}>
+        <mesh geometry={geo.box(2.1, 1.85, 0.1)} material={trim} position={[0, 0.95, 0.03]} />
+        <mesh geometry={geo.box(0.9, 1.7, 0.12)} material={glass} position={[-0.47, 0.88, 0.05]} />
+        <mesh geometry={geo.box(0.9, 1.7, 0.12)} material={glass} position={[0.47, 0.88, 0.05]} />
+        {[-0.08, 0.08].map((x) => <mesh key={x} geometry={geo.box(0.04, 0.4, 0.16)} material={wood} position={[x, 0.9, 0.08]} />)}
+        <mesh geometry={geo.cyl(0.6, 0.6, 2.5, 10, )} material={coral} position={[0, 2.05, 0.45]} rotation={[0, 0, Math.PI / 2]} scale={[1, 1, 0.45]} />
+        {[-1.1, 1.1].map((x) => <mesh key={x} geometry={geo.cyl(0.07, 0.07, 1.9, 6)} material={trim} position={[x, 0.95, 0.75]} />)}
+        <mesh geometry={geo.box(2.6, 0.12, 0.6)} material={mat(PALETTE.stone)} position={[0, -0.24, 0.55]} />
+        <mesh geometry={geo.box(3.0, 0.12, 0.6)} material={mat(PALETTE.stoneDark)} position={[0, -0.24 - 0.1, 0.95]} />
+        {/* 입구 양옆 화단 */}
+        {[-1.7, 1.7].map((x) => (
+          <group key={x} position={[x, 0, 0.55]}>
+            <mesh geometry={geo.box(0.7, 0.35, 0.5)} material={mat('#e2cfae')} position={[0, 0.0, 0]} />
+            <mesh geometry={geo.ico(0.32, 0)} material={sage} position={[0, 0.3, 0]} />
+          </group>
+        ))}
+      </group>
+      <Html position={[0, BASE + 2.75, D / 2 + 0.6]} center distanceFactor={22} zIndexRange={[5, 0]}>
+        <div className="name-tag" style={{ fontSize: 13 }}>🏢 멍글 아파트 1동 · 로비 입구</div>
+      </Html>
+    </group>
+  );
+}
+
+function SmallBuilding({ b }: { b: BuildingDef }) {
   const wall = mat(b.wall), roof = mat(b.roof), wood = mat(PALETTE.woodDark), win = mat('#bfe3f5'), trim = mat('#ffffff');
   const h = 2.6;
   // 삼각 지붕: 3각 실린더를 눕혀 사용
@@ -322,21 +417,6 @@ function Building({ b }: { b: BuildingDef }) {
             <mesh key={i} geometry={geo.box((b.w - 0.6) / 6, 0.06, 0.8)} material={mat(i % 2 ? '#fff8ef' : '#f6c453')} position={[-(b.w - 0.6) / 2 + ((b.w - 0.6) / 6) * (i + 0.5), 0, 0.25]} rotation={[0.35, 0, 0]} />
           ))}
         </group>
-      )}
-      {b.kind === 'doghouse' && (
-        <>
-          {/* 지붕 위 발바닥 간판 */}
-          <group position={[0, 0.25 + h + 0.55, b.d / 2 + 0.05]}>
-            <mesh geometry={geo.cyl(0.62, 0.62, 0.1, 8)} material={mat('#fff8ef')} rotation={[Math.PI / 2, 0, 0]} />
-            <mesh geometry={geo.cyl(0.22, 0.22, 0.12, 6)} material={mat('#f39a7b')} rotation={[Math.PI / 2, 0, 0]} position={[0, -0.1, 0.02]} />
-            {[[-0.26, 0.14], [-0.1, 0.3], [0.1, 0.3], [0.26, 0.14]].map(([x, y], i) => (
-              <mesh key={i} geometry={geo.cyl(0.08, 0.08, 0.12, 5)} material={mat('#f39a7b')} rotation={[Math.PI / 2, 0, 0]} position={[x, y, 0.02]} />
-            ))}
-          </group>
-          <Html position={[0, 3.05, b.d / 2 + 0.3]} center distanceFactor={22} zIndexRange={[5, 0]}>
-            <div className="name-tag" style={{ fontSize: 13 }}>🏠 강아지 집 입구 · 준비 중</div>
-          </Html>
-        </>
       )}
       {b.kind === 'shop' && (
         <mesh geometry={geo.box(1.6, 0.4, 0.08)} material={mat('#fff8ef')} position={[0, 2.35, b.d / 2 - 0.08]} />

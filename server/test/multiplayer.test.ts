@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { io, type Socket } from 'socket.io-client';
+import { SEATS } from '../../shared/world';
 
 const PORT = 3999;
 const BASE = `http://localhost:${PORT}`;
@@ -115,6 +116,67 @@ async function main() {
     check('강아지 위치는 목줄 길이 이내로 제한', st2 && Math.hypot(st2.data[b.id][4] - st2.data[b.id][0], st2.data[b.id][5] - st2.data[b.id][1]) <= 4.01, st2?.data);
     b.s.emit('state', ['x', null]);
     check('잘못된 패킷 무시(서버 정상)', (await emit(b.s, 'park:list')).ok);
+
+    console.log('\n[벤치 앉기]');
+    const seat = SEATS[0];
+    const far = await emit(b.s, 'seat:sit', { seatId: seat.id });
+    check('멀리서는 앉기 거부', !far.ok && /가까이/.test(far.error));
+    // B를 벤치 앞으로 조금씩 이동 (서버 속도 검증 통과)
+    let bx = x + 0.4, bz = z;
+    for (let i = 0; i < 12 && Math.hypot(seat.frontX - bx, seat.frontZ - bz) > 0.1; i++) {
+      const dx = seat.frontX - bx, dz = seat.frontZ - bz, dd = Math.hypot(dx, dz), step = Math.min(dd, 1.6);
+      bx += (dx / dd) * step; bz += (dz / dd) * step;
+      b.s.emit('state', [bx, bz, 0, 1, bx + 0.8, bz, 0, 1]);
+      await sleep(320);
+    }
+    clear(a, b);
+    const sit = await emit(b.s, 'seat:sit', { seatId: seat.id });
+    await sleep(150);
+    check('벤치 앞에서 앉기 성공', sit.ok && sit.seatId === seat.id);
+    check('다른 사용자에게 좌석 점유 전파', got(a, 'seats', (m) => m[seat.id] === b.id));
+    check('이미 앉은 자리는 다른 사용자가 선택 불가', !(await emit(a.s, 'seat:sit', { seatId: seat.id })).ok);
+    check('없는 좌석 거부', !(await emit(b.s, 'seat:sit', { seatId: 'nope' })).ok);
+    clear(a, b);
+    b.s.emit('state', [seat.x, seat.z, seat.rot, 5, seat.dogX, seat.dogZ, seat.dogRot, 6]);
+    await sleep(350);
+    const sst = a.events.find((e) => e.ev === 'states' && e.data[b.id]);
+    check('앉기·엎드리기 상태 동기화', sst && sst.data[b.id][3] === 5 && sst.data[b.id][7] === 6, sst?.data);
+    clear(a, b);
+    await emit(b.s, 'seat:leave');
+    await sleep(150);
+    check('일어나면 좌석 해제', got(a, 'seats', (m) => m[seat.id] === undefined));
+    clear(a, b);
+    b.s.emit('state', [seat.frontX, seat.frontZ, 0, 5, seat.frontX + 0.8, seat.frontZ, 0, 0]);
+    await sleep(350);
+    const nst = a.events.find((e) => e.ev === 'states' && e.data[b.id]);
+    check('좌석 없이 앉기 상태를 보내면 서버가 무시', nst && nst.data[b.id][3] === 0, nst?.data);
+    await emit(b.s, 'seat:sit', { seatId: seat.id });
+    clear(a);
+    b.s.disconnect();
+    await sleep(200);
+    check('연결 종료 시 좌석 자동 해제', got(a, 'seats', (m) => m[seat.id] === undefined));
+    b.s.connect();
+    await new Promise<void>((r) => b.s.once('connect', () => r()));
+    await emit(b.s, 'park:join', { parkId: 'central-1' });
+
+    console.log('\n[멍글 아파트 입주]');
+    const apt0 = await api('/api/apartment', undefined, a.token, 'GET');
+    check('아파트 1동 4층×4호 = 16호실', apt0.status === 200 && apt0.body.buildings[0].units.length === 16 && apt0.body.buildings[0].units.every((u: any) => !u.occupied));
+    const mvA = await api('/api/apartment/move-in', { building: '1', unit: '302' }, a.token);
+    check('호실 선택 후 입주 확정', mvA.status === 200 && mvA.body.profile.residence?.unit === '302');
+    check('이미 배정된 호실은 다른 사용자가 선택 불가', (await api('/api/apartment/move-in', { building: '1', unit: '302' }, b.token)).status === 409);
+    check('한 사용자는 한 호실만', (await api('/api/apartment/move-in', { building: '1', unit: '101' }, a.token)).status === 409);
+    check('없는 호실 거부', (await api('/api/apartment/move-in', { building: '1', unit: '999' }, b.token)).status === 400 && (await api('/api/apartment/move-in', { building: '9', unit: '101' }, b.token)).status === 400);
+    const [r1, r2] = await Promise.all([
+      api('/api/apartment/move-in', { building: '1', unit: '401' }, b.token),
+      api('/api/apartment/move-in', { building: '1', unit: '401' }, c.token),
+    ]);
+    check('같은 호실 동시 요청 시 한 명만 입주', [r1.status, r2.status].sort().join() === '200,409');
+    const apt1 = await api('/api/apartment', undefined, c.token, 'GET');
+    const u302 = apt1.body.buildings[0].units.find((u: any) => u.unit === '302');
+    check('안내판에 호실별 강아지 이름 표시', u302.occupied && u302.resident?.dogName === '사슴이' && !u302.resident.mine);
+    const profA = await emit(c.s, 'profile:get', { userId: a.id });
+    check('프로필에 동·호실 표시', profA.ok && profA.profile.residence?.unit === '302');
 
     console.log('\n[정원 제한]');
     const jc = await emit(c.s, 'park:join', { parkId: 'central-1' });

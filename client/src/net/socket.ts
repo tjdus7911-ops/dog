@@ -6,7 +6,7 @@ import { clearRemotes, pushSnapshot, removeRemote } from './remote';
 import { local } from '../game/local';
 import { DEMO } from '../demo';
 import type {
-  ChatMessage, DirectMessage, FriendEntry, FriendStatus, NetState, ParkInfo, PlayerSnapshot, PublicProfile,
+  ChatMessage, DirectMessage, FriendEntry, FriendStatus, NetState, ParkInfo, PlayerSnapshot, PublicProfile, SeatMap,
 } from '@shared/protocol';
 
 let socket: Socket | null = null;
@@ -56,6 +56,12 @@ export function connect() {
       s.disconnect();
       set({ connection: 'kicked', kickReason: e.message === 'banned' ? '이용이 정지된 계정이에요.' : '로그인이 만료되었어요. 다시 로그인해 주세요.' });
     }
+  });
+  s.on('seats', (seats: SeatMap) => {
+    set({ seats });
+    // 서버에서 내 자리가 해제됐다면(멀리 이동 등) 로컬 상태도 정리
+    const me = get().me?.id;
+    if (local.seated && seats[local.seated] !== me) { local.seated = null; set({ seated: null }); }
   });
   s.on('kicked', ({ reason }: { reason: string }) => {
     set({ connection: 'kicked', kickReason: reason, players: {}, park: null });
@@ -138,7 +144,7 @@ export function disconnect() {
 
 // ---------- 동작 ----------
 export async function joinPark(parkId?: string) {
-  const res = await request<{ park: ParkInfo; spawn: NetState; players: PlayerSnapshot[] }>('park:join', parkId ? { parkId } : undefined);
+  const res = await request<{ park: ParkInfo; spawn: NetState; players: PlayerSnapshot[]; seats?: SeatMap }>('park:join', parkId ? { parkId } : undefined);
   if (!res.ok) {
     toast(res.error, 'error');
     if (!get().park) {
@@ -151,10 +157,25 @@ export async function joinPark(parkId?: string) {
   const players: Record<number, PublicProfile> = {};
   for (const p of res.players) { players[p.profile.id] = p.profile; pushSnapshot(p.profile.id, p.state); }
   local.teleport = res.spawn;
-  set({ park: res.park, players, chat: [], bubbles: {} });
+  local.seated = null; local.seatGoal = null;
+  set({ park: res.park, players, chat: [], bubbles: {}, seats: res.seats ?? {}, seated: null, benchMenu: null });
   const list = await request<{ parks: ParkInfo[] }>('park:list');
   if (list.ok) set({ parks: list.parks });
   return true;
+}
+
+/** 벤치 좌석에 앉기 (서버가 거리·빈자리 확인) */
+export async function sitOnSeat(seatId: string) {
+  if (DEMO) { set({ seated: seatId, seats: { [seatId]: get().me?.id ?? 1 } }); return true; }
+  const res = await request<{ seatId: string }>('seat:sit', { seatId });
+  if (!res.ok) { toast(res.error, 'error'); return false; }
+  set({ seated: seatId });
+  return true;
+}
+export async function leaveSeat() {
+  set({ seated: null });
+  if (DEMO) { set({ seats: {} }); return; }
+  await request('seat:leave');
 }
 
 export async function sendChat(text: string) {

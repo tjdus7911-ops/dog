@@ -5,10 +5,10 @@ import * as repo from './db';
 import { userFromToken } from './auth';
 import { filterProfanity, RateLimiter, sanitize, SpamGuard } from './moderation';
 import {
-  CHAT_MAX_LEN, NET_TICK_MS, PARKS, RUN_SPEED,
-  type ChatMessage, type FriendEntry, type NetState, type PlayerSnapshot, type PublicProfile,
+  CHAT_MAX_LEN, HumanAnim, NET_TICK_MS, PARKS, RUN_SPEED,
+  type ChatMessage, type FriendEntry, type NetState, type PlayerSnapshot, type PublicProfile, type SeatMap,
 } from '../../shared/protocol';
-import { WORLD_RADIUS, spawnPoint } from '../../shared/world';
+import { SEAT_BY_ID, SEAT_REACH, WORLD_RADIUS, spawnPoint } from '../../shared/world';
 
 const CAPACITY = Number(process.env.MUNGLE_PARK_CAPACITY ?? 30);
 const REPORT_REASONS = ['욕설/비하', '도배/스팸', '불쾌한 닉네임/사진', '사칭/사기', '기타'];
@@ -28,6 +28,8 @@ interface Room {
   players: Map<number, Player>;
   /** 신고 시 맥락으로 첨부할 최근 채팅 */
   recentChat: ChatMessage[];
+  /** 벤치 좌석 점유: 좌석 id → 사용자 id */
+  seats: Map<string, number>;
 }
 
 interface Session {
@@ -40,7 +42,7 @@ interface Session {
 }
 
 export function setupRealtime(io: Server) {
-  const rooms = new Map<string, Room>(PARKS.map((p) => [p.id, { id: p.id, name: p.name, players: new Map(), recentChat: [] }]));
+  const rooms = new Map<string, Room>(PARKS.map((p) => [p.id, { id: p.id, name: p.name, players: new Map(), recentChat: [], seats: new Map() }]));
   const sessions = new Map<number, Session>();
   const spam = new SpamGuard();
   const dmSpam = new SpamGuard(8, 10000, 15000);
@@ -74,9 +76,18 @@ export function setupRealtime(io: Server) {
     for (const fid of repo.friendIds(userId)) sessions.get(fid)?.socket.emit('presence', p);
   }
 
+  /** 사용자가 앉아 있던 좌석을 비우고 방에 알림 */
+  function releaseSeat(room: Room, userId: number) {
+    let changed = false;
+    for (const [seat, uid] of room.seats) if (uid === userId) { room.seats.delete(seat); changed = true; }
+    if (changed) io.to(room.id).emit('seats', Object.fromEntries(room.seats) satisfies SeatMap);
+    return changed;
+  }
+
   function leavePark(s: Session) {
     if (!s.parkId) return;
     const room = rooms.get(s.parkId)!;
+    releaseSeat(room, s.userId);
     room.players.delete(s.userId);
     s.socket.leave(room.id);
     io.to(room.id).emit('players:leave', { id: s.userId });
@@ -154,7 +165,7 @@ export function setupRealtime(io: Server) {
       emitToRoomFiltered(room, userId, 'players:join', { profile, state } satisfies PlayerSnapshot);
       io.emit('park:count', parkInfo(room));
       notifyFriendsPresence(userId);
-      okAck(ack, { park: parkInfo(room), spawn: state, players: others });
+      okAck(ack, { park: parkInfo(room), spawn: state, players: others, seats: Object.fromEntries(room.seats) satisfies SeatMap });
     });
 
     socket.on('park:leave', (_: unknown, ack: unknown) => { leavePark(session); notifyFriendsPresence(userId); okAck(ack); });
@@ -181,9 +192,37 @@ export function setupRealtime(io: Server) {
       const dd = Math.hypot(dx - x, dz - z);
       if (dd > 4) { dx = x + ((dx - x) / dd) * 4; dz = z + ((dz - z) / dd) * 4; }
       const round = (v: number) => Math.round(v * 100) / 100;
-      p.state = [round(x), round(z), round(rot), ha >= 0 && ha <= 4 ? ha | 0 : 0, round(dx), round(dz), round(drot), da >= 0 && da <= 5 ? da | 0 : 0];
+      // 앉기 상태는 실제로 좌석을 차지한 경우만 인정, 좌석에서 멀어지면 자리 해제
+      const room = rooms.get(session.parkId)!;
+      const seatId = [...room.seats].find(([, uid]) => uid === userId)?.[0];
+      const seat = seatId ? SEAT_BY_ID.get(seatId) : undefined;
+      if (seat && Math.hypot(x - seat.x, z - seat.z) > 1.2) releaseSeat(room, userId);
+      const seated = !!seat && room.seats.get(seat.id) === userId;
+      let anim = ha >= 0 && ha <= 5 ? ha | 0 : 0;
+      if (anim === HumanAnim.Sit && !seated) anim = 0;
+      p.state = [round(x), round(z), round(rot), anim, round(dx), round(dz), round(drot), da >= 0 && da <= 6 ? da | 0 : 0];
       p.lastTs = now;
       p.dirty = true;
+    });
+
+    // ---------- 벤치 앉기 ----------
+    socket.on('seat:sit', (data: { seatId?: unknown } | undefined, ack: unknown) => {
+      if (!session.parkId) return fail(ack, '공원에 입장한 뒤 앉을 수 있어요.');
+      const room = rooms.get(session.parkId)!;
+      const p = room.players.get(userId);
+      const seat = typeof data?.seatId === 'string' ? SEAT_BY_ID.get(data.seatId) : undefined;
+      if (!p || !seat) return fail(ack, '존재하지 않는 자리예요.');
+      if (Math.hypot(p.state[0] - seat.x, p.state[1] - seat.z) > SEAT_REACH) return fail(ack, '벤치에 조금 더 가까이 가 주세요.');
+      const owner = room.seats.get(seat.id);
+      if (owner !== undefined && owner !== userId) return fail(ack, '이미 다른 사람이 앉아 있는 자리예요.');
+      for (const [sid, uid] of room.seats) if (uid === userId) room.seats.delete(sid); // 다른 자리에 앉아 있었다면 옮김
+      room.seats.set(seat.id, userId);
+      io.to(room.id).emit('seats', Object.fromEntries(room.seats) satisfies SeatMap);
+      okAck(ack, { seatId: seat.id });
+    });
+    socket.on('seat:leave', (_: unknown, ack: unknown) => {
+      if (session.parkId) releaseSeat(rooms.get(session.parkId)!, userId);
+      okAck(ack);
     });
 
     // ---------- 공개 채팅 ----------
