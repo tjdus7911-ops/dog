@@ -85,6 +85,13 @@ export async function demoApi(path: string, opts: { method?: string; body?: any 
     return { profile: next };
   }
   // 우리 집 (미리보기: 내 집만, 브라우저에 저장)
+  if (path.startsWith('/api/home/') && path.endsWith('/access')) {
+    if (!cur.residence || path !== `/api/home/${cur.id}/access`) throw new Error('미리보기에서는 다른 집에 방문할 수 없어요.');
+    return {
+      allowed: true, reason: null, canRequest: false, request: null, visibility: 'public', neighbor: 'unavailable',
+      owner: { id: cur.id, nickname: cur.nickname, dogName: cur.dogName, dogIntro: cur.dogIntro, dogPhoto: cur.dogPhoto, dog: cur.dog, residence: cur.residence },
+    };
+  }
   if (path.startsWith('/api/home/')) {
     if (!cur.residence) throw new Error('먼저 아파트에 입주해 주세요.');
     const KEYH = 'mungle.demo.home';
