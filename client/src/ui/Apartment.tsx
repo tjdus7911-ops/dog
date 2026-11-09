@@ -30,7 +30,7 @@ function useApartment() {
 }
 
 /** 층별 호실 격자 (위층부터). selectable이면 빈 집을 고를 수 있다 */
-function UnitGrid({ b, selected, onSelect, selectable }: { b: BuildingData; selected?: string | null; onSelect?: (u: string) => void; selectable: boolean }) {
+function UnitGrid({ b, selected, onSelect, selectable, onVisit }: { b: BuildingData; selected?: string | null; onSelect?: (u: string) => void; selectable: boolean; onVisit?: (userId: number) => void }) {
   const floors = useMemo(() => {
     const m = new Map<number, UnitInfo[]>();
     for (const u of b.units) m.set(u.floor, [...(m.get(u.floor) ?? []), u]);
@@ -45,13 +45,16 @@ function UnitGrid({ b, selected, onSelect, selectable }: { b: BuildingData; sele
             {units.map((u) => {
               const mine = u.resident?.mine;
               const canPick = selectable && !u.occupied;
+              const canVisit = !selectable && !!onVisit && !!u.resident;
               const isSel = selected === u.unit;
               return (
-                <button key={u.unit} type="button" disabled={!canPick} onClick={() => canPick && onSelect?.(u.unit)}
+                <button key={u.unit} type="button" disabled={!canPick && !canVisit}
+                  onClick={() => { if (canPick) onSelect?.(u.unit); else if (canVisit) onVisit!(u.resident!.id); }}
+                  title={canVisit ? (u.resident!.mine ? '우리 집으로 가기' : '이 집 방문하기') : undefined}
                   className={`relative rounded-2xl px-2 py-2 text-left min-h-[64px] border-2 transition ${
                     isSel ? 'border-[#f4776a] bg-[#fff1ec] shadow-[0_3px_10px_rgba(244,119,106,.25)]'
                       : mine ? 'border-[#a9cfa0] bg-sage-soft'
-                      : u.occupied ? 'border-transparent bg-white'
+                      : u.occupied ? `border-transparent bg-white ${canVisit ? 'hover:border-[#f4776a] active:scale-[.98]' : ''}`
                       : selectable ? 'border-dashed border-[#e9d8c6] bg-white/70 hover:border-[#f4776a]' : 'border-dashed border-[#efe2d4] bg-white/50'
                   } ${!canPick && selectable && !mine ? 'cursor-not-allowed' : ''}`}>
                   <div className="font-display text-sm leading-none">{u.unit}호{mine && <span className="ml-1 text-[11px] text-sage-deep">(우리 집)</span>}</div>
@@ -272,7 +275,10 @@ export function Lobby() {
             <div className="mt-3 rounded-2xl bg-white p-3 flex items-center gap-3">
               <span className="text-2xl">🏠</span>
               {me.residence ? (
-                <div className="flex-1"><div className="font-display">우리 집 · {residenceLabel(me.residence)}</div><div className="text-xs text-cocoa-soft">{me.dogName}와(과) 함께 살고 있어요</div></div>
+                <>
+                  <div className="flex-1"><div className="font-display">우리 집 · {residenceLabel(me.residence)}</div><div className="text-xs text-cocoa-soft">{me.dogName}와(과) 함께 살고 있어요</div></div>
+                  <button className="btn btn-coral px-4 min-h-[44px] text-sm" onClick={() => set({ view: 'home', homeOwner: me.id })}>우리 집 가기</button>
+                </>
               ) : (
                 <>
                   <div className="flex-1 text-sm">아직 입주하지 않았어요.</div>
@@ -282,10 +288,11 @@ export function Lobby() {
             </div>
             {error && <p className="text-sm text-[#c4553a] bg-[#fff0ec] rounded-xl px-3 py-2 mt-3">{error}</p>}
             {!data && !error && <p className="text-cocoa-soft py-6 text-center">불러오는 중…</p>}
-            {b && <div className="mt-3"><UnitGrid b={b} selectable={false} /></div>}
+            {b && <div className="mt-3"><UnitGrid b={b} selectable={false} onVisit={(id) => set({ view: 'home', homeOwner: id })} /></div>}
+            {b && <p className="text-[11px] text-cocoa-soft mt-2">주민이 사는 호실을 누르면 그 집에 방문해요. (집주인이 정한 공개 범위에 따라 들어갈 수 있어요)</p>}
             {DEMO && <p className="text-[11px] text-cocoa-soft mt-3">미리보기에서는 다른 주민 없이 내 집만 표시돼요.</p>}
             <div className="mt-4 rounded-2xl border-2 border-dashed border-[#e9d8c6] p-3 text-xs text-cocoa-soft leading-relaxed">
-              <b className="font-display text-cocoa">곧 열려요</b> · 우리 집 꾸미기, 이웃 집 방문 신청, 방명록, 주민 게시판은 다음 단계에서 이 로비에 추가돼요.
+              <b className="font-display text-cocoa">곧 열려요</b> · 이웃 맺기(신청·수락·목록)와 아파트 주민 게시판은 다음 단계에서 이 로비에 추가돼요.
             </div>
           </>
         )}

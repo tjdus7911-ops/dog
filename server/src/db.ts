@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_DOG, DEFAULT_HUMAN, normalizeDog, normalizeHuman, type DogAvatar, type HumanAvatar } from '../../shared/avatar';
+import { DEFAULT_LAYOUT, validateLayout, type HomeVisibility, type PlacedItem } from '../../shared/home';
 import { DEFAULT_PRIVACY, type FriendStatus, type MyProfile, type PrivacySettings, type PublicProfile, type Residence } from '../../shared/protocol';
 
 export const DATA_DIR = process.env.MUNGLE_DATA_DIR ?? path.resolve(import.meta.dirname, '../data');
@@ -87,6 +88,29 @@ CREATE TABLE IF NOT EXISTS residences (
   UNIQUE (building, unit)
 );
 `);
+// 개인 집: 가구 배치·공개 범위 / 좋아요 / 방명록
+db.exec(`
+CREATE TABLE IF NOT EXISTS homes (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  visibility TEXT NOT NULL DEFAULT 'public',
+  layout TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS home_likes (
+  home_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (home_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS guestbook (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  home_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  author_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_guestbook_home ON guestbook(home_id, created_at);
+`);
 // 마이그레이션: 약관 동의 시각 (기존 계정은 0 = 동의 기록 없음)
 try { db.exec('ALTER TABLE users ADD COLUMN agreed_at INTEGER NOT NULL DEFAULT 0'); } catch { /* 이미 있음 */ }
 
@@ -162,6 +186,36 @@ export function listResidents(building: string) {
   return all(`SELECT r.unit, r.user_id, p.nickname, p.dog_name, p.dog, p.dog_photo FROM residences r
     JOIN profiles p ON p.user_id = r.user_id WHERE r.building = ?`, building);
 }
+
+// ---------- 개인 집 ----------
+export function getHome(userId: number): { visibility: HomeVisibility; layout: PlacedItem[] } {
+  const r = one('SELECT visibility, layout FROM homes WHERE user_id = ?', userId);
+  if (!r) return { visibility: 'public', layout: DEFAULT_LAYOUT.map((i) => ({ ...i })) };
+  return { visibility: r.visibility, layout: validateLayout(JSON.parse(r.layout)) ?? DEFAULT_LAYOUT.map((i) => ({ ...i })) };
+}
+export function saveHome(userId: number, h: { visibility?: HomeVisibility; layout?: PlacedItem[] }) {
+  const cur = getHome(userId);
+  run(`INSERT INTO homes (user_id, visibility, layout, updated_at) VALUES (?,?,?,?)
+    ON CONFLICT(user_id) DO UPDATE SET visibility=excluded.visibility, layout=excluded.layout, updated_at=excluded.updated_at`,
+  userId, h.visibility ?? cur.visibility, JSON.stringify(h.layout ?? cur.layout), Date.now());
+}
+export const countLikes = (homeId: number) => Number(one('SELECT COUNT(*) AS n FROM home_likes WHERE home_id = ?', homeId)?.n ?? 0);
+export const hasLiked = (homeId: number, userId: number) => !!one('SELECT 1 FROM home_likes WHERE home_id = ? AND user_id = ?', homeId, userId);
+export function toggleLike(homeId: number, userId: number) {
+  if (hasLiked(homeId, userId)) { run('DELETE FROM home_likes WHERE home_id = ? AND user_id = ?', homeId, userId); return false; }
+  run('INSERT INTO home_likes (home_id, user_id, created_at) VALUES (?,?,?)', homeId, userId, Date.now());
+  return true;
+}
+export function listGuestbook(homeId: number, limit = 50) {
+  return all(`SELECT g.id, g.author_id, g.text, g.created_at, p.nickname, p.dog_name FROM guestbook g
+    JOIN profiles p ON p.user_id = g.author_id WHERE g.home_id = ? ORDER BY g.created_at DESC, g.id DESC LIMIT ?`, homeId, limit);
+}
+export function addGuestbook(homeId: number, authorId: number, text: string) {
+  const r = run('INSERT INTO guestbook (home_id, author_id, text, created_at) VALUES (?,?,?,?)', homeId, authorId, text, Date.now());
+  return Number(r.lastInsertRowid);
+}
+export const getGuestbookEntry = (id: number) => one('SELECT * FROM guestbook WHERE id = ?', id);
+export const deleteGuestbook = (id: number) => run('DELETE FROM guestbook WHERE id = ?', id);
 
 // ---------- profiles ----------
 function toPublic(r: Row): PublicProfile {

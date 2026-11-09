@@ -3,6 +3,7 @@
 // AI 강아지 사진 분석은 Claude 앱 안에서 열었을 때 보는 사람의 Claude로 실행한다 (sample 기능).
 import { DEFAULT_DOG, DEFAULT_HUMAN, validateDog, validateHuman } from '@shared/avatar';
 import { DEFAULT_PRIVACY, type MyProfile } from '@shared/protocol';
+import { DEFAULT_LAYOUT, validateLayout, type HomeVisibility, type PlacedItem } from '@shared/home';
 import { APARTMENT_BUILDINGS, isValidUnit, unitsOf } from '@shared/apartment';
 import { interpretDogFeatures, jsonPrompt, type DogPhotoKind } from '@shared/dogAnalysis';
 
@@ -82,6 +83,27 @@ export async function demoApi(path: string, opts: { method?: string; body?: any 
     const next = { ...cur, residence: { building: String(building), unit: String(unit) } };
     saveDemoProfile(next);
     return { profile: next };
+  }
+  // 우리 집 (미리보기: 내 집만, 브라우저에 저장)
+  if (path.startsWith('/api/home/')) {
+    if (!cur.residence) throw new Error('먼저 아파트에 입주해 주세요.');
+    const KEYH = 'mungle.demo.home';
+    let saved: { layout: PlacedItem[]; visibility: HomeVisibility } = { layout: DEFAULT_LAYOUT, visibility: 'public' };
+    try { const raw = localStorage.getItem(KEYH); if (raw) saved = { ...saved, ...JSON.parse(raw) }; } catch { /* 무시 */ }
+    if (path === '/api/home/me/layout') {
+      const layout = validateLayout(opts.body?.layout);
+      if (!layout) throw new Error('가구 배치 정보가 올바르지 않아요.');
+      saved = { ...saved, layout };
+    } else if (path === '/api/home/me/visibility') saved = { ...saved, visibility: opts.body?.visibility ?? 'public' };
+    else if (path !== '/api/home/me' && path !== `/api/home/${cur.id}`) throw new Error('미리보기에서는 다른 집에 방문할 수 없어요.');
+    try { localStorage.setItem(KEYH, JSON.stringify(saved)); } catch { /* 무시 */ }
+    return {
+      home: {
+        ownerId: cur.id, owner: { nickname: cur.nickname, dogName: cur.dogName, dogPhoto: cur.dogPhoto, human: cur.human, dog: cur.dog },
+        residence: cur.residence, visibility: saved.visibility, layout: validateLayout(saved.layout) ?? DEFAULT_LAYOUT,
+        likes: 0, likedByMe: false, isOwner: true, guestbook: [],
+      },
+    };
   }
   if (path === '/api/dog-analysis/status') return { available: !!(await getSample()), demo: true };
   if (path === '/api/dog-analysis') return { result: await analyzeInClaude(opts.body?.photos ?? []) };

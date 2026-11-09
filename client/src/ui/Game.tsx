@@ -13,6 +13,7 @@ import { SettingsPanel } from './SettingsPanel';
 import { ConnectionOverlay } from './ConnectionOverlay';
 import { BenchMenu } from './BenchMenu';
 import { EntrancePrompt, Lobby } from './Apartment';
+import { Home } from './Home';
 
 const AvatarEditor = lazy(() => import('./AvatarEditor'));
 const AdminPanel = lazy(() => import('./AdminPanel'));
@@ -23,10 +24,10 @@ export default function Game() {
   const report = useStore((s) => s.reportTarget);
   const dmWith = useStore((s) => s.dmWith);
   const view = useStore((s) => s.view);
-  if (view === 'lobby') {
+  if (view === 'lobby' || view === 'home') {
     return (
       <div className="relative h-full w-full overflow-hidden">
-        <Lobby />
+        {view === 'lobby' ? <Lobby /> : <Home />}
         {dmWith && <DmWindow profile={dmWith} />}
         <ConnectionOverlay />
       </div>

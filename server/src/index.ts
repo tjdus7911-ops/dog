@@ -7,6 +7,7 @@ import { Server } from 'socket.io';
 import * as repo from './db';
 import * as persist from './persist';
 import { APARTMENT_BUILDINGS, isValidUnit, unitsOf, type UnitInfo } from '../../shared/apartment';
+import { GUESTBOOK_MAX_LEN, HOME_VISIBILITY, validateLayout, type HomeView, type HomeVisibility } from '../../shared/home';
 import { hashPassword, issueToken, requireAdmin, requireAuth, revokeToken, verifyPassword, type AuthedRequest } from './auth';
 import { setupRealtime } from './realtime';
 import { filterProfanity, RateLimiter, sanitize } from './moderation';
@@ -213,6 +214,94 @@ app.post('/api/apartment/move-in', requireAuth, (req, res) => {
   if (!r.ok) return res.status(409).json({ error: r.reason === 'already' ? '이미 입주한 집이 있어요.' : '방금 다른 주민이 입주한 호실이에요. 다른 호실을 골라 주세요.' });
   rt.profileChanged(me);
   res.json({ profile: repo.getMyProfile(me) });
+});
+
+// ---------- 개인 집 (꾸미기·방문·좋아요·방명록) ----------
+const guestbookLimiter = new RateLimiter(6, 60_000);
+/** 방문 가능 여부: 집주인 / 차단 / 공개 범위(전체·친구·이웃=같은 동 주민·비공개) */
+function canVisit(viewer: number, owner: number): { ok: true } | { ok: false; status: number; error: string } {
+  const res = repo.getResidence(owner);
+  if (!res) return { ok: false, status: 404, error: '아직 입주하지 않은 사용자예요.' };
+  if (viewer === owner) return { ok: true };
+  if (repo.eitherBlocked(viewer, owner)) return { ok: false, status: 403, error: '방문할 수 없는 집이에요.' };
+  const vis = repo.getHome(owner).visibility;
+  if (vis === 'public') return { ok: true };
+  if (vis === 'friends' && repo.areFriends(viewer, owner)) return { ok: true };
+  if (vis === 'neighbors' && repo.getResidence(viewer)?.building === res.building) return { ok: true };
+  const why = vis === 'friends' ? '친구에게만 공개된 집이에요.' : vis === 'neighbors' ? '같은 동 이웃에게만 공개된 집이에요.' : '비공개 집이에요.';
+  return { ok: false, status: 403, error: why };
+}
+function homeView(viewer: number, owner: number): HomeView | null {
+  const p = repo.getPublicProfile(owner);
+  const res = repo.getResidence(owner);
+  if (!p || !res) return null;
+  const h = repo.getHome(owner);
+  return {
+    ownerId: owner,
+    owner: { nickname: p.nickname, dogName: p.dogName, dogPhoto: p.dogPhoto, human: p.human, dog: p.dog },
+    residence: res, visibility: h.visibility, layout: h.layout,
+    likes: repo.countLikes(owner), likedByMe: repo.hasLiked(owner, viewer), isOwner: viewer === owner,
+    guestbook: repo.listGuestbook(owner).filter((g) => !repo.eitherBlocked(viewer, g.author_id)).map((g) => ({
+      id: g.id, authorId: g.author_id, nickname: g.nickname, dogName: g.dog_name, text: g.text, ts: g.created_at,
+      canDelete: viewer === owner || viewer === g.author_id,
+    })),
+  };
+}
+const homeOwnerParam = (req: express.Request) => (req.params.userId === 'me' ? (req as AuthedRequest).userId : Number(req.params.userId));
+
+app.get('/api/home/:userId', requireAuth, (req, res) => {
+  const me = (req as AuthedRequest).userId, owner = homeOwnerParam(req);
+  if (!Number.isInteger(owner)) return res.status(400).json({ error: '잘못된 요청이에요.' });
+  const c = canVisit(me, owner);
+  if (!c.ok) return res.status(c.status).json({ error: c.error });
+  res.json({ home: homeView(me, owner) });
+});
+
+// 집주인만 가구 배치·공개 범위 변경 (다른 사용자는 경로상 자기 집만 수정 가능)
+app.put('/api/home/me/layout', requireAuth, (req, res) => {
+  const me = (req as AuthedRequest).userId;
+  if (!repo.getResidence(me)) return res.status(400).json({ error: '입주한 뒤 집을 꾸밀 수 있어요.' });
+  const layout = validateLayout(req.body?.layout);
+  if (!layout) return res.status(400).json({ error: '가구 배치 정보가 올바르지 않아요.' });
+  repo.saveHome(me, { layout });
+  res.json({ home: homeView(me, me) });
+});
+app.put('/api/home/me/visibility', requireAuth, (req, res) => {
+  const me = (req as AuthedRequest).userId;
+  const v = req.body?.visibility as HomeVisibility;
+  if (!HOME_VISIBILITY.some((x) => x.id === v)) return res.status(400).json({ error: '공개 범위가 올바르지 않아요.' });
+  if (!repo.getResidence(me)) return res.status(400).json({ error: '입주한 뒤 설정할 수 있어요.' });
+  repo.saveHome(me, { visibility: v });
+  res.json({ home: homeView(me, me) });
+});
+
+app.post('/api/home/:userId/like', requireAuth, (req, res) => {
+  const me = (req as AuthedRequest).userId, owner = homeOwnerParam(req);
+  if (owner === me) return res.status(400).json({ error: '내 집에는 좋아요를 누를 수 없어요.' });
+  const c = canVisit(me, owner);
+  if (!c.ok) return res.status(c.status).json({ error: c.error });
+  const liked = repo.toggleLike(owner, me);
+  res.json({ liked, likes: repo.countLikes(owner) });
+});
+
+app.post('/api/home/:userId/guestbook', requireAuth, (req, res) => {
+  const me = (req as AuthedRequest).userId, owner = homeOwnerParam(req);
+  const c = canVisit(me, owner);
+  if (!c.ok) return res.status(c.status).json({ error: c.error });
+  if (!guestbookLimiter.allow(String(me))) return res.status(429).json({ error: '방명록을 너무 자주 남기고 있어요. 잠시 후 다시 써 주세요.' });
+  const clean = sanitize(req.body?.text, GUESTBOOK_MAX_LEN);
+  if (!clean) return res.status(400).json({ error: '방명록 내용을 입력해 주세요.' });
+  repo.addGuestbook(owner, me, filterProfanity(clean).text);
+  res.json({ home: homeView(me, owner) });
+});
+app.delete('/api/home/:userId/guestbook/:id', requireAuth, (req, res) => {
+  const me = (req as AuthedRequest).userId, owner = homeOwnerParam(req);
+  const g = repo.getGuestbookEntry(Number(req.params.id));
+  if (!g || g.home_id !== owner) return res.status(404).json({ error: '방명록을 찾을 수 없어요.' });
+  if (me !== owner && me !== g.author_id) return res.status(403).json({ error: '집주인이나 작성자만 지울 수 있어요.' });
+  repo.deleteGuestbook(g.id);
+  const c = canVisit(me, owner);
+  res.json({ home: c.ok ? homeView(me, owner) : null });
 });
 
 // ---------- 운영 ----------

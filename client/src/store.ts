@@ -41,7 +41,9 @@ interface State {
   benchMenu: number | null;
   seated: string | null;
   /** 지금 보는 화면: 공원 / 아파트 로비 */
-  view: 'park' | 'lobby';
+  view: 'park' | 'lobby' | 'home';
+  /** 보고 있는 집의 주인 id (view === 'home') */
+  homeOwner: number | null;
   /** 입주 화면을 이번 접속에서 '나중에 하기'로 넘겼는지 */
   moveInLater: boolean;
 }
@@ -73,6 +75,7 @@ export const useStore = create<State>()(() => ({
   benchMenu: null,
   seated: null,
   view: 'park',
+  homeOwner: null,
   moveInLater: false,
 }));
 

@@ -69,9 +69,11 @@ export function ProfilePopup() {
           {status === 'blocked' && <button disabled={busy} className="btn btn-ghost py-2.5 border border-[#f1e2d2]" onClick={() => act('unblock')}>🚫 차단됨 · 차단 해제</button>}
           {status !== 'friends' && status !== 'blocked' && <p className="text-xs text-cocoa-soft text-center">1:1 대화는 친구가 되면 이용할 수 있어요.</p>}
 
-          <button disabled className="btn btn-ghost py-2.5 !shadow-none border border-dashed border-[#e8d6c3]" title="개인 강아지 집은 5단계에서 구현 예정">
-            🏠 강아지 집 방문 · 준비 중
-          </button>
+          {p.residence && (
+            <button className="btn btn-ghost py-2.5 border border-[#f1e2d2]" onClick={() => set({ view: 'home', homeOwner: p.id, profilePopup: null })}>
+              🏠 {residenceLabel(p.residence)} 집 방문하기
+            </button>
+          )}
           <div className="flex gap-2 text-sm">
             {status === 'friends' && <button className="flex-1 text-cocoa-soft underline py-1" onClick={() => act('friend:remove', `${p.nickname}님을 친구에서 삭제할까요?`)}>친구 삭제</button>}
             {status !== 'blocked' && <button className="flex-1 text-cocoa-soft underline py-1" onClick={() => act('block', `${p.nickname}님을 차단할까요? 친구 관계가 끊기고 서로의 아바타와 채팅이 보이지 않아요.`)}>차단</button>}

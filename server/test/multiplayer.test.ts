@@ -178,6 +178,40 @@ async function main() {
     const profA = await emit(c.s, 'profile:get', { userId: a.id });
     check('프로필에 동·호실 표시', profA.ok && profA.profile.residence?.unit === '302');
 
+    console.log('\n[개인 집 · 꾸미기 · 방문 · 방명록]');
+    const hA = await api('/api/home/me', undefined, a.token, 'GET');
+    check('입주하면 기본 가구가 놓인 내 집', hA.status === 200 && hA.body.home.isOwner && hA.body.home.layout.length > 3 && hA.body.home.residence.unit === '302');
+    const newLayout = [{ type: 'sofa', n: 0, x: -1, z: -2, rot: 1 }, { type: 'frame', n: 0, x: 0, z: -2.7, rot: 0 }, { type: 'frame', n: 1, x: 1, z: -2.7, rot: 0 }, { type: 'dogbed', n: 0, x: 2, z: 1, rot: 2 }];
+    const saveL = await api('/api/home/me/layout', { layout: newLayout }, a.token, 'PUT');
+    const hA2 = await api('/api/home/me', undefined, a.token, 'GET');
+    check('가구 배치·회전·보관 저장', saveL.status === 200 && hA2.body.home.layout.length === 4 && hA2.body.home.layout[0].rot === 1);
+    const badLayout = async (layout: unknown) => (await api('/api/home/me/layout', { layout }, a.token, 'PUT')).status === 400;
+    check('잘못된 배치 거부(없는 가구·방 밖·보유 수 초과·중복)', await badLayout([{ type: 'piano', n: 0, x: 0, z: 0, rot: 0 }]) && await badLayout([{ type: 'sofa', n: 0, x: 9, z: 0, rot: 0 }])
+      && await badLayout([{ type: 'sofa', n: 1, x: 0, z: 0, rot: 0 }]) && await badLayout([{ type: 'ball', n: 0, x: 0, z: 0, rot: 0 }, { type: 'ball', n: 0, x: 1, z: 0, rot: 0 }]));
+    const neighborTok = r1.status === 200 ? b.token : c.token, outsiderTok = r1.status === 200 ? c.token : b.token;
+    const visit = await api(`/api/home/${a.id}`, undefined, outsiderTok, 'GET');
+    check('전체 공개 집 방문 (편집 권한 없음)', visit.status === 200 && !visit.body.home.isOwner && visit.body.home.layout.length === 4);
+    check('입주 전 사용자의 집은 없음', (await api(`/api/home/${(await api('/api/me', undefined, outsiderTok, 'GET')).body.profile.id}`, undefined, a.token, 'GET')).status === 404);
+    await api('/api/home/me/visibility', { visibility: 'private' }, a.token, 'PUT');
+    check('비공개 집은 방문 불가', (await api(`/api/home/${a.id}`, undefined, outsiderTok, 'GET')).status === 403);
+    await api('/api/home/me/visibility', { visibility: 'neighbors' }, a.token, 'PUT');
+    check('이웃만: 같은 동 주민은 방문 가능, 아니면 불가', (await api(`/api/home/${a.id}`, undefined, neighborTok, 'GET')).status === 200 && (await api(`/api/home/${a.id}`, undefined, outsiderTok, 'GET')).status === 403);
+    await api('/api/home/me/visibility', { visibility: 'friends' }, a.token, 'PUT');
+    check('친구만: 친구가 아니면 방문 불가', (await api(`/api/home/${a.id}`, undefined, neighborTok, 'GET')).status === 403);
+    check('잘못된 공개 범위 거부', (await api('/api/home/me/visibility', { visibility: 'all' }, a.token, 'PUT')).status === 400);
+    await api('/api/home/me/visibility', { visibility: 'public' }, a.token, 'PUT');
+    const like1 = await api(`/api/home/${a.id}/like`, {}, outsiderTok);
+    const like2 = await api(`/api/home/${a.id}/like`, {}, outsiderTok);
+    check('집 좋아요 / 취소', like1.body.liked === true && like1.body.likes === 1 && like2.body.liked === false && like2.body.likes === 0);
+    check('내 집에는 좋아요 불가', (await api(`/api/home/${a.id}/like`, {}, a.token)).status === 400);
+    const gb = await api(`/api/home/${a.id}/guestbook`, { text: '집이 너무 예뻐요 시발 🐶' }, outsiderTok);
+    const entry = gb.body.home?.guestbook?.[0];
+    check('방명록 작성 (욕설 가림)', gb.status === 200 && entry && entry.text.includes('예뻐요') && !entry.text.includes('시발') && entry.canDelete);
+    check('빈 방명록 거부', (await api(`/api/home/${a.id}/guestbook`, { text: '   ' }, outsiderTok)).status === 400);
+    check('제3자는 방명록 삭제 불가', (await api(`/api/home/${a.id}/guestbook/${entry.id}`, undefined, neighborTok, 'DELETE')).status === 403);
+    const delGb = await api(`/api/home/${a.id}/guestbook/${entry.id}`, undefined, a.token, 'DELETE');
+    check('집주인은 방명록 삭제 가능', delGb.status === 200 && delGb.body.home.guestbook.length === 0);
+
     console.log('\n[정원 제한]');
     const jc = await emit(c.s, 'park:join', { parkId: 'central-1' });
     check('C 입장 (3/3)', jc.ok && jc.players.length === 2);
