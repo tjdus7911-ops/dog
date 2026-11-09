@@ -77,6 +77,8 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages(from_id, to_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_id, read_at);
 `);
+// 마이그레이션: 약관 동의 시각 (기존 계정은 0 = 동의 기록 없음)
+try { db.exec('ALTER TABLE users ADD COLUMN agreed_at INTEGER NOT NULL DEFAULT 0'); } catch { /* 이미 있음 */ }
 
 type Row = Record<string, any>;
 const one = (sql: string, ...p: any[]) => db.prepare(sql).get(...p) as Row | undefined;
@@ -86,7 +88,8 @@ const run = (sql: string, ...p: any[]) => db.prepare(sql).run(...p);
 // ---------- users / sessions ----------
 export function createUser(username: string, passHash: string, salt: string, nickname: string, dogName: string) {
   const role = (process.env.MUNGLE_ADMINS ?? '').split(',').map((s) => s.trim().toLowerCase()).includes(username.toLowerCase()) ? 'admin' : 'user';
-  const r = run('INSERT INTO users (username, pass_hash, salt, role, created_at) VALUES (?,?,?,?,?)', username, passHash, salt, role, Date.now());
+  const now = Date.now();
+  const r = run('INSERT INTO users (username, pass_hash, salt, role, created_at, agreed_at) VALUES (?,?,?,?,?,?)', username, passHash, salt, role, now, now);
   const id = Number(r.lastInsertRowid);
   run('INSERT INTO profiles (user_id, nickname, dog_name, human, dog, privacy) VALUES (?,?,?,?,?,?)',
     id, nickname, dogName, JSON.stringify(DEFAULT_HUMAN), JSON.stringify(DEFAULT_DOG), JSON.stringify(DEFAULT_PRIVACY));
@@ -94,6 +97,22 @@ export function createUser(username: string, passHash: string, salt: string, nic
 }
 export const findUserByName = (username: string) => one('SELECT * FROM users WHERE username = ?', username);
 export const findUser = (id: number) => one('SELECT * FROM users WHERE id = ?', id);
+/** 회원 탈퇴: 계정과 연결된 프로필·세션·친구·차단·메시지·신고가 함께 삭제된다 (ON DELETE CASCADE) */
+export const deleteUser = (id: number) => run('DELETE FROM users WHERE id = ?', id);
+
+// ---------- 백업 ----------
+export const BACKUP_DIR = path.join(DATA_DIR, 'backups');
+/** 실행 중에도 안전한 DB 스냅샷을 backups/에 만들고 최근 keep개만 남긴다 */
+export function backupNow(keep = 7) {
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').replace('.', '').replace('Z', '');
+  const file = path.join(BACKUP_DIR, `mungle-${stamp}.db`);
+  fs.rmSync(file, { force: true });
+  db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
+  const old = fs.readdirSync(BACKUP_DIR).filter((f) => /^mungle-.*\.db$/.test(f)).sort();
+  for (const f of old.slice(0, Math.max(0, old.length - keep))) fs.rmSync(path.join(BACKUP_DIR, f), { force: true });
+  return file;
+}
 export const createSession = (tokenHash: string, userId: number, expiresAt: number) =>
   run('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?,?,?)', tokenHash, userId, expiresAt);
 export const findSession = (tokenHash: string) =>

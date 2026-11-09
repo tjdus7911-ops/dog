@@ -45,6 +45,7 @@ app.post('/api/auth/signup', (req, res) => {
   if (!nickname) return res.status(400).json({ error: '닉네임은 2~12자로, 부적절한 표현 없이 입력해 주세요.' });
   const dogName = cleanName(req.body.dogName, 1, 12);
   if (!dogName) return res.status(400).json({ error: '강아지 이름을 1~12자로 입력해 주세요.' });
+  if (req.body.agree !== true) return res.status(400).json({ error: '만 14세 이상 확인과 이용약관·개인정보 처리방침 동의가 필요해요.' });
   if (repo.findUserByName(username)) return res.status(409).json({ error: '이미 사용 중인 아이디예요.' });
   const { hash, salt } = hashPassword(password);
   const id = repo.createUser(username, hash, salt, nickname, dogName);
@@ -64,6 +65,27 @@ app.post('/api/auth/login', (req, res) => {
 
 app.post('/api/auth/logout', requireAuth, (req, res) => {
   revokeToken((req as AuthedRequest).token);
+  res.json({ ok: true });
+});
+
+// ---------- 서비스 정보 (약관·처리방침에 표시할 운영자 정보) ----------
+app.get('/api/site', (_req, res) => res.json({
+  operator: process.env.MUNGLE_OPERATOR ?? '',
+  contact: process.env.MUNGLE_CONTACT ?? '',
+  aiAnalysis: dogAnalyzer.available,
+}));
+
+// ---------- 회원 탈퇴 ----------
+app.delete('/api/me', requireAuth, (req, res) => {
+  const id = (req as AuthedRequest).userId;
+  const u = repo.findUser(id);
+  if (!u || typeof req.body?.password !== 'string' || !verifyPassword(req.body.password, u.salt, u.pass_hash)) {
+    return res.status(401).json({ error: '비밀번호가 맞지 않아요.' });
+  }
+  const photo = repo.getDogPhoto(id);
+  rt.kick(id, '회원 탈퇴가 완료되었어요.');
+  repo.deleteUser(id);
+  if (photo) fs.rm(path.join(repo.UPLOAD_DIR, path.basename(photo)), { force: true }, () => {});
   res.json({ ok: true });
 });
 
@@ -180,6 +202,14 @@ const clientDist = path.resolve(import.meta.dirname, '../../client/dist');
 if (fs.existsSync(clientDist)) {
   app.use(express.static(clientDist, { index: false }));
   app.get(/^\/(?!api|uploads|socket\.io).*/, (_req, res) => res.sendFile(path.join(clientDist, 'index.html')));
+}
+
+// ---------- 자동 백업 (기본 하루 1번, MUNGLE_BACKUP_HOURS=0 이면 끔) ----------
+const backupHours = Number(process.env.MUNGLE_BACKUP_HOURS ?? 24);
+if (backupHours > 0) {
+  const doBackup = () => { try { console.log('💾 DB 백업:', repo.backupNow()); } catch (e) { console.error('DB 백업 실패', e); } };
+  setTimeout(doBackup, 60_000).unref();
+  setInterval(doBackup, backupHours * 3600_000).unref();
 }
 
 server.listen(PORT, () => console.log(`🐾 멍글마을 서버 실행 중: http://localhost:${PORT}`));

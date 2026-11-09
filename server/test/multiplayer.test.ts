@@ -33,7 +33,7 @@ function emit<T = any>(s: Socket, ev: string, data?: unknown): Promise<T> {
 interface Client { id: number; token: string; s: Socket; events: { ev: string; data: any }[] }
 
 async function makeUser(name: string, nickname: string, dogName: string): Promise<Client> {
-  const r = await api('/api/auth/signup', { username: name, password: 'password123', nickname, dogName });
+  const r = await api('/api/auth/signup', { username: name, password: 'password123', nickname, dogName, agree: true });
   if (r.status !== 200) throw new Error(JSON.stringify(r.body));
   const s = io(BASE, { auth: { token: r.body.token }, transports: ['websocket'] });
   const events: Client['events'] = [];
@@ -47,7 +47,7 @@ const clear = (...cs: Client[]) => cs.forEach((c) => (c.events.length = 0));
 async function main() {
   const proc = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
     cwd: path.resolve(import.meta.dirname, '..'),
-    env: { ...process.env, PORT: String(PORT), MUNGLE_DATA_DIR: dataDir, MUNGLE_PARK_CAPACITY: '3', MUNGLE_ADMINS: 'admin_user' },
+    env: { ...process.env, PORT: String(PORT), MUNGLE_DATA_DIR: dataDir, MUNGLE_PARK_CAPACITY: '3', MUNGLE_ADMINS: 'admin_user', MUNGLE_BACKUP_HOURS: '0', MUNGLE_OPERATOR: '멍글마을 운영팀', MUNGLE_CONTACT: 'help@example.com' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   proc.stderr.on('data', (d) => { const t = String(d); if (!t.includes('ExperimentalWarning') && !t.includes('--trace-warnings')) process.stderr.write(t); });
@@ -59,6 +59,10 @@ async function main() {
     check('잘못된 가입 정보 거부', bad.status === 400);
     const badNick = await api('/api/auth/signup', { username: 'baduser', password: 'password123', nickname: '시 발놈', dogName: '초코' });
     check('욕설 닉네임 거부', badNick.status === 400);
+    const noAgree = await api('/api/auth/signup', { username: 'noagree1', password: 'password123', nickname: '동의없음', dogName: '초코' });
+    check('만 14세·약관 동의 없이 가입 거부', noAgree.status === 400 && noAgree.body.error.includes('동의'));
+    const site = await api('/api/site', undefined, undefined, 'GET');
+    check('약관용 운영자 정보 제공', site.body.operator === '멍글마을 운영팀' && site.body.contact === 'help@example.com');
 
     const a = await makeUser('alice01', '앨리스', '사슴이');
     const b = await makeUser('bob0001', '밥이', '몽실이');
@@ -234,6 +238,16 @@ async function main() {
     const kicked = new Promise((r) => a.s.on('kicked', r));
     await new Promise<void>((r) => a2.on('connect', () => r()));
     check('같은 계정 중복 접속 시 이전 연결 종료', !!(await Promise.race([kicked, sleep(500).then(() => null)])));
+
+    console.log('\n[회원 탈퇴]');
+    const e = await makeUser('erin0001', '에린', '두부');
+    await emit(e.s, 'park:join', { parkId: 'central-2' });
+    check('비밀번호가 틀리면 탈퇴 거부', (await api('/api/me', { password: 'wrongpass1' }, e.token, 'DELETE')).status === 401);
+    const del = await api('/api/me', { password: 'password123' }, e.token, 'DELETE');
+    await sleep(150);
+    check('탈퇴 성공 시 접속 종료', del.status === 200 && !e.s.connected);
+    check('탈퇴 후 로그인 불가·세션 무효', (await api('/api/auth/login', { username: 'erin0001', password: 'password123' })).status === 401 && (await api('/api/me', undefined, e.token, 'GET')).status === 401);
+    check('탈퇴한 아이디 재가입 가능', (await api('/api/auth/signup', { username: 'erin0001', password: 'password123', nickname: '에린', dogName: '두부', agree: true })).status === 200);
     [a2, b2, d.s, admin.s].forEach((s) => s.close());
   } finally {
     proc.kill();

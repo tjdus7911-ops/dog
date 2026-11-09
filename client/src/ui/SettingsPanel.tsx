@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react';
 import type { MyProfile, PrivacySettings } from '@shared/protocol';
 import { api } from '../lib/api';
 import { get, set, toast, useStore } from '../store';
-import { friendAction, refreshBlocked } from '../net/socket';
+import { disconnect, friendAction, refreshBlocked } from '../net/socket';
+import { DEMO } from '../demo';
+import { logout } from './App';
+import { LegalModal, type LegalDoc } from './Legal';
 import { DogBadge, PanelHeader } from './common';
 
 const ITEMS: { key: keyof PrivacySettings; title: string; desc: string }[] = [
@@ -15,7 +18,25 @@ export function SettingsPanel() {
   const me = useStore((s) => s.me)!;
   const blocked = useStore((s) => s.blocked);
   const [privacy, setPrivacy] = useState(me.privacy);
+  const [legal, setLegal] = useState<LegalDoc | null>(null);
+  const [leaving, setLeaving] = useState(false);
+  const [pw, setPw] = useState('');
+  const [busy, setBusy] = useState(false);
   useEffect(() => { refreshBlocked(); }, []);
+
+  async function withdraw() {
+    if (!confirm('정말 탈퇴할까요? 아바타, 강아지 사진, 친구, 1:1 대화가 모두 삭제되고 되돌릴 수 없어요.')) return;
+    setBusy(true);
+    try {
+      disconnect(); // 서버가 연결을 끊기 전에 먼저 정리 (재연결 시도 방지)
+      await api('/api/me', { method: 'DELETE', body: { password: pw } });
+      await logout();
+      toast('탈퇴가 완료되었어요. 그동안 함께 산책해 주셔서 고마워요 🐾');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+      location.reload(); // 연결 복구
+    } finally { setBusy(false); }
+  }
 
   async function toggle(k: keyof PrivacySettings) {
     const next = { ...privacy, [k]: !privacy[k] };
@@ -51,7 +72,21 @@ export function SettingsPanel() {
             <button className="btn btn-ghost px-3 py-1.5 text-sm border border-[#f1e2d2] !shadow-none" onClick={() => friendAction('unblock', p.id)}>차단 해제</button>
           </div>
         ))}
+
+        <div className="pt-4 mt-2 border-t border-[#f1e2d2] text-sm text-cocoa-soft flex flex-wrap gap-x-3 gap-y-1">
+          <button className="underline" onClick={() => setLegal('terms')}>이용약관</button>
+          <button className="underline" onClick={() => setLegal('privacy')}>개인정보 처리방침</button>
+          {!DEMO && <button className="underline ml-auto" onClick={() => setLeaving((v) => !v)}>회원 탈퇴</button>}
+        </div>
+        {leaving && !DEMO && (
+          <div className="bg-white rounded-2xl p-3 space-y-2">
+            <p className="text-xs text-cocoa-soft">탈퇴하면 계정과 아바타, 강아지 사진, 친구·차단 목록, 1:1 대화가 바로 삭제돼요. 확인을 위해 비밀번호를 입력해 주세요.</p>
+            <input className="field text-sm" type="password" autoComplete="current-password" placeholder="비밀번호" value={pw} onChange={(e) => setPw(e.target.value)} />
+            <button className="btn w-full py-2 text-sm bg-[#c4553a] text-white" disabled={!pw || busy} onClick={withdraw}>{busy ? '처리 중…' : '탈퇴하기'}</button>
+          </div>
+        )}
       </div>
+      {legal && <LegalModal doc={legal} onClose={() => setLegal(null)} />}
     </aside>
   );
 }

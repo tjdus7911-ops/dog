@@ -51,6 +51,16 @@ npm run test:ai      # AI 사진 분석기 테스트 (13개) — 가짜 API 응�
 
 ---
 
+## 서버 배포 (친구들과 함께 쓰기)
+
+| 방법 | 비용 | 특징 |
+|---|---|---|
+| **오라클 클라우드 Always Free** (권장) | 0원 | 24시간 켜짐, 데이터 영구 저장·자동 백업 → [deploy/README.md](deploy/README.md) 의 한 줄 설치 |
+| Render 무료 플랜 | 0원 | `render.yaml` Blueprint. 15분 미사용 시 잠들고, 재시작 시 데이터 초기화 가능 (짧은 테스트용) |
+| GitHub Codespaces | 0원(월 사용시간 한도) | `.devcontainer` 설정. 창을 닫으면 꺼짐 (잠깐 테스트용) |
+
+운영 관련 기능: 가입 시 만 14세 이상·약관 동의(서버에서 강제), 이용약관/개인정보 처리방침 화면(운영자 정보는 `MUNGLE_OPERATOR`, `MUNGLE_CONTACT`), 회원 탈퇴(비밀번호 확인 후 즉시 삭제), DB 자동 백업(`MUNGLE_BACKUP_HOURS`, 기본 24시간·7개 보관), 상태 점검 `/api/health`.
+
 ## 조작법
 
 | | PC | 모바일 |
