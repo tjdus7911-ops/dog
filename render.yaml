@@ -8,11 +8,11 @@ services:
     runtime: node
     plan: free
     buildCommand: npm ci --include=dev && npm run build
-    startCommand: cd server && node --import tsx src/main.ts
+    startCommand: cd server && node --experimental-sqlite --import tsx src/main.ts
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
-        value: 22.12.0
+        value: "22"
       - key: MUNGLE_PARK_CAPACITY
         value: "30"
       - key: MUNGLE_GITHUB_REPO
