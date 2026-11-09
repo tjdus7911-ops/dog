@@ -15,6 +15,7 @@ import { local } from '../game/local';
 import { APARTMENT_ENTRANCE } from '@shared/world';
 import { DEMO } from '../demo';
 import { standUp } from '../game/Players';
+import { isTouchDevice } from '../game/input';
 
 type BuildingData = BuildingInfo & { units: UnitInfo[] };
 
@@ -303,9 +304,10 @@ export function EntrancePrompt() {
     }, 250);
     return () => window.clearInterval(id);
   }, []);
-  if (!near) return null;
+  const mobileChat = useStore((s) => s.chatOpen) && isTouchDevice();
+  if (!near || mobileChat) return null;
   return (
-    <div className="absolute z-20 left-1/2 -translate-x-1/2 bottom-28 md:bottom-24 pop">
+    <div className="absolute z-20 left-1/2 -translate-x-1/2 bottom-24 pop" style={{ bottom: isTouchDevice() ? 'calc(var(--safe-b) + 176px)' : undefined }}>
       <button className="btn btn-coral px-6 py-3 text-lg shadow-lg" onClick={() => set({ view: 'lobby', benchMenu: null })}>🏢 아파트 로비 들어가기</button>
     </div>
   );

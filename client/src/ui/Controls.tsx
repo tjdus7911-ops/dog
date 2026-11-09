@@ -5,12 +5,15 @@ import { local } from '../game/local';
 import { DEMO } from '../demo';
 import { useStore } from '../store';
 import { standUp } from '../game/Players';
+import { MOBILE_JOY_BOTTOM, MOBILE_JOY_SIZE } from './ChatPanel';
 
 export function Joystick() {
   const [knob, setKnob] = useState({ x: 0, y: 0 });
   const base = useRef<HTMLDivElement>(null);
   const pid = useRef<number | null>(null);
-  if (!isTouchDevice()) return null;
+  const chatOpen = useStore((s) => s.chatOpen);
+  // 채팅이 열리면 조이스틱을 숨긴다 (이동 입력도 함께 잠김)
+  if (!isTouchDevice() || chatOpen) return null;
   const R = 52;
 
   const update = (e: React.PointerEvent) => {
@@ -25,7 +28,8 @@ export function Joystick() {
 
   return (
     <div ref={base}
-      className="absolute z-10 left-5 bottom-6 w-[136px] h-[136px] rounded-full bg-white/45 border-4 border-white/80 shadow-lg touch-none select-none"
+      style={{ bottom: `calc(var(--safe-b) + ${MOBILE_JOY_BOTTOM}px)`, width: MOBILE_JOY_SIZE, height: MOBILE_JOY_SIZE }}
+      className="absolute z-10 left-4 rounded-full bg-white/45 border-4 border-white/80 shadow-lg touch-none select-none"
       onPointerDown={(e) => { pid.current = e.pointerId; (e.target as HTMLElement).setPointerCapture(e.pointerId); update(e); }}
       onPointerMove={(e) => { if (pid.current === e.pointerId) update(e); }}
       onPointerUp={end} onPointerCancel={end}>
@@ -39,6 +43,22 @@ export function ActionBar() {
   const touch = isTouchDevice();
   const [run, setRun] = useState(false);
   const seated = useStore((s) => s.seated);
+  const chatOpen = useStore((s) => s.chatOpen);
+  if (touch) {
+    // 모바일: 2×2 버튼 묶음 (조이스틱과 겹치지 않는 폭), 채팅이 열리면 숨김
+    if (chatOpen) return null;
+    return (
+      <div className="absolute z-10 right-3 flex flex-col items-end gap-2" style={{ bottom: `calc(var(--safe-b) + ${MOBILE_JOY_BOTTOM}px)` }}>
+        {seated && <button className="btn btn-coral px-4 min-h-[44px] text-sm shadow-lg pop" onClick={standUp}>🧍 일어나기</button>}
+        <div className="grid grid-cols-2 gap-2">
+          <Action small icon="👋" label="인사하기" onClick={() => { local.waveUntil = performance.now() + 1800; }} />
+          <Action small icon="🐕" label="앉아!" onClick={() => { local.sitUntil = performance.now() + 6000; }} />
+          <Action small icon="⤴️" label="점프" onClick={() => { input.jump = true; }} />
+          <Action small icon="🏃" label={run ? '달리는 중' : '달리기'} active={run} onClick={() => { input.runToggle = !run; setRun(!run); }} />
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="absolute z-10 right-2 md:right-3 bottom-3 flex flex-col items-end gap-2">
       {!touch && (
@@ -59,10 +79,10 @@ export function ActionBar() {
   );
 }
 
-function Action({ icon, label, onClick, active }: { icon: string; label: string; onClick: () => void; active?: boolean }) {
+function Action({ icon, label, onClick, active, small }: { icon: string; label: string; onClick: () => void; active?: boolean; small?: boolean }) {
   return (
     <button onClick={onClick}
-      className={`w-[68px] h-[68px] rounded-full flex flex-col items-center justify-center shadow-lg border-2 border-white transition active:scale-95 ${active ? 'bg-peach text-white' : 'bg-white/95'}`}>
+      className={`${small ? 'w-[62px] h-[62px]' : 'w-[68px] h-[68px]'} rounded-full flex flex-col items-center justify-center shadow-lg border-2 border-white transition active:scale-95 ${active ? 'bg-peach text-white' : 'bg-white/95'}`}>
       <span className="text-2xl leading-none">{icon}</span>
       <span className="text-[11px] font-display mt-0.5">{label}</span>
     </button>

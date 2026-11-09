@@ -19,9 +19,9 @@ export function TopBar() {
 
   return (
     <div className="absolute top-0 inset-x-0 z-20 p-2 md:p-3 flex items-center gap-1.5 md:gap-2 pointer-events-none">
-      <div className="panel !rounded-full pl-2.5 pr-3 md:pl-3 md:pr-4 py-1.5 flex items-center gap-1.5 md:gap-2 pointer-events-auto whitespace-nowrap shrink-0">
-        <span className="text-xl md:text-2xl">🐾</span>
-        <div className="leading-none">
+      <div className="panel !rounded-full pl-2.5 pr-3 max-[399px]:px-0 max-[399px]:w-11 max-[399px]:h-11 max-[399px]:justify-center md:pl-3 md:pr-4 py-1.5 flex items-center gap-1.5 md:gap-2 pointer-events-auto whitespace-nowrap shrink-0" title="멍글마을">
+        <span className="text-xl md:text-2xl" aria-hidden>🐾</span>
+        <div className="leading-none max-[399px]:hidden">
           <div className="font-display text-lg md:text-2xl">멍글마을</div>
           <div className="text-[10px] text-cocoa-soft tracking-wide hidden sm:block">Mungle Village</div>
         </div>

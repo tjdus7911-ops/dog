@@ -2,6 +2,7 @@
 import { SEATS } from '@shared/world';
 import { set, useStore } from '../store';
 import { local } from '../game/local';
+import { isTouchDevice } from '../game/input';
 
 export function BenchMenu() {
   const bench = useStore((s) => s.benchMenu);
@@ -9,7 +10,8 @@ export function BenchMenu() {
   const players = useStore((s) => s.players);
   const me = useStore((s) => s.me)!;
   const seated = useStore((s) => s.seated);
-  if (bench === null) return null;
+  const mobileChat = useStore((s) => s.chatOpen) && isTouchDevice();
+  if (bench === null || mobileChat) return null;
   const list = SEATS.filter((s) => s.bench === bench);
   const close = () => set({ benchMenu: null });
 
@@ -21,7 +23,7 @@ export function BenchMenu() {
   }
 
   return (
-    <div className="absolute z-30 left-1/2 -translate-x-1/2 bottom-28 md:bottom-24 panel p-4 w-[min(92vw,340px)] pop">
+    <div style={{ bottom: isTouchDevice() ? 'calc(var(--safe-b) + 176px)' : undefined }} className="absolute z-30 left-1/2 -translate-x-1/2 bottom-24 panel p-4 w-[min(92vw,340px)] pop">
       <div className="flex items-center gap-2">
         <span className="text-2xl">🪑</span>
         <div className="flex-1">

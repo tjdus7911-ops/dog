@@ -5,6 +5,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { WORLD_RADIUS, resolveCollision } from '@shared/world';
 import { local } from './local';
+import { input } from './input';
 
 export function ClickToMove() {
   const marker = useRef<THREE.Group>(null!);
@@ -28,6 +29,7 @@ export function ClickToMove() {
         rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]} material={hitMat}
         onClick={(e) => {
           if (e.delta > 8) return; // 카메라를 돌린 드래그는 이동으로 보지 않음
+          if (input.locked) return; // 모바일 채팅 중에는 이동하지 않음
           e.stopPropagation();
           const [x, z] = resolveCollision(e.point.x, e.point.z, 0.3);
           local.moveTarget = { x, z };

@@ -5,7 +5,19 @@ export const input = {
   runToggle: false,
   /** 점프 요청 (스페이스 키 / 점프 버튼) — 다음 프레임에 처리 */
   jump: false,
+  /** 이동 입력 잠금 — 모바일에서 채팅창이 열려 있는 동안 (채팅 열림 상태 하나로 UI·입력을 함께 제어) */
+  locked: false,
 };
+
+/** 이동 입력 잠금 설정: 잠글 때 진행 중인 조이스틱·키 입력도 함께 해제 */
+export function setMoveLocked(locked: boolean) {
+  input.locked = locked;
+  if (locked) {
+    input.joy.x = 0; input.joy.y = 0; input.joy.active = false;
+    input.keys.clear();
+    input.jump = false;
+  }
+}
 
 const isTyping = () => {
   const el = document.activeElement as HTMLElement | null;
@@ -30,6 +42,7 @@ export function installKeyboard() {
 
 /** 이동 입력 벡터 (x: 오른쪽, y: 앞쪽), 달리기 여부 */
 export function readMove(): { x: number; y: number; run: boolean } {
+  if (input.locked) return { x: 0, y: 0, run: false };
   const k = input.keys;
   let x = 0, y = 0;
   if (!isTyping()) {

@@ -52,7 +52,9 @@ export function MiniMap() {
   return (
     <div className="absolute top-[62px] md:top-[78px] left-2 md:left-3 z-10 flex items-start gap-2 pointer-events-none">
       <canvas ref={ref} style={{ width: SIZE, height: SIZE }} className="rounded-full border-4 border-white shadow-lg hidden sm:block" />
-      <div className="flex flex-col gap-1.5">
+      {/* 작은 화면: 한 줄로 간결하게 */}
+      <span className="name-tag !text-xs !px-2.5 !py-1 sm:hidden">📍 {park ? park.name.replace('중앙 공원 ', '공원') : '입장 중'} · 🐾 {count}명</span>
+      <div className="hidden sm:flex flex-col gap-1.5">
         <span className="name-tag !text-sm !px-3 !py-1">📍 {park?.name ?? '입장 중'}</span>
         <span className="name-tag !text-sm !px-3 !py-1">🐾 산책 중 {count}명</span>
       </div>

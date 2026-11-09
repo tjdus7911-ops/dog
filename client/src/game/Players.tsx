@@ -131,7 +131,7 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
     // 점프 (땅에 있을 때만)
     if (input.jump) {
       input.jump = false;
-      if (local.jumpY <= 0) local.jumpV = JUMP_VELOCITY;
+      if (!input.locked && local.jumpY <= 0) local.jumpV = JUMP_VELOCITY; // 채팅 중에는 점프하지 않음
     }
     if (local.jumpV !== 0 || local.jumpY > 0) {
       local.jumpV -= GRAVITY * dt;

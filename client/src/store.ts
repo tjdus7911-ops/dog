@@ -67,7 +67,8 @@ export const useStore = create<State>()(() => ({
   profilePopup: null,
   reportTarget: null,
   toasts: [],
-  chatOpen: true,
+  // 모바일은 채팅을 닫은 상태로 시작 (조이스틱·액션 버튼 우선)
+  chatOpen: typeof window === 'undefined' || !window.matchMedia('(pointer: coarse)').matches,
   seats: {},
   benchMenu: null,
   seated: null,
