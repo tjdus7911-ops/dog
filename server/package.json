@@ -4,10 +4,11 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
+    "start": "tsx src/main.ts",
     "typecheck": "tsc --noEmit",
     "test:multi": "tsx test/multiplayer.test.ts",
-    "test:ai": "tsx test/dogAnalyzer.test.ts"
+    "test:ai": "tsx test/dogAnalyzer.test.ts",
+    "test:persist": "tsx test/persist.test.ts"
   },
   "dependencies": {
     "express": "^4.21.0",

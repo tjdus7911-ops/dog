@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { Server } from 'socket.io';
 import * as repo from './db';
+import * as persist from './persist';
 import { hashPassword, issueToken, requireAdmin, requireAuth, revokeToken, verifyPassword, type AuthedRequest } from './auth';
 import { setupRealtime } from './realtime';
 import { filterProfanity, RateLimiter, sanitize } from './moderation';
@@ -85,7 +86,7 @@ app.delete('/api/me', requireAuth, (req, res) => {
   const photo = repo.getDogPhoto(id);
   rt.kick(id, '회원 탈퇴가 완료되었어요.');
   repo.deleteUser(id);
-  if (photo) fs.rm(path.join(repo.UPLOAD_DIR, path.basename(photo)), { force: true }, () => {});
+  if (photo) { fs.rm(path.join(repo.UPLOAD_DIR, path.basename(photo)), { force: true }, () => {}); persist.removeUpload(path.basename(photo)); }
   res.json({ ok: true });
 });
 
@@ -129,9 +130,10 @@ app.post('/api/me/dog-photo', requireAuth, (req, res) => {
   if (!kind || (kind[0] === 'webp' && buf.subarray(8, 12).toString() !== 'WEBP')) return res.status(400).json({ error: '이미지 파일이 아니에요.' });
   const file = `${crypto.randomBytes(16).toString('hex')}.${kind[0]}`;
   fs.writeFileSync(path.join(repo.UPLOAD_DIR, file), buf);
+  persist.saveUpload(file, buf);
   const old = repo.getDogPhoto(id);
   repo.setDogPhoto(id, `/uploads/${file}`);
-  if (old) fs.rm(path.join(repo.UPLOAD_DIR, path.basename(old)), { force: true }, () => {});
+  if (old) { fs.rm(path.join(repo.UPLOAD_DIR, path.basename(old)), { force: true }, () => {}); persist.removeUpload(path.basename(old)); }
   rt.profileChanged(id);
   res.json({ profile: repo.getMyProfile(id) });
 });
@@ -140,7 +142,7 @@ app.delete('/api/me/dog-photo', requireAuth, (req, res) => {
   const id = (req as AuthedRequest).userId;
   const old = repo.getDogPhoto(id);
   repo.setDogPhoto(id, null);
-  if (old) fs.rm(path.join(repo.UPLOAD_DIR, path.basename(old)), { force: true }, () => {});
+  if (old) { fs.rm(path.join(repo.UPLOAD_DIR, path.basename(old)), { force: true }, () => {}); persist.removeUpload(path.basename(old)); }
   rt.profileChanged(id);
   res.json({ profile: repo.getMyProfile(id) });
 });
@@ -211,5 +213,9 @@ if (backupHours > 0) {
   setTimeout(doBackup, 60_000).unref();
   setInterval(doBackup, backupHours * 3600_000).unref();
 }
+
+// GitHub 저장소 영구 저장 (MUNGLE_GITHUB_REPO + MUNGLE_GITHUB_TOKEN 설정 시)
+persist.startDbSync(repo.snapshotBuffer, repo.totalChanges);
+if (persist.enabled) console.log('💾 GitHub 저장소에 데이터 자동 저장 사용 중');
 
 server.listen(PORT, () => console.log(`🐾 멍글마을 서버 실행 중: http://localhost:${PORT}`));

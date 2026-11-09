@@ -100,6 +100,18 @@ export const findUser = (id: number) => one('SELECT * FROM users WHERE id = ?', 
 /** 회원 탈퇴: 계정과 연결된 프로필·세션·친구·차단·메시지·신고가 함께 삭제된다 (ON DELETE CASCADE) */
 export const deleteUser = (id: number) => run('DELETE FROM users WHERE id = ?', id);
 
+/** 누적 변경 수 (변경이 있었는지 확인용) */
+export const totalChanges = () => Number((db.prepare('SELECT total_changes() AS n').get() as { n: number }).n);
+/** 실행 중에도 일관된 DB 스냅샷을 Buffer로 */
+export function snapshotBuffer() {
+  const tmp = path.join(DATA_DIR, `.snapshot-${process.pid}.db`);
+  fs.rmSync(tmp, { force: true });
+  db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
+  const buf = fs.readFileSync(tmp);
+  fs.rmSync(tmp, { force: true });
+  return buf;
+}
+
 // ---------- 백업 ----------
 export const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 /** 실행 중에도 안전한 DB 스냅샷을 backups/에 만들고 최근 keep개만 남긴다 */
