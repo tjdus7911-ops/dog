@@ -8,14 +8,14 @@ import * as repo from './db';
 import { hashPassword, issueToken, requireAdmin, requireAuth, revokeToken, verifyPassword, type AuthedRequest } from './auth';
 import { setupRealtime } from './realtime';
 import { filterProfanity, RateLimiter, sanitize } from './moderation';
-import { dogAnalyzer } from './dogAnalyzer';
+import { AnalysisError, dogAnalyzer, type DogPhoto } from './dogAnalyzer';
 import { validateDog, validateHuman } from '../../shared/avatar';
 import { DEFAULT_PRIVACY } from '../../shared/protocol';
 
 const PORT = Number(process.env.PORT ?? 3001);
 const app = express();
 app.disable('x-powered-by');
-app.use(express.json({ limit: '3mb' }));
+app.use(express.json({ limit: '6mb' }));
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: process.env.MUNGLE_CORS?.split(',') ?? false }, maxHttpBufferSize: 64 * 1024 });
@@ -125,6 +125,35 @@ app.use('/uploads', express.static(repo.UPLOAD_DIR, { maxAge: '7d', index: false
 app.get('/api/parks', (_req, res) => res.json({ parks: rt.parks() }));
 
 app.get('/api/dog-analysis/status', (_req, res) => res.json({ available: dogAnalyzer.available }));
+
+// AI 강아지 사진 분석: 정면(필수)·측면·전신 최대 3장 → 파츠 값
+const aiLimiter = new RateLimiter(10, 3600_000);
+app.post('/api/dog-analysis', requireAuth, async (req, res) => {
+  const userId = (req as AuthedRequest).userId;
+  if (!dogAnalyzer.available) return res.status(503).json({ error: 'AI 분석이 아직 설정되지 않았어요.' });
+  const list = Array.isArray(req.body?.photos) ? req.body.photos : [];
+  const photos: DogPhoto[] = [];
+  const seen = new Set<string>();
+  for (const p of list.slice(0, 3)) {
+    if (!['front', 'side', 'full'].includes(p?.kind) || seen.has(p.kind)) return res.status(400).json({ error: '사진 구분이 올바르지 않아요.' });
+    const m = typeof p.dataUrl === 'string' ? /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(p.dataUrl) : null;
+    if (!m) return res.status(400).json({ error: 'PNG, JPG, WEBP 사진만 분석할 수 있어요.' });
+    const buf = Buffer.from(m[2], 'base64');
+    if (buf.length > 1.5 * 1024 * 1024) return res.status(400).json({ error: '사진 한 장은 1.5MB 이하여야 해요.' });
+    if (!MAGIC.some(([, sig]) => sig.every((b, i) => buf[i] === b))) return res.status(400).json({ error: '이미지 파일이 아니에요.' });
+    seen.add(p.kind);
+    photos.push({ kind: p.kind, mediaType: m[1] as DogPhoto['mediaType'], base64: m[2] });
+  }
+  if (!seen.has('front')) return res.status(400).json({ error: '정면 사진은 꼭 필요해요.' });
+  if (!aiLimiter.allow(`ai${userId}`)) return res.status(429).json({ error: 'AI 분석은 1시간에 10번까지 할 수 있어요.' });
+  try {
+    res.json({ result: await dogAnalyzer.analyze(photos) });
+  } catch (e) {
+    if (e instanceof AnalysisError) return res.status(e.status).json({ error: e.message });
+    console.error(e);
+    res.status(500).json({ error: 'AI 분석 중 오류가 발생했어요.' });
+  }
+});
 
 // ---------- 운영 ----------
 app.get('/api/admin/reports', requireAuth, requireAdmin, (_req, res) => res.json({ reports: repo.listReports() }));

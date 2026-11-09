@@ -1,93 +1,102 @@
-// 아바타 만들기 / 수정 — 사람 아바타 & 강아지 아바타(파츠 조합) + 360도 미리보기
+// 아바타 만들기 / 수정 — 왼쪽: 3D 미리보기 + 아바타 예시 / 오른쪽: 항목별 실제 3D 썸네일 커스터마이징
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls } from '@react-three/drei';
-import * as THREE from 'three';
 import {
-  ACCESSORIES, BOTTOM_STYLES, BREED_PRESETS, CLOTH_COLORS, COAT_COLORS, DOG_EARS, DOG_FUR, DOG_PATTERNS, DOG_SIZES,
-  DOG_SNOUTS, DOG_TAILS, HAIR_COLORS, HAIR_STYLES, HARNESS_COLORS, HAT_STYLES, SHOE_COLORS, SKIN_TONES, TOP_STYLES,
-  type DogAvatar, type HumanAvatar,
+  ACCESSORIES, BREED_PRESETS, CLOTH_COLORS, COAT_COLORS, DOG_EARS, DOG_FUR, DOG_PATTERNS, DOG_SIZES, DOG_SNOUTS,
+  DOG_TAILS, HAIR_COLORS, HAIR_STYLES, HARNESS_COLORS, HAT_STYLES, SKIN_TONES,
+  type Accessory, type DogAvatar, type HatStyle, type HumanAvatar,
 } from '@shared/avatar';
-import { DogAnim, HumanAnim, type MyProfile } from '@shared/protocol';
-import { Human, newHumanDriver } from '../game/models/Human';
-import { Dog, newDogDriver } from '../game/models/Dog';
+import type { MyProfile } from '@shared/protocol';
 import { api } from '../lib/api';
+import { resizeImage } from '../lib/image';
 import { get, set, toast } from '../store';
-import { geo, mat } from '../game/lowpoly';
+import { useDogThumb, useHumanThumb, type DogView, type HumanView } from '../game/thumbs';
+import { AvatarStage, type StageFocus } from './AvatarStage';
+import { DogAiPanel } from './DogAiPanel';
+import { BOTTOM_PRESETS, EXAMPLES, FUR_LABEL, LABEL, SHOE_PRESETS, SNOUT_LABEL, TAIL_LABEL, THUMB_BASE, TOP_PRESETS } from './avatarOptions';
 
-const L: Record<string, string> = {
-  short: '숏컷', bob: '단발', long: '긴머리', bun: '똥머리', spiky: '삐죽',
-  hoodie: '후드티', tee: '티셔츠', jacket: '재킷', shorts: '반바지', pants: '긴바지', skirt: '치마',
-  none: '없음', cap: '캡모자', beanie: '비니', backpack: '가방', glasses: '안경',
-  small: '소형', medium: '중형', large: '대형', patch: '얼룩', saddle: '등 무늬', mask: '얼굴·가슴', socks: '흰 양말',
-  floppy: '접힌 귀', pointy: '선 귀', fold: '반쯤 접힌 귀', curl: '말린 꼬리', straight: '곧은 꼬리', fluffy: '풍성한 꼬리',
-  medium_snout: '보통',
-};
-const snoutLabel = { short: '짧은 코', medium: '보통 코', long: '긴 코' };
-const furLabel = { short: '단모', long: '장모' };
-const shortTail = { short: '짧은 꼬리' };
-
-function Preview({ human, dog, walking }: { human: HumanAvatar; dog: DogAvatar; walking: boolean }) {
-  const hd = useRef(newHumanDriver());
-  const dd = useRef(newDogDriver());
-  useFrame((state, dt) => {
-    hd.current.anim = walking ? HumanAnim.Walk : HumanAnim.Idle;
-    hd.current.phase += walking ? dt * 7 : 0;
-    dd.current.anim = walking ? DogAnim.Walk : DogAnim.Stand;
-    dd.current.phase += walking ? dt * 11 : 0;
-    dd.current.look = walking ? 0 : Math.sin(state.clock.elapsedTime * 0.8) * 0.5;
-  });
+// ---------- 공통 조각 ----------
+function OptionRow({ icon, label, children, extra }: { icon: string; label: string; children: ReactNode; extra?: ReactNode }) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const [more, setMore] = useState(false);
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const check = () => setMore(el.scrollWidth - el.clientWidth - el.scrollLeft > 4);
+    check();
+    el.addEventListener('scroll', check);
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => { el.removeEventListener('scroll', check); ro.disconnect(); };
+  }, []);
   return (
-    <group position={[0, -0.75, 0]}>
-      <mesh geometry={geo.cyl(1.25, 1.35, 0.18, 12)} material={mat('#fdeedd')} position={[0, -0.09, 0]} />
-      <mesh geometry={geo.cyl(1.32, 1.32, 0.02, 12)} material={mat('#a9d38f')} position={[0, 0.005, 0]} />
-      <group position={[-0.35, 0, 0]}><Human avatar={human} driver={hd} /></group>
-      <group position={[0.5, 0, 0.25]} rotation={[0, -0.5, 0]}><Dog avatar={dog} driver={dd} /></group>
-    </group>
+    <div className="py-3 border-b border-[#f4e6d7] last:border-0">
+      <div className="flex items-center gap-2 md:gap-3">
+        <div className="w-[88px] md:w-[124px] shrink-0 flex items-center gap-2">
+          <span className="w-7 h-7 grid place-items-center text-lg opacity-80">{icon}</span>
+          <span className="font-display text-[15px] md:text-base">{label}</span>
+        </div>
+        <div ref={scroller} className="flex-1 min-w-0 flex gap-2 overflow-x-auto scroll-soft no-scrollbar py-1 px-0.5">{children}</div>
+        <button type="button" aria-label="더 보기" onClick={() => scroller.current?.scrollBy({ left: 220, behavior: 'smooth' })}
+          className={`w-7 h-7 shrink-0 rounded-full text-cocoa-soft hover:bg-cream-2 transition ${more ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>›</button>
+      </div>
+      {extra && <div className="mt-2 md:ml-[136px] ml-[96px]">{extra}</div>}
+    </div>
   );
 }
 
-function Swatches({ list, value, onChange }: { list: readonly string[]; value: string; onChange: (v: string) => void }) {
+function Thumb({ src, selected, onClick, label, size = 64 }: { src: string | null; selected: boolean; onClick: () => void; label: string; size?: number }) {
   return (
-    <div className="flex flex-wrap gap-2">
+    <button type="button" onClick={onClick} title={label} aria-label={label} aria-pressed={selected}
+      className={`shrink-0 rounded-2xl bg-white grid place-items-center transition border-2 ${selected ? 'border-[#f4776a] bg-[#fff1ec] shadow-[0_3px_10px_rgba(244,119,106,.25)]' : 'border-[#f3e7da] hover:border-[#f6b6a9]'}`}
+      style={{ width: size + 8, height: size + 8 }}>
+      {src ? <img src={src} alt="" draggable={false} style={{ width: size, height: size }} className="object-contain" />
+        : <span className="rounded-xl bg-cream-2 animate-pulse" style={{ width: size * 0.7, height: size * 0.7 }} />}
+    </button>
+  );
+}
+
+const HumanThumb = (p: { a: HumanAvatar; view: HumanView; selected: boolean; onClick: () => void; label: string }) =>
+  <Thumb src={useHumanThumb(p.a, p.view)} selected={p.selected} onClick={p.onClick} label={p.label} />;
+const DogThumb = (p: { d: DogAvatar; view: DogView; selected: boolean; onClick: () => void; label: string }) =>
+  <Thumb src={useDogThumb(p.d, p.view)} selected={p.selected} onClick={p.onClick} label={p.label} />;
+
+function Swatches({ list, value, onChange, square }: { list: readonly string[]; value: string; onChange: (v: string) => void; square?: boolean }) {
+  return (
+    <>
       {list.map((c) => (
-        <button key={c} type="button" onClick={() => onChange(c)} aria-label={c}
-          className={`w-8 h-8 rounded-full border-2 transition ${value === c ? 'border-peach scale-110 shadow-md' : 'border-white shadow-sm'}`} style={{ background: c }} />
+        <button key={c} type="button" onClick={() => onChange(c)} aria-label={`색상 ${c}`} aria-pressed={value === c}
+          className={`shrink-0 transition border-2 ${square ? 'w-12 h-12 rounded-2xl' : 'w-10 h-10 rounded-full'} ${value === c ? 'border-[#f4776a] scale-105 shadow-[0_3px_10px_rgba(244,119,106,.3)]' : 'border-white shadow-sm'}`}
+          style={{ background: c, outline: value === c ? '3px solid #fff' : undefined, outlineOffset: -5 }} />
       ))}
-    </div>
+    </>
   );
 }
 
-function Chips<T extends string>({ list, value, onChange, labels }: { list: readonly T[]; value: T; onChange: (v: T) => void; labels?: Record<string, string> }) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {list.map((v) => (
-        <button key={v} type="button" onClick={() => onChange(v)}
-          className={`btn px-3 py-1.5 text-sm ${value === v ? 'btn-peach !shadow-none' : 'btn-ghost !shadow-none border border-[#f1e2d2]'}`}>
-          {(labels ?? L)[v] ?? L[v] ?? v}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-const Row = ({ label, children }: { label: string; children: ReactNode }) => (
-  <div className="py-2.5 border-b border-[#f6e9db] last:border-0">
-    <div className="text-sm text-cocoa-soft mb-1.5">{label}</div>
-    {children}
+const SmallSwatches = ({ list, value, onChange }: { list: readonly string[]; value: string; onChange: (v: string) => void }) => (
+  <div className="flex flex-wrap gap-1.5 items-center">
+    <span className="text-xs text-cocoa-soft mr-1">색상</span>
+    {list.map((c) => (
+      <button key={c} type="button" onClick={() => onChange(c)} aria-label={`색상 ${c}`}
+        className={`w-6 h-6 rounded-full border-2 ${value === c ? 'border-[#f4776a] scale-110' : 'border-white shadow-sm'}`} style={{ background: c }} />
+    ))}
   </div>
 );
 
-async function resizeImage(file: File): Promise<string> {
-  const bmp = await createImageBitmap(file);
-  const max = 640;
-  const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
-  const c = document.createElement('canvas');
-  c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
-  c.getContext('2d')!.drawImage(bmp, 0, 0, c.width, c.height);
-  return c.toDataURL('image/jpeg', 0.85);
+function Chips<T extends string>({ list, value, onChange, labels = LABEL }: { list: readonly T[]; value: T; onChange: (v: T) => void; labels?: Record<string, string> }) {
+  return (
+    <>
+      {list.map((v) => (
+        <button key={v} type="button" onClick={() => onChange(v)}
+          className={`shrink-0 btn px-3.5 py-2 text-sm border-2 !shadow-none ${value === v ? 'border-[#f4776a] bg-[#fff1ec] text-[#e2604f]' : 'border-[#f3e7da] bg-white'}`}>
+          {labels[v] ?? v}
+        </button>
+      ))}
+    </>
+  );
 }
 
+
+// ---------- 화면 ----------
 export default function AvatarEditor({ mode }: { mode: 'onboarding' | 'edit' }) {
   const me = get().me!;
   const [tab, setTab] = useState<'human' | 'dog'>('human');
@@ -98,17 +107,18 @@ export default function AvatarEditor({ mode }: { mode: 'onboarding' | 'edit' }) 
   const [dogIntro, setDogIntro] = useState(me.dogIntro);
   const [photo, setPhoto] = useState(me.dogPhoto);
   const [walking, setWalking] = useState(false);
+  const [focus, setFocus] = useState<StageFocus>('both');
+  const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const h = <K extends keyof HumanAvatar>(k: K) => (v: HumanAvatar[K]) => setHuman({ ...human, [k]: v });
-  const d = <K extends keyof DogAvatar>(k: K) => (v: DogAvatar[K]) => setDog({ ...dog, [k]: v });
+  const h = (patch: Partial<HumanAvatar>) => setHuman((p) => ({ ...p, ...patch }));
+  const d = (patch: Partial<DogAvatar>) => setDog((p) => ({ ...p, ...patch }));
 
   useEffect(() => { document.body.style.cursor = ''; }, []);
+  useEffect(() => { setFocus(tab === 'dog' ? 'dog' : 'both'); }, [tab]);
 
-  async function uploadPhoto(file: File | undefined) {
-    if (!file) return;
+  async function uploadPhoto(dataUrl: string) {
     try {
-      const dataUrl = await resizeImage(file);
       const r = await api<{ profile: MyProfile }>('/api/me/dog-photo', { body: { dataUrl } });
       setPhoto(r.profile.dogPhoto);
       set({ me: { ...get().me!, dogPhoto: r.profile.dogPhoto } });
@@ -133,113 +143,184 @@ export default function AvatarEditor({ mode }: { mode: 'onboarding' | 'edit' }) 
     finally { setBusy(false); }
   }
 
-  const body = (
-    <div className="flex flex-col md:flex-row gap-4 h-full min-h-0">
-      {/* 360도 미리보기 */}
-      <div className="md:w-[44%] shrink-0 flex flex-col">
-        <div className="relative rounded-3xl bg-gradient-to-b from-[#fff8ef] to-[#fdeedd] h-[34vh] md:h-full min-h-[240px] overflow-hidden">
-          <Canvas camera={{ position: [0, 0.6, 3.4], fov: 38 }} dpr={[1, 2]}>
-            <hemisphereLight args={['#fff7ea', '#e8d6b8', 1.5]} />
-            <directionalLight position={[3, 5, 4]} intensity={1.4} />
-            <Preview human={human} dog={dog} walking={walking} />
-            <OrbitControls enablePan={false} enableZoom={false} autoRotate autoRotateSpeed={1.6} minPolarAngle={0.9} maxPolarAngle={1.75} target={new THREE.Vector3(0, -0.05, 0)} />
-          </Canvas>
-          <div className="absolute bottom-3 inset-x-0 flex justify-center gap-2">
-            <span className="name-tag">↔ 드래그해서 360도 돌려 보기</span>
-            <button className="btn btn-ghost text-xs px-3 py-1" onClick={() => setWalking(!walking)}>{walking ? '⏸ 멈추기' : '🚶 걷기 보기'}</button>
-          </div>
+  // 썸네일 기준 아바타 (관련 항목만 반영)
+  const base: HumanAvatar = { ...THUMB_BASE, skin: human.skin };
+  const hairBase: HumanAvatar = { ...base, hairStyle: human.hairStyle, hairColor: human.hairColor };
+
+  const humanRows = (
+    <>
+      <div className="flex items-center gap-3 py-3 border-b border-[#f4e6d7]">
+        <span className="w-[88px] md:w-[124px] shrink-0 font-display pl-9">닉네임</span>
+        <div className="flex-1 relative">
+          <input className="field !rounded-2xl pr-20" value={nickname} maxLength={12} onChange={(e) => setNickname(e.target.value)} />
+          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-cocoa-soft">{Array.from(nickname).length}/12자</span>
         </div>
       </div>
+      <OptionRow icon="🙂" label="피부색"><Swatches list={SKIN_TONES} value={human.skin} onChange={(skin) => h({ skin })} square /></OptionRow>
+      <OptionRow icon="✂️" label="헤어스타일">
+        {HAIR_STYLES.map((s) => (
+          <HumanThumb key={s} a={{ ...base, hairColor: human.hairColor, hairStyle: s }} view="hair" label={LABEL[s]} selected={human.hairStyle === s} onClick={() => h({ hairStyle: s })} />
+        ))}
+      </OptionRow>
+      <OptionRow icon="🎨" label="머리색"><Swatches list={HAIR_COLORS} value={human.hairColor} onChange={(hairColor) => h({ hairColor })} /></OptionRow>
+      <OptionRow icon="👕" label="상의" extra={<SmallSwatches list={CLOTH_COLORS} value={human.topColor} onChange={(topColor) => h({ topColor })} />}>
+        {TOP_PRESETS.map((p, i) => (
+          <HumanThumb key={i} a={{ ...base, ...p }} view="top" label={LABEL[p.top]} selected={human.top === p.top && human.topColor === p.topColor} onClick={() => h(p)} />
+        ))}
+      </OptionRow>
+      <OptionRow icon="👖" label="하의" extra={<SmallSwatches list={CLOTH_COLORS} value={human.bottomColor} onChange={(bottomColor) => h({ bottomColor })} />}>
+        {BOTTOM_PRESETS.map((p, i) => (
+          <HumanThumb key={i} a={{ ...base, ...p }} view="bottom" label={LABEL[p.bottom]} selected={human.bottom === p.bottom && human.bottomColor === p.bottomColor} onClick={() => h(p)} />
+        ))}
+      </OptionRow>
+      <OptionRow icon="👟" label="신발">
+        {SHOE_PRESETS.map((p, i) => (
+          <HumanThumb key={i} a={{ ...base, ...p }} view="shoes" label={LABEL[p.shoes]} selected={human.shoes === p.shoes && human.shoeColor === p.shoeColor} onClick={() => h(p)} />
+        ))}
+      </OptionRow>
+      <OptionRow icon="🧢" label="모자" extra={human.hat !== 'none' && <SmallSwatches list={CLOTH_COLORS} value={human.hatColor} onChange={(hatColor) => h({ hatColor })} />}>
+        {HAT_STYLES.map((s: HatStyle) => s === 'none'
+          ? <NoneBtn key={s} selected={human.hat === 'none'} onClick={() => h({ hat: 'none' })} />
+          : <HumanThumb key={s} a={{ ...hairBase, hat: s, hatColor: human.hatColor }} view="head" label={LABEL[s]} selected={human.hat === s} onClick={() => h({ hat: s })} />)}
+      </OptionRow>
+      <OptionRow icon="👓" label="액세서리">
+        {ACCESSORIES.map((s: Accessory) => s === 'none'
+          ? <NoneBtn key={s} selected={human.accessory === 'none'} onClick={() => h({ accessory: 'none' })} />
+          : <HumanThumb key={s} a={{ ...hairBase, accessory: s }} view={s === 'backpack' || s === 'crossbag' ? 'back' : 'head'} label={LABEL[s]} selected={human.accessory === s} onClick={() => h({ accessory: s })} />)}
+      </OptionRow>
+    </>
+  );
 
-      {/* 설정 */}
-      <div className="flex-1 min-h-0 flex flex-col">
-        <div className="grid grid-cols-2 gap-1 bg-cream-2 rounded-full p-1 mb-2 shrink-0">
-          <button className={`btn py-2 ${tab === 'human' ? 'btn-peach !shadow-none' : 'text-cocoa-soft'}`} onClick={() => setTab('human')}>🧑 사람 아바타</button>
-          <button className={`btn py-2 ${tab === 'dog' ? 'btn-peach !shadow-none' : 'text-cocoa-soft'}`} onClick={() => setTab('dog')}>🐶 강아지 아바타</button>
+  const dogRows = (
+    <>
+      <DogAiPanel current={dog} onApply={(next) => setDog({ ...next, harness: dog.harness })} onUseAsProfile={uploadPhoto} />
+      <div className="grid md:grid-cols-2 gap-3 py-3 border-b border-[#f4e6d7]">
+        <label className="text-sm font-display">강아지 이름
+          <input className="field !rounded-2xl mt-1 font-body" value={dogName} maxLength={12} onChange={(e) => setDogName(e.target.value)} />
+        </label>
+        <label className="text-sm font-display">한 줄 소개
+          <input className="field !rounded-2xl mt-1 font-body" value={dogIntro} maxLength={80} placeholder="산책과 간식을 좋아해요!" onChange={(e) => setDogIntro(e.target.value)} />
+        </label>
+      </div>
+      <div className="flex items-center gap-3 py-3 border-b border-[#f4e6d7]">
+        <span className="w-[88px] md:w-[124px] shrink-0 font-display flex items-center gap-2"><span className="w-7 text-lg text-center">📷</span>프로필 사진</span>
+        {photo ? <img src={photo} alt="강아지 사진" className="w-14 h-14 rounded-2xl object-cover border-2 border-white shadow" />
+          : <div className="w-14 h-14 rounded-2xl bg-cream-2 grid place-items-center text-xl">🐶</div>}
+        <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+          onChange={async (e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) uploadPhoto(await resizeImage(f, 640)); }} />
+        <button type="button" className="btn btn-ghost px-4 py-2 text-sm border-2 border-[#f3e7da] !shadow-none" onClick={() => fileRef.current?.click()}>{photo ? '바꾸기' : '사진 올리기'}</button>
+        {photo && <button type="button" className="text-sm text-cocoa-soft underline" onClick={removePhoto}>삭제</button>}
+      </div>
+      <OptionRow icon="🐕" label="견종 유형">
+        {Object.entries(BREED_PRESETS).map(([k, p]) => (
+          <DogThumb key={k} d={{ ...p.dog, harness: dog.harness }} view="full" label={p.label} selected={dog.breed === k} onClick={() => setDog({ ...p.dog, harness: dog.harness })} />
+        ))}
+      </OptionRow>
+      <OptionRow icon="📏" label="체형"><Chips list={DOG_SIZES} value={dog.size} onChange={(size) => d({ size })} /></OptionRow>
+      <OptionRow icon="〰️" label="털 길이"><Chips list={DOG_FUR} value={dog.fur} onChange={(fur) => d({ fur })} labels={FUR_LABEL} /></OptionRow>
+      <OptionRow icon="🎨" label="털색"><Swatches list={COAT_COLORS} value={dog.coat} onChange={(coat) => d({ coat })} /></OptionRow>
+      <OptionRow icon="🐾" label="주요 무늬" extra={dog.pattern !== 'none' && <SmallSwatches list={COAT_COLORS} value={dog.secondary} onChange={(secondary) => d({ secondary })} />}>
+        {DOG_PATTERNS.map((s) => <DogThumb key={s} d={{ ...dog, pattern: s }} view="full" label={LABEL[s]} selected={dog.pattern === s} onClick={() => d({ pattern: s })} />)}
+      </OptionRow>
+      <OptionRow icon="👂" label="귀 모양">
+        {DOG_EARS.map((s) => <DogThumb key={s} d={{ ...dog, ear: s }} view="head" label={LABEL[s]} selected={dog.ear === s} onClick={() => d({ ear: s })} />)}
+      </OptionRow>
+      <OptionRow icon="👃" label="주둥이">
+        {DOG_SNOUTS.map((s) => <DogThumb key={s} d={{ ...dog, snout: s }} view="side" label={SNOUT_LABEL[s]} selected={dog.snout === s} onClick={() => d({ snout: s })} />)}
+      </OptionRow>
+      <OptionRow icon="🌀" label="꼬리">
+        {DOG_TAILS.map((s) => <DogThumb key={s} d={{ ...dog, tail: s }} view="tail" label={TAIL_LABEL[s]} selected={dog.tail === s} onClick={() => d({ tail: s })} />)}
+      </OptionRow>
+      <OptionRow icon="🎀" label="목줄·하네스"><Swatches list={HARNESS_COLORS} value={dog.harness} onChange={(harness) => d({ harness })} /></OptionRow>
+    </>
+  );
+
+  const cta = mode === 'onboarding' && tab === 'human'
+    ? <button className="btn btn-coral w-full py-3.5 text-lg" onClick={() => setTab('dog')}>다음: 강아지 아바타 만들기 →</button>
+    : (
+      <div className="flex gap-2">
+        {mode === 'edit' && <button className="btn btn-ghost px-6 py-3.5" onClick={() => set({ panel: 'none' })}>취소</button>}
+        {mode === 'onboarding' && <button className="btn btn-ghost px-6 py-3.5" onClick={() => setTab('human')}>← 사람 아바타</button>}
+        <button className="btn btn-coral flex-1 py-3.5 text-lg" disabled={busy} onClick={save}>{busy ? '저장 중…' : mode === 'onboarding' ? '완성! 산책 나가기 🐾' : '저장하기'}</button>
+      </div>
+    );
+
+  const stageButtons: [string, string, () => void, boolean][] = [
+    ['⛶', expanded ? '작게 보기' : '크게 보기', () => setExpanded(!expanded), expanded],
+    ['👕', '사람 보기', () => setFocus(focus === 'human' ? 'both' : 'human'), focus === 'human'],
+    ['🐾', '강아지 보기', () => setFocus(focus === 'dog' ? 'both' : 'dog'), focus === 'dog'],
+    ['🚶', walking ? '걷기 멈추기' : '걷는 모습 보기', () => setWalking(!walking), walking],
+  ];
+
+  return (
+    <div className={`${mode === 'edit' ? 'fixed inset-0 z-40' : 'h-full'} bg-[#fff8f0] flex flex-col overflow-hidden`}>
+      {/* 헤더 */}
+      <header className="flex items-center gap-3 md:gap-5 px-4 md:px-7 pt-3 md:pt-5 pb-2 shrink-0">
+        <div className="flex items-center gap-2">
+          <span className="text-3xl md:text-4xl leading-none">🐾</span>
+          <div className="leading-none"><div className="font-display text-xl md:text-[28px]">멍글마을</div><div className="text-[11px] font-display text-cocoa-soft hidden md:block mt-0.5">Mungle Village</div></div>
         </div>
-        <div className="flex-1 overflow-y-auto scroll-soft pr-1">
-          {tab === 'human' ? (
-            <>
-              <Row label="닉네임"><input className="field" value={nickname} maxLength={12} onChange={(e) => setNickname(e.target.value)} /></Row>
-              <Row label="피부색"><Swatches list={SKIN_TONES} value={human.skin} onChange={h('skin')} /></Row>
-              <Row label="헤어스타일"><Chips list={HAIR_STYLES} value={human.hairStyle} onChange={h('hairStyle')} /></Row>
-              <Row label="머리색"><Swatches list={HAIR_COLORS} value={human.hairColor} onChange={h('hairColor')} /></Row>
-              <Row label="상의"><Chips list={TOP_STYLES} value={human.top} onChange={h('top')} /><div className="mt-2"><Swatches list={CLOTH_COLORS} value={human.topColor} onChange={h('topColor')} /></div></Row>
-              <Row label="하의"><Chips list={BOTTOM_STYLES} value={human.bottom} onChange={h('bottom')} /><div className="mt-2"><Swatches list={CLOTH_COLORS} value={human.bottomColor} onChange={h('bottomColor')} /></div></Row>
-              <Row label="신발"><Swatches list={SHOE_COLORS} value={human.shoeColor} onChange={h('shoeColor')} /></Row>
-              <Row label="모자"><Chips list={HAT_STYLES} value={human.hat} onChange={h('hat')} />{human.hat !== 'none' && <div className="mt-2"><Swatches list={CLOTH_COLORS} value={human.hatColor} onChange={h('hatColor')} /></div>}</Row>
-              <Row label="액세서리"><Chips list={ACCESSORIES} value={human.accessory} onChange={h('accessory')} /></Row>
-            </>
-          ) : (
-            <>
-              <div className="rounded-2xl bg-sage-soft text-[13px] px-3 py-2.5 my-2 leading-relaxed">
-                🤖 <b>AI 사진 분석은 아직 연결되지 않았어요.</b> 지금은 아래에서 견종 유형을 고르고 털색·귀·꼬리를 직접 맞춰 주세요.
-                AI가 연결되면 사진을 분석해 같은 항목을 자동으로 채워 드리고, 결과는 여기서 다시 수정할 수 있어요.
+        <span className="w-px h-7 bg-[#e9d8c6]" />
+        <h1 className="font-display text-xl md:text-[28px]">아바타 {mode === 'edit' ? '꾸미기' : '만들기'}</h1>
+        <p className="hidden lg:block text-sm text-cocoa-soft border-b-2 border-[#f3e3d2] pb-0.5">나와 우리 강아지를 닮은 로우폴리 아바타를 꾸며 주세요 ♡</p>
+        {mode === 'edit' && <button className="ml-auto btn btn-ghost w-10 h-10" onClick={() => set({ panel: 'none' })} aria-label="닫기">✕</button>}
+      </header>
+
+      <div className="flex-1 min-h-0 flex flex-col md:flex-row gap-3 md:gap-5 px-3 md:px-7 pb-3 md:pb-6">
+        {/* 왼쪽: 미리보기 + 예시 */}
+        <div className="md:w-[41%] shrink-0 flex flex-col gap-3 md:gap-4 min-h-0">
+          <div className={`${expanded ? 'fixed inset-0 z-50 rounded-none' : 'relative rounded-[28px] h-[34vh] md:h-auto md:flex-1 min-h-[220px]'} overflow-hidden shadow-[0_6px_24px_rgba(122,82,56,.14)] bg-[#bfe3f7]`}>
+            <AvatarStage human={human} dog={dog} walking={walking} focus={focus} />
+            <div className="absolute right-3 top-3 flex flex-col gap-2.5">
+              {stageButtons.map(([icon, label, onClick, active]) => (
+                <button key={label} onClick={onClick} title={label} aria-label={label}
+                  className={`w-11 h-11 md:w-12 md:h-12 rounded-full grid place-items-center text-lg shadow-md transition ${active ? 'bg-[#f4776a] text-white' : 'bg-white/95 hover:bg-white'}`}>{icon}</button>
+              ))}
+            </div>
+            <div className="absolute bottom-3 inset-x-0 flex justify-center pointer-events-none">
+              <span className="font-display text-white text-lg md:text-xl drop-shadow-[0_1px_3px_rgba(0,0,0,.35)]">⟲ 360° ⟳</span>
+            </div>
+          </div>
+          {tab === 'human' && !expanded && (
+            <div className="hidden md:block panel !rounded-[24px] p-3.5 shrink-0">
+              <div className="font-display text-sm mb-2 flex items-center gap-1.5"><span className="text-[#f4776a]">●</span> 아바타 예시 <span className="text-xs text-cocoa-soft font-body">· 누르면 바로 적용돼요</span></div>
+              <div className="grid grid-cols-4 gap-2.5">
+                {EXAMPLES.map((ex, i) => <ExampleCard key={i} a={ex} bg={['#e6ecf7', '#fde3e6', '#ece7f4', '#f1e6f7'][i]} onClick={() => setHuman({ ...ex })} />)}
               </div>
-              <Row label="강아지 이름"><input className="field" value={dogName} maxLength={12} onChange={(e) => setDogName(e.target.value)} /></Row>
-              <Row label="한 줄 소개">
-                <input className="field" value={dogIntro} maxLength={80} placeholder="예: 산책과 간식을 좋아하는 호기심 많은 아이예요!" onChange={(e) => setDogIntro(e.target.value)} />
-              </Row>
-              <Row label="실제 강아지 사진 (프로필에 표시)">
-                <div className="flex items-center gap-3">
-                  {photo ? <img src={photo} alt="강아지 사진" className="w-16 h-16 rounded-2xl object-cover border-2 border-white shadow" />
-                    : <div className="w-16 h-16 rounded-2xl bg-cream-2 grid place-items-center text-2xl">📷</div>}
-                  <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => { uploadPhoto(e.target.files?.[0]); e.target.value = ''; }} />
-                  <button type="button" className="btn btn-ghost px-4 py-2 text-sm" onClick={() => fileRef.current?.click()}>{photo ? '사진 바꾸기' : '사진 올리기'}</button>
-                  {photo && <button type="button" className="text-sm text-cocoa-soft underline" onClick={removePhoto}>삭제</button>}
-                </div>
-              </Row>
-              <Row label="견종 유형 (선택하면 기본 파츠가 맞춰져요)">
-                <div className="flex flex-wrap gap-1.5">
-                  {Object.entries(BREED_PRESETS).map(([k, p]) => (
-                    <button key={k} type="button" onClick={() => setDog({ ...p.dog, harness: dog.harness })}
-                      className={`btn px-3 py-1.5 text-sm ${dog.breed === k ? 'btn-peach !shadow-none' : 'btn-ghost !shadow-none border border-[#f1e2d2]'}`}>{p.label}</button>
-                  ))}
-                </div>
-              </Row>
-              <Row label="체형"><Chips list={DOG_SIZES} value={dog.size} onChange={d('size')} /></Row>
-              <Row label="털 길이"><Chips list={DOG_FUR} value={dog.fur} onChange={d('fur')} labels={furLabel} /></Row>
-              <Row label="털색 (기본)"><Swatches list={COAT_COLORS} value={dog.coat} onChange={d('coat')} /></Row>
-              <Row label="주요 무늬"><Chips list={DOG_PATTERNS} value={dog.pattern} onChange={d('pattern')} />
-                {dog.pattern !== 'none' && <div className="mt-2"><div className="text-xs text-cocoa-soft mb-1">무늬 색</div><Swatches list={COAT_COLORS} value={dog.secondary} onChange={d('secondary')} /></div>}
-              </Row>
-              <Row label="귀 모양"><Chips list={DOG_EARS} value={dog.ear} onChange={d('ear')} /></Row>
-              <Row label="꼬리 모양"><Chips list={DOG_TAILS} value={dog.tail} onChange={d('tail')} labels={{ ...L, ...shortTail }} /></Row>
-              <Row label="주둥이"><Chips list={DOG_SNOUTS} value={dog.snout} onChange={d('snout')} labels={snoutLabel} /></Row>
-              <Row label="하네스 색"><Swatches list={HARNESS_COLORS} value={dog.harness} onChange={d('harness')} /></Row>
-            </>
+            </div>
           )}
         </div>
-        <div className="pt-3 flex gap-2 shrink-0">
-          {mode === 'onboarding' && tab === 'human'
-            ? <button className="btn btn-peach flex-1 py-3 text-lg" onClick={() => setTab('dog')}>다음: 강아지 만들기 →</button>
-            : <>
-                {mode === 'edit' && <button className="btn btn-ghost px-5 py-3" onClick={() => set({ panel: 'none' })}>취소</button>}
-                <button className="btn btn-peach flex-1 py-3 text-lg" disabled={busy} onClick={save}>{busy ? '저장 중…' : mode === 'onboarding' ? '완성! 산책 나가기 🐾' : '저장하기'}</button>
-              </>}
+
+        {/* 오른쪽: 커스터마이징 */}
+        <div className="flex-1 min-w-0 min-h-0 panel !rounded-[28px] p-3 md:p-5 flex flex-col">
+          <div className="grid grid-cols-2 gap-1 bg-[#fdeee3] rounded-full p-1 shrink-0">
+            {(['human', 'dog'] as const).map((t) => (
+              <button key={t} onClick={() => setTab(t)}
+                className={`btn py-2.5 md:py-3 text-base md:text-lg ${tab === t ? 'bg-[#f4776a] text-white shadow-[0_3px_0_#e2604f]' : 'text-cocoa'}`}>
+                {t === 'human' ? '🧑 사람 아바타' : '🐾 강아지 아바타'}
+              </button>
+            ))}
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto scroll-soft px-1 md:px-2 mt-1">{tab === 'human' ? humanRows : dogRows}</div>
+          <div className="pt-3 shrink-0">{cta}</div>
         </div>
       </div>
     </div>
   );
+}
 
-  if (mode === 'onboarding') {
-    return (
-      <div className="h-full bg-cream p-3 md:p-6 flex flex-col">
-        <div className="flex items-center gap-2 mb-3 shrink-0">
-          <span className="text-2xl">✨</span>
-          <h1 className="font-display text-2xl">아바타 만들기</h1>
-          <span className="text-sm text-cocoa-soft ml-2 hidden sm:inline">나와 우리 강아지를 닮은 로우폴리 아바타를 꾸며 주세요</span>
-        </div>
-        <div className="panel p-3 md:p-5 flex-1 min-h-0">{body}</div>
-      </div>
-    );
-  }
+function NoneBtn({ selected, onClick }: { selected: boolean; onClick: () => void }) {
   return (
-    <div className="fixed inset-0 z-40 bg-[#5a403333] p-2 md:p-8 grid place-items-center">
-      <div className="panel pop p-3 md:p-5 w-full max-w-5xl h-[94vh] md:h-[82vh] flex flex-col">
-        <div className="flex items-center gap-2 mb-3"><span className="text-xl">✨</span><h2 className="font-display text-xl">아바타 꾸미기</h2></div>
-        <div className="flex-1 min-h-0">{body}</div>
-      </div>
-    </div>
+    <button type="button" onClick={onClick} aria-label="없음" title="없음" aria-pressed={selected}
+      className={`shrink-0 w-[72px] h-[72px] rounded-2xl bg-white grid place-items-center text-2xl text-[#c9b8a8] border-2 ${selected ? 'border-[#f4776a] bg-[#fff1ec]' : 'border-[#f3e7da]'}`}>⊘</button>
+  );
+}
+
+function ExampleCard({ a, bg, onClick }: { a: HumanAvatar; bg: string; onClick: () => void }) {
+  const src = useHumanThumb(a, 'bust');
+  return (
+    <button onClick={onClick} className="rounded-2xl aspect-square grid place-items-center overflow-hidden hover:scale-[1.03] transition" style={{ background: bg }} aria-label="예시 아바타 적용">
+      {src ? <img src={src} alt="" className="w-full h-full object-contain" /> : <span className="w-1/2 h-1/2 rounded-xl bg-white/60 animate-pulse" />}
+    </button>
   );
 }

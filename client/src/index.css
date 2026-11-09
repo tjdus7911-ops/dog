@@ -79,3 +79,8 @@ canvas { touch-action: none; }
 
 [data-far="true"] .bubble { display: none; }
 [data-far="true"] .name-tag { opacity: .7; }
+
+.btn-coral { background: #f4776a; color: white; box-shadow: 0 4px 0 #e2604f; }
+.btn-coral:hover:not(:disabled) { background: #f6887c; }
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

@@ -2,23 +2,26 @@
 // 3D 모델을 GLB로 교체하더라도 이 설정 구조는 그대로 유지하도록 설계했다.
 
 export const SKIN_TONES = ['#ffe0c7', '#f6cfa8', '#e5b48a', '#c98f62', '#9a6643'] as const;
-export const HAIR_COLORS = ['#3b2a20', '#6b4127', '#a8693a', '#e2b866', '#1f1f24', '#d88a7a'] as const;
+export const HAIR_COLORS = ['#3b2a20', '#6b4127', '#a8693a', '#e2b866', '#e9965a', '#1f1f24', '#d88a7a', '#f4a3b5', '#c4a8e8'] as const;
 export const CLOTH_COLORS = [
   '#fff3df', '#f6c453', '#f39a7b', '#8fb88a', '#7ea6d8', '#b59ad6', '#f4a6b8', '#4a5a78', '#c9a27a', '#ffffff',
+  '#5b7fb8', '#3a3a44', '#f3e3c3', '#9c7656', '#c9b6e8',
 ] as const;
-export const SHOE_COLORS = ['#ffffff', '#4a3b33', '#f39a7b', '#4a5a78', '#e9d9bd'] as const;
+export const SHOE_COLORS = ['#ffffff', '#4a3b33', '#f39a7b', '#4a5a78', '#e9d9bd', '#f4a6b8', '#f6c453', '#7ea6d8', '#8a5a3a', '#3a3a44'] as const;
 
-export const HAIR_STYLES = ['short', 'bob', 'long', 'bun', 'spiky'] as const;
-export const TOP_STYLES = ['hoodie', 'tee', 'jacket'] as const;
+export const HAIR_STYLES = ['bob', 'bun', 'twin', 'long', 'short', 'pony', 'spiky'] as const;
+export const TOP_STYLES = ['hoodie', 'tee', 'stripe', 'overalls', 'jacket'] as const;
 export const BOTTOM_STYLES = ['shorts', 'pants', 'skirt'] as const;
-export const HAT_STYLES = ['none', 'cap', 'beanie'] as const;
-export const ACCESSORIES = ['none', 'backpack', 'glasses'] as const;
+export const HAT_STYLES = ['none', 'cap', 'bucket', 'beanie', 'headphones'] as const;
+export const SHOE_STYLES = ['sneaker', 'boots'] as const;
+export const ACCESSORIES = ['none', 'glasses', 'square_glasses', 'backpack', 'crossbag'] as const;
 
 export type HairStyle = (typeof HAIR_STYLES)[number];
 export type TopStyle = (typeof TOP_STYLES)[number];
 export type BottomStyle = (typeof BOTTOM_STYLES)[number];
 export type HatStyle = (typeof HAT_STYLES)[number];
 export type Accessory = (typeof ACCESSORIES)[number];
+export type ShoeStyle = (typeof SHOE_STYLES)[number];
 
 export interface HumanAvatar {
   skin: string;
@@ -29,6 +32,8 @@ export interface HumanAvatar {
   bottom: BottomStyle;
   bottomColor: string;
   shoeColor: string;
+  /** v2 추가 항목 — 이전 데이터에는 없을 수 있어 normalize 시 기본값 적용 */
+  shoes: ShoeStyle;
   hat: HatStyle;
   hatColor: string;
   accessory: Accessory;
@@ -72,12 +77,13 @@ export const DEFAULT_HUMAN: HumanAvatar = {
   hairStyle: 'bob',
   hairColor: HAIR_COLORS[1],
   top: 'hoodie',
-  topColor: CLOTH_COLORS[0],
+  topColor: '#f3e3c3',
   bottom: 'shorts',
-  bottomColor: CLOTH_COLORS[4],
+  bottomColor: '#5b7fb8',
   shoeColor: SHOE_COLORS[0],
+  shoes: 'sneaker',
   hat: 'cap',
-  hatColor: CLOTH_COLORS[0],
+  hatColor: '#f3e3c3',
   accessory: 'backpack',
 };
 
@@ -90,6 +96,8 @@ export const BREED_PRESETS: Record<string, { label: string; dog: Omit<DogAvatar,
   retriever: { label: '리트리버형', dog: { breed: 'retriever', size: 'large', coat: '#e6b47a', secondary: '#e6b47a', pattern: 'none', ear: 'floppy', tail: 'straight', fur: 'short', snout: 'long' } },
   beagle: { label: '비글형', dog: { breed: 'beagle', size: 'medium', coat: '#f7f1e6', secondary: '#b8703a', pattern: 'saddle', ear: 'floppy', tail: 'straight', fur: 'short', snout: 'medium' } },
   corgi: { label: '웰시코기형', dog: { breed: 'corgi', size: 'small', coat: '#d98c4a', secondary: '#f7f1e6', pattern: 'socks', ear: 'pointy', tail: 'short', fur: 'short', snout: 'medium' } },
+  pomeranian: { label: '포메라니안형', dog: { breed: 'pomeranian', size: 'small', coat: '#e6b47a', secondary: '#f7f1e6', pattern: 'mask', ear: 'pointy', tail: 'fluffy', fur: 'long', snout: 'short' } },
+  dachshund: { label: '닥스훈트형', dog: { breed: 'dachshund', size: 'small', coat: '#7a4a2c', secondary: '#d98c4a', pattern: 'mask', ear: 'floppy', tail: 'straight', fur: 'short', snout: 'long' } },
   mix: { label: '믹스/기타', dog: { breed: 'mix', size: 'medium', coat: '#7a4a2c', secondary: '#f7f1e6', pattern: 'patch', ear: 'fold', tail: 'straight', fur: 'short', snout: 'medium' } },
 };
 
@@ -98,21 +106,27 @@ export const DEFAULT_DOG: DogAvatar = { ...BREED_PRESETS.shiba.dog, harness: HAR
 const oneOf = <T extends readonly string[]>(list: T, v: unknown): v is T[number] =>
   typeof v === 'string' && (list as readonly string[]).includes(v);
 
-/** 서버·클라이언트 공용 검증. 허용 목록 밖의 값은 거부한다. */
-export function validateHuman(v: any): HumanAvatar | null {
-  if (!v || typeof v !== 'object') return null;
+/** 서버·클라이언트 공용 검증. 허용 목록 밖의 값은 거부한다.
+ *  새로 추가된 항목(shoes 등)이 빠진 이전 데이터는 기본값으로 채워 하위 호환을 유지한다. */
+export function validateHuman(input: any): HumanAvatar | null {
+  if (!input || typeof input !== 'object') return null;
+  const v = { shoes: DEFAULT_HUMAN.shoes, ...input };
   const ok =
     oneOf(SKIN_TONES, v.skin) && oneOf(HAIR_STYLES, v.hairStyle) && oneOf(HAIR_COLORS, v.hairColor) &&
     oneOf(TOP_STYLES, v.top) && oneOf(CLOTH_COLORS, v.topColor) && oneOf(BOTTOM_STYLES, v.bottom) &&
-    oneOf(CLOTH_COLORS, v.bottomColor) && oneOf(SHOE_COLORS, v.shoeColor) && oneOf(HAT_STYLES, v.hat) &&
-    oneOf(CLOTH_COLORS, v.hatColor) && oneOf(ACCESSORIES, v.accessory);
+    oneOf(CLOTH_COLORS, v.bottomColor) && oneOf(SHOE_COLORS, v.shoeColor) && oneOf(SHOE_STYLES, v.shoes) &&
+    oneOf(HAT_STYLES, v.hat) && oneOf(CLOTH_COLORS, v.hatColor) && oneOf(ACCESSORIES, v.accessory);
   if (!ok) return null;
   return {
     skin: v.skin, hairStyle: v.hairStyle, hairColor: v.hairColor, top: v.top, topColor: v.topColor,
-    bottom: v.bottom, bottomColor: v.bottomColor, shoeColor: v.shoeColor, hat: v.hat, hatColor: v.hatColor,
+    bottom: v.bottom, bottomColor: v.bottomColor, shoeColor: v.shoeColor, shoes: v.shoes, hat: v.hat, hatColor: v.hatColor,
     accessory: v.accessory,
   };
 }
+
+/** 저장된 데이터를 읽을 때 사용: 유효하지 않으면 기본 아바타로 대체 */
+export const normalizeHuman = (v: unknown): HumanAvatar => validateHuman(v) ?? { ...DEFAULT_HUMAN };
+export const normalizeDog = (v: unknown): DogAvatar => validateDog(v) ?? { ...DEFAULT_DOG };
 
 export function validateDog(v: any): DogAvatar | null {
   if (!v || typeof v !== 'object') return null;

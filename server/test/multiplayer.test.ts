@@ -64,6 +64,18 @@ async function main() {
     const b = await makeUser('bob0001', '밥이', '몽실이');
     const c = await makeUser('carol01', '캐롤', '보리');
     check('3명 가입 및 소켓 인증 접속', a.s.connected && b.s.connected && c.s.connected);
+
+    console.log('\n[아바타 데이터 하위 호환]');
+    const oldHuman = { skin: '#ffe0c7', hairStyle: 'bob', hairColor: '#6b4127', top: 'hoodie', topColor: '#fff3df', bottom: 'shorts', bottomColor: '#7ea6d8', shoeColor: '#ffffff', hat: 'cap', hatColor: '#fff3df', accessory: 'backpack' };
+    const me0 = (await api('/api/me', undefined, a.token, 'GET')).body.profile;
+    const upOld = await api('/api/me/profile', { nickname: '앨리스', dogName: '사슴이', dogIntro: '', human: oldHuman, dog: me0.dog }, a.token, 'PUT');
+    check('이전 형식 아바타(신발 종류 없음) 저장 시 기본값 보정', upOld.status === 200 && upOld.body.profile.human.shoes === 'sneaker');
+    const upNew = await api('/api/me/profile', { nickname: '앨리스', dogName: '사슴이', dogIntro: '', human: { ...oldHuman, hairStyle: 'twin', top: 'overalls', hat: 'headphones', accessory: 'crossbag', shoes: 'boots' }, dog: { ...me0.dog, breed: 'corgi' } }, a.token, 'PUT');
+    check('새 옵션(양갈래·멜빵·헤드폰·크로스백·부츠·코기형) 저장', upNew.status === 200 && upNew.body.profile.human.hat === 'headphones');
+    const upBad = await api('/api/me/profile', { nickname: '앨리스', dogName: '사슴이', dogIntro: '', human: { ...oldHuman, hat: 'crown' }, dog: me0.dog }, a.token, 'PUT');
+    check('허용 목록 밖의 아바타 값 거부', upBad.status === 400);
+    const aiOff = await api('/api/dog-analysis', { photos: [] }, a.token);
+    check('AI 키 미설정 시 분석 요청은 503 안내', aiOff.status === 503 && (await api('/api/dog-analysis/status', undefined, a.token, 'GET')).body.available === false);
     const anon = io(BASE, { auth: { token: 'invalid-token-xxxxxxxxxxxxxxxxxx' }, transports: ['websocket'] });
     const anonErr = await new Promise<string>((res) => anon.on('connect_error', (e) => res(e.message)));
     check('토큰 없는 소켓 접속 거부', anonErr === 'unauthorized');

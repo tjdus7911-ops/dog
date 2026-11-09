@@ -3,7 +3,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_DOG, DEFAULT_HUMAN, type DogAvatar, type HumanAvatar } from '../../shared/avatar';
+import { DEFAULT_DOG, DEFAULT_HUMAN, normalizeDog, normalizeHuman, type DogAvatar, type HumanAvatar } from '../../shared/avatar';
 import { DEFAULT_PRIVACY, type FriendStatus, type MyProfile, type PrivacySettings, type PublicProfile } from '../../shared/protocol';
 
 export const DATA_DIR = process.env.MUNGLE_DATA_DIR ?? path.resolve(import.meta.dirname, '../data');
@@ -105,7 +105,8 @@ export const setBan = (userId: number, until: number) => run('UPDATE users SET b
 function toPublic(r: Row): PublicProfile {
   return {
     id: r.user_id, nickname: r.nickname, dogName: r.dog_name, dogIntro: r.dog_intro, dogPhoto: r.dog_photo ?? null,
-    human: JSON.parse(r.human), dog: JSON.parse(r.dog),
+    // 이전 버전 데이터도 새 항목 기본값으로 정규화해서 내보냄
+    human: normalizeHuman(JSON.parse(r.human)), dog: normalizeDog(JSON.parse(r.dog)),
   };
 }
 export function getPublicProfile(id: number): PublicProfile | null {
