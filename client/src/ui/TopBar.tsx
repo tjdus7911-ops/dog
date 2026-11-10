@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { set, useStore } from '../store';
-import { joinPark } from '../net/socket';
+import { joinPark, lastPark, warpTo } from '../net/socket';
 import { PLACES } from '@shared/spaces';
 import { DogBadge } from './common';
 import { logout } from './App';
@@ -10,13 +11,16 @@ import { residenceLabel } from '@shared/apartment';
 import { openCommunity } from './Community';
 import { isTouchDevice } from '../game/input';
 import { CoinChip } from './Coins';
+import { Icon, type IconName } from './icons';
+import { closeMenu, dropdownPlacement, toggleMenu } from './menus';
+import type { WarpId } from '@shared/world';
 
 export function TopBar() {
   const me = useStore((s) => s.me)!;
   const panel = useStore((s) => s.panel);
   const notifUnread = useStore((s) => s.notifications.filter((n) => !n.read).length);
   const friendBadge = useStore((s) => s.incoming.length + s.friends.reduce((a, f) => a + f.unread, 0));
-  const [menuOpen, setMenuOpen] = useState(false);
+  const menuOpen = useStore((s) => s.activeMenu === 'profile');
   const guest = me.role === 'guest';
   const touch = isTouchDevice();
   const toggle = (p: typeof panel) => set({ panel: panel === p ? 'none' : p });
@@ -50,9 +54,9 @@ export function TopBar() {
       {/* 둘러보기 중 표시 + 가입 버튼 */}
       {guest && <button className="btn btn-coral h-11 px-3 text-sm whitespace-nowrap pointer-events-auto" onClick={() => set({ joinPrompt: true })}>👀 둘러보기 중 · 가입</button>}
       <div className="relative pointer-events-auto">
-        <button className="rounded-full" onClick={() => setMenuOpen(!menuOpen)} aria-label="내 메뉴"><DogBadge profile={me} size={44} /></button>
+        <button className="rounded-full" onClick={() => toggleMenu('profile')} aria-label="내 메뉴" aria-expanded={menuOpen} data-menu-trigger="profile"><DogBadge profile={me} size={44} /></button>
         {menuOpen && (
-          <div className="absolute right-0 mt-2 panel p-2 w-52 pop" onClick={() => setMenuOpen(false)}>
+          <div className="absolute right-0 mt-2 panel p-2 w-52 max-w-[calc(100vw-24px)] max-h-[calc(100dvh-90px)] overflow-y-auto overscroll-contain pop" data-menu-root="profile" onClick={closeMenu}>
             <div className="px-3 py-2 text-sm"><b className="font-display">{me.nickname}</b> · 🐶 {me.dogName}
               <div className="text-xs text-cocoa-soft mt-0.5">🏠 {me.residence ? residenceLabel(me.residence) : '아직 입주 전'}</div>
             </div>
@@ -99,55 +103,103 @@ export const Badge = ({ n }: { n: number }) => (
   <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-[#ef6b5b] text-white text-[11px] grid place-items-center font-sans">{n > 9 ? '9+' : n}</span>
 );
 
-/** 상단 장소 선택 드롭다운 — 현재 장소 표시, 체크 표시, 이동(공원 / 아파트 로비) */
+/** 장소 선택에 보이는 마을 장소 (입구 앞으로 바로 이동) */
+const WARP_ROWS: { id: WarpId; icon: IconName; label: string; sub: string }[] = [
+  { id: 'plaza', icon: 'tree', label: '중앙 공원', sub: '분수 광장 앞' },
+  { id: 'apartment', icon: 'building', label: '멍글 아파트', sub: '아파트 입구 앞 · 로비는 걸어서 들어가요' },
+  { id: 'cafe', icon: 'coffee', label: '멍글 애견카페', sub: '카페 입구 앞' },
+  { id: 'shop', icon: 'store', label: '멍글 애견샵', sub: '샵 입구 앞' },
+  { id: 'runner', icon: 'flag', label: '멍글런너', sub: '경기장 입구 앞' },
+];
+const KIND_ICON: Record<string, IconName> = { park: 'tree', lobby: 'building', home: 'home', cafe: 'coffee', shop: 'store' };
+
+/**
+ * 상단 장소 선택 드롭다운 — 지금 있는 곳 표시, 마을 장소를 고르면 그 입구 앞으로 바로 이동, 공원 채널 바꾸기.
+ * 화면 기준 좌표로 띄워(포털) 부모 영역에 잘리지 않고, 화면 좌우·하단 탭을 넘지 않게 위치·높이를 맞춘다.
+ */
 export function PlacePicker() {
   const park = useStore((s) => s.park);
   const parks = useStore((s) => s.parks);
-  const [open, setOpen] = useState(false);
+  const open = useStore((s) => s.activeMenu === 'place');
+  const btn = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState<ReturnType<typeof dropdownPlacement> | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  // 서버 장소 목록(실시간 인원) 기준, 없으면 기본 장소 목록
-  const list = (parks.length ? parks : PLACES.map((p) => ({ ...p, count: 0, capacity: 0 }))).filter((p) => p.kind !== 'home');
-  const curLabel = park ? `${park.icon ?? '📍'} ${park.name}` : '입장 중…';
-  async function go(id: string) {
-    setBusy(id);
-    // 건물(로비·카페·샵)에서 공원으로 나가면 그 건물 입구 앞에서 시작
-    const door = id.startsWith('central') && (park?.kind === 'lobby' || park?.kind === 'cafe' || park?.kind === 'shop') ? park.kind : undefined;
-    if (await joinPark(id, door)) setOpen(false);
-    setBusy(null);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      if (!btn.current) return;
+      const nav = document.querySelector('nav[aria-label="주 메뉴"]');
+      setPos(dropdownPlacement(btn.current.getBoundingClientRect(), { width: 304, maxHeight: 470, bottomReserve: nav ? nav.getBoundingClientRect().height + 8 : 12 }));
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.visualViewport?.addEventListener('resize', place);
+    return () => { window.removeEventListener('resize', place); window.visualViewport?.removeEventListener('resize', place); };
+  }, [open]);
+  const channels = (parks.length ? parks : PLACES.map((p) => ({ ...p, count: 0, capacity: 0 }))).filter((p) => p.kind === 'park');
+  const inPark = park?.kind === 'park';
+  const curChannel = channels.find((c) => c.id === (inPark ? park!.id : lastPark()));
+  const label = park ? park.name : '입장 중…';
+  async function run(key: string, f: () => Promise<unknown>) {
+    setBusy(key);
+    try { await f(); } finally { setBusy(null); }
+    closeMenu();
   }
-  return (
-    <div className="relative pointer-events-auto min-w-0">
-      <button className="btn btn-ghost px-3 md:px-4 h-11 text-sm whitespace-nowrap max-w-[46vw] sm:max-w-[260px] truncate" onClick={() => setOpen(!open)} aria-haspopup="listbox" aria-expanded={open}>
-        <span className="truncate">{curLabel}</span> ▾
-      </button>
-      {open && (
+  const panel = open && pos && createPortal(
+    <div role="listbox" aria-label="장소 이동" data-menu-root="place" data-testid="place-menu"
+      className="fixed z-[70] rounded-2xl bg-[#FFFCF8] border border-[#EAE3DC] shadow-[0_10px_28px_rgba(81,71,63,0.14)] p-2 overflow-y-auto overscroll-contain scroll-soft pop text-[#51473F]"
+      style={{ left: pos.left, width: pos.width, maxHeight: pos.maxHeight, top: pos.top, bottom: pos.bottom }}>
+      <p className="px-2 pt-1 pb-1.5 text-[12px] text-[#8A8078]">장소를 고르면 그 장소 <b className="text-[#51473F]">입구 앞</b>으로 바로 이동해요</p>
+      {park && !inPark && (
+        <div role="option" aria-selected className="flex items-center gap-2.5 rounded-xl px-2.5 min-h-[48px] bg-[#FBE8E1]">
+          <Icon name={KIND_ICON[park.kind] ?? 'home'} size={18} className="text-[#E58D76] shrink-0" />
+          <span className="flex-1 min-w-0 leading-tight"><span className="block text-[14px] truncate">{park.name}</span><span className="block text-[11px] text-[#8A8078]">지금 있는 곳</span></span>
+          <Icon name="check" size={18} strokeWidth={2.2} className="text-[#E58D76] shrink-0" />
+        </div>
+      )}
+      <div className="h-px bg-[#EAE3DC] mx-2 my-1.5" />
+      <p className="px-2 pb-1 text-[12px] text-[#8A8078]">마을 장소</p>
+      {WARP_ROWS.map((w) => (
+        <button key={w.id} role="option" aria-selected={false} disabled={!!busy} data-testid={`warp-${w.id}`}
+          className="w-full flex items-center gap-2.5 rounded-xl px-2.5 min-h-[48px] text-left hover:bg-[#F7F1EA] active:bg-[#F7F1EA] disabled:opacity-50"
+          onClick={() => void run(w.id, () => warpTo(w.id))}>
+          <Icon name={w.icon} size={18} className="text-[#756B63] shrink-0" />
+          <span className="flex-1 min-w-0 leading-tight">
+            <span className="block text-[14px] truncate">{w.label}</span>
+            <span className="block text-[11px] text-[#8A8078] truncate">{w.id === 'plaza' && curChannel && curChannel.capacity > 0 && !DEMO ? `${w.sub} · 지금 ${curChannel.count}명` : w.sub}</span>
+          </span>
+          {busy === w.id && <span className="text-[11px] text-[#8A8078] shrink-0">이동 중…</span>}
+        </button>
+      ))}
+      {channels.length > 1 && (
         <>
-          <div className="fixed inset-0 z-0" onClick={() => setOpen(false)} />
-          <div role="listbox" className="absolute right-0 mt-2 panel p-2 w-[min(78vw,260px)] max-h-[min(60vh,360px)] overflow-y-auto scroll-soft pop z-10">
-            <p className="text-xs text-cocoa-soft px-2 pb-1">장소 이동</p>
-            {park?.kind === 'home' && (
-              <div className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-sm bg-peach-soft">
-                <span>🏠</span><span className="flex-1 truncate">{park.name}</span><span>✓</span>
-              </div>
-            )}
-            {list.map((p) => {
-              const here = p.id === park?.id;
-              const full = !here && p.capacity > 0 && p.count >= p.capacity;
+          <div className="h-px bg-[#EAE3DC] mx-2 my-1.5" />
+          <p className="px-2 pb-1 text-[12px] text-[#8A8078]">공원 채널 (사람이 많으면 다른 채널로)</p>
+          <div className="grid grid-cols-3 gap-1.5 px-1 pb-1">
+            {channels.map((c, i) => {
+              const here = inPark && c.id === park!.id;
+              const full = !here && c.capacity > 0 && c.count >= c.capacity;
               return (
-                <button key={p.id} role="option" aria-selected={here} disabled={full || !!busy}
-                  onClick={() => (here ? setOpen(false) : go(p.id))}
-                  className={`w-full flex items-center gap-2 rounded-xl px-3 min-h-[44px] text-sm hover:bg-cream-2 disabled:opacity-40 text-left ${here ? 'bg-peach-soft' : ''}`}>
-                  <span>{p.icon}</span>
-                  <span className="flex-1 truncate">{p.name}</span>
-                  {busy === p.id ? <span className="text-xs text-cocoa-soft">이동 중…</span>
-                    : here ? <span className="text-[#e2604f] font-bold">✓</span>
-                    : p.capacity > 0 && !DEMO ? <span className="text-xs text-cocoa-soft">{p.count}/{p.capacity}</span> : null}
+                <button key={c.id} disabled={full || !!busy} aria-pressed={here} data-testid={`channel-${c.id}`}
+                  className={`min-h-[44px] rounded-xl border text-[13px] disabled:opacity-40 ${here ? 'border-[#E58D76] bg-[#FBE8E1]' : 'border-[#EAE3DC] bg-[#FFFCF8]'}`}
+                  onClick={() => (here ? closeMenu() : void run(c.id, () => warpTo('plaza', c.id)))}>
+                  {busy === c.id ? '이동 중…' : `공원 ${i + 1}${c.capacity > 0 && !DEMO ? ` · ${c.count}명` : ''}`}
                 </button>
               );
             })}
           </div>
         </>
       )}
+    </div>,
+    document.body,
+  );
+  return (
+    <div className="relative pointer-events-auto min-w-0">
+      <button ref={btn} className="btn btn-ghost px-3 md:px-4 h-11 text-sm whitespace-nowrap max-w-[60vw] sm:max-w-[300px]" onClick={() => toggleMenu('place')}
+        aria-haspopup="listbox" aria-expanded={open} data-menu-trigger="place" data-testid="place-picker">
+        <span className="truncate">{park ? `${park.icon ?? '📍'} ${label}` : label}{inPark && !DEMO && park!.capacity > 0 ? ` · ${park!.count}명` : ''}</span> ▾
+      </button>
+      {panel}
     </div>
   );
 }

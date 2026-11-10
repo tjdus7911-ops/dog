@@ -13,7 +13,7 @@ import type { CoinEarned } from '@shared/coins';
 import { tierOfBuilding } from '@shared/home';
 import { onCoinEarned } from '../ui/Coins';
 import { attachMulti } from '../runner/multi';
-import { APARTMENT_ENTRANCE, BIN_BY_ID, CAFE_ENTRANCE, SHOP_ENTRANCE } from '@shared/world';
+import { APARTMENT_ENTRANCE, BIN_BY_ID, CAFE_ENTRANCE, SHOP_ENTRANCE, warpState, type WarpId } from '@shared/world';
 import { ACTION_MS, PET_LOW, binOpenAt, petLow, playPet } from '../game/fx';
 import { onLayoutChanged, resetFurniture } from '../game/furniture';
 import { DOG_SCALE } from '../game/models/Dog';
@@ -172,6 +172,8 @@ export function connect() {
     }
   });
   s.on('correct', (st: NetState) => { local.teleport = st; });
+  // 다른 사람이 장소 바로 가기로 순간 이동: 미끄러지듯 지나가지 않고 그 자리에 바로 나타남
+  s.on('players:warp', ({ userId, state }: { userId: number; state: NetState }) => { removeRemote(userId); pushSnapshot(userId, state); });
   s.on('park:count', (p: ParkInfo) => {
     set((st) => ({
       parks: st.parks.some((x) => x.id === p.id) ? st.parks.map((x) => (x.id === p.id ? p : x)) : [...st.parks, p],
@@ -234,16 +236,47 @@ export function disconnect() {
  */
 let joining = false;
 export type DoorFrom = 'lobby' | 'cafe' | 'shop';
-export async function joinPark(parkId?: string, from?: DoorFrom, quiet = false): Promise<boolean> {
+/** warp: 공원에 들어가며 그 장소의 입구 앞에서 시작 (장소 선택 바로 가기) */
+export async function joinPark(parkId?: string, from?: DoorFrom, quiet = false, warp?: WarpId): Promise<boolean> {
   if (joining) return false; // 이동 중 중복 요청 방지
   joining = true;
   try {
-    return await doJoin(parkId, from, quiet);
+    return await doJoin(parkId, from, quiet, warp);
   } finally { joining = false; }
 }
-async function doJoin(parkId: string | undefined, from: DoorFrom | undefined, quiet: boolean) {
-  if (DEMO) return demoJoin(parkId ?? 'central-1', from);
-  const res = await request<{ park: ParkInfo; spawn: NetState; players: PlayerSnapshot[]; seats?: SeatMap; poops?: PoopInfo[]; bags?: number[] }>('park:join', parkId ? { parkId, from } : undefined);
+/** 마지막으로 있던 공원 채널 (실내에서 장소 바로 가기를 고르면 이 공원으로 나감) */
+let lastParkId = 'central-1';
+export const lastPark = () => lastParkId;
+
+/**
+ * 장소 바로 가기: 그 장소의 입구 앞으로 즉시 이동 (자동으로 걸어가지 않고, 안으로 바로 들어가지 않음).
+ * 좌표는 서버가 정하고(목적지 이름만 보냄) 사람·강아지·카메라가 함께 옮겨진다. 실내에 있으면 공원으로 나가며 그 입구 앞에서 시작.
+ */
+export async function warpTo(to: WarpId, parkId?: string) {
+  const park = get().park;
+  const target = parkId ?? (park?.kind === 'park' ? park.id : lastParkId);
+  if (park?.kind !== 'park' || target !== park.id) return joinPark(target, undefined, false, to);
+  let state: NetState;
+  if (DEMO) state = warpState(to, get().me?.id ?? 1);
+  else {
+    const r = await request<{ state: NetState }>('park:warp', { to });
+    if (!r.ok) { toast(r.error, 'error'); return false; }
+    state = r.state;
+  }
+  applyWarp(state);
+  return true;
+}
+function applyWarp(state: NetState) {
+  local.teleport = state;
+  local.seated = null; local.seatGoal = null; local.moveTarget = null; // 남아 있던 이동 명령 때문에 다시 걸어가지 않게
+  local.action = null;
+  local.jumpY = 0; local.jumpV = 0;
+  cam.pendingReset = 'park'; // 카메라도 바로: 아바타 뒤에서 입구 쪽을 보게
+  set({ seated: null, benchMenu: null, dogMenu: null, furnMenu: null, activeMenu: null });
+}
+async function doJoin(parkId: string | undefined, from: DoorFrom | undefined, quiet: boolean, warp?: WarpId) {
+  if (DEMO) return demoJoin(parkId ?? 'central-1', from, warp);
+  const res = await request<{ park: ParkInfo; spawn: NetState; players: PlayerSnapshot[]; seats?: SeatMap; poops?: PoopInfo[]; bags?: number[] }>('park:join', parkId ? { parkId, from, warp } : undefined);
   if (!res.ok) {
     if (!quiet && res.code !== 'members_only') toast(res.error, 'error');
     if (!get().park && parkId && !quiet) return doJoin(undefined, undefined, true); // 지정 장소 입장 실패 시 빈 공원으로
@@ -264,6 +297,7 @@ async function doJoin(parkId: string | undefined, from: DoorFrom | undefined, qu
 /** 새 공간에 들어갈 때 공통 처리: 이전 공간 아바타 정리, 이동 규칙·카메라 초기화, 사람·강아지 함께 이동 */
 function enterSpace(park: ParkInfo, spawn: NetState) {
   clearRemotes();
+  if (park.kind === 'park') lastParkId = park.id;
   local.teleport = spawn;
   local.seated = null; local.seatGoal = null; local.moveTarget = null;
   local.jumpY = 0; local.jumpV = 0;
@@ -272,12 +306,12 @@ function enterSpace(park: ParkInfo, spawn: NetState) {
   const moved = get().park?.id !== park.id;
   local.action = null; local.poopStart = 0; local.petHold = null;
   resetFurniture();
-  set({ park, players: {}, poops: {}, dogMenu: null, furnMenu: null, chat: [], chatUnread: 0, bubbles: {}, seats: {}, seated: null, benchMenu: null, home: null, homeEdit: false, lobbyPanel: park.kind === 'lobby', shopOpen: false, ...(moved ? { community: null } : {}) });
+  set({ park, activeMenu: null, players: {}, poops: {}, dogMenu: null, furnMenu: null, chat: [], chatUnread: 0, bubbles: {}, seats: {}, seated: null, benchMenu: null, home: null, homeEdit: false, lobbyPanel: park.kind === 'lobby', shopOpen: false, ...(moved ? { community: null } : {}) });
   if (park.kind === 'home' && park.ownerId) void loadHome(park.ownerId);
 }
 
 /** 미리보기: 서버 없이 장소 전환 (내 집만 들어갈 수 있음) */
-function demoJoin(id: string, from?: DoorFrom) {
+function demoJoin(id: string, from?: DoorFrom, warp?: WarpId) {
   const place = PLACES.find((p) => p.id === id);
   const me = get().me!;
   let park: ParkInfo;
@@ -287,7 +321,7 @@ function demoJoin(id: string, from?: DoorFrom) {
   const door = from === 'lobby' ? APARTMENT_ENTRANCE : from === 'cafe' ? CAFE_ENTRANCE : from === 'shop' ? SHOP_ENTRANCE : null;
   const [x, z] = park.kind === 'park' ? (door ? [door.x, door.z + 2.2] : [0.6, 10]) : spawnOf(park.kind, park.tier ?? 1);
   const face = park.kind === 'park' && !door ? Math.PI : 0;
-  enterSpace(park, [x, z, face, 0, x + 0.7, z + 0.3, face, 0]);
+  enterSpace(park, park.kind === 'park' && warp ? warpState(warp, me.id) : [x, z, face, 0, x + 0.7, z + 0.3, face, 0]);
   return true;
 }
 

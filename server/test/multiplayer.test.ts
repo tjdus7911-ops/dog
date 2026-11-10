@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { io, type Socket } from 'socket.io-client';
-import { SEATS } from '../../shared/world';
+import { SEATS, warpState } from '../../shared/world';
 
 const PORT = 3999;
 const BASE = `http://localhost:${PORT}`;
@@ -116,6 +116,31 @@ async function main() {
     check('강아지 위치는 목줄 길이 이내로 제한', st2 && Math.hypot(st2.data[b.id][4] - st2.data[b.id][0], st2.data[b.id][5] - st2.data[b.id][1]) <= 4.01, st2?.data);
     b.s.emit('state', ['x', null]);
     check('잘못된 패킷 무시(서버 정상)', (await emit(b.s, 'park:list')).ok);
+
+    console.log('\n[장소 바로 가기 · 입구 앞 순간 이동]');
+    clear(a, b);
+    const w1 = await emit(b.s, 'park:warp', { to: 'apartment' });
+    const ws1 = warpState('apartment', b.id);
+    check('아파트 입구 앞으로 바로 이동 (서버가 정한 좌표)', w1.ok && JSON.stringify(w1.state) === JSON.stringify(ws1), w1);
+    await sleep(200);
+    check('다른 사람 화면에도 바로 반영 (미끄러지지 않게 warp 이벤트)', got(a, 'players:warp', (d) => d.userId === b.id && d.state[0] === ws1[0] && d.state[1] === ws1[1]));
+    check('입구를 바라보고 · 강아지도 바로 옆으로 함께', ws1[2] === Math.PI && Math.hypot(ws1[4] - ws1[0], ws1[5] - ws1[1]) < 1.2);
+    clear(a, b);
+    b.s.emit('state', [ws1[0] + 0.2, ws1[1] - 0.1, ws1[2], 1, ws1[4], ws1[5], ws1[6], 1]);
+    await sleep(300);
+    check('순간 이동 직후 걷기는 정상 처리 (보정·되돌림 없음)', !got(b, 'correct') && a.events.some((e) => e.ev === 'states' && Math.abs((e.data[b.id]?.[0] ?? -99) - (ws1[0] + 0.2)) < 0.02));
+    check('없는 장소 이름 거부', !(await emit(b.s, 'park:warp', { to: 'moon' })).ok);
+    check('좌표를 보내도 쓰지 않음 (장소 이름으로만)', !(await emit(b.s, 'park:warp', { to: { x: 100, z: 100 } })).ok);
+    const inLobby = await emit(b.s, 'park:join', { parkId: 'lobby-1' });
+    check('실내에서는 같은 자리 순간 이동 거부 (공원으로 나가며 이동)', inLobby.ok && !(await emit(b.s, 'park:warp', { to: 'cafe' })).ok);
+    const outCafe = await emit(b.s, 'park:join', { parkId: 'central-1', warp: 'cafe' });
+    const wsC = warpState('cafe', b.id);
+    check('공원으로 나가며 카페 입구 앞에서 시작', outCafe.ok && outCafe.spawn[0] === wsC[0] && outCafe.spawn[1] === wsC[1] && outCafe.spawn[2] === wsC[2], outCafe.spawn);
+    const runnerW = await emit(b.s, 'park:warp', { to: 'runner' });
+    check('멍글런너 경기장 입구 앞', runnerW.ok && runnerW.state[0] === warpState('runner', b.id)[0]);
+    const badJoin = await emit(b.s, 'park:join', { parkId: 'lobby-1', warp: 'cafe' });
+    check('실내 입장에 warp를 붙여도 실내 시작 위치 (입구 좌표 무시)', badJoin.ok && Math.abs(badJoin.spawn[0]) < 5);
+    await emit(b.s, 'park:join', { parkId: 'central-1' });
 
     console.log('\n[벤치 앉기]');
     const seat = SEATS[0];
@@ -398,12 +423,18 @@ async function main() {
     check('정지 계정 로그인 차단', (await api('/api/auth/login', { username: 'carol01', password: 'password123' })).status === 403);
 
     console.log('\n[접속 · 퇴장]');
+    await emit(b.s, 'park:join', { parkId: 'central-1' });
+    const lastW = await emit(b.s, 'park:warp', { to: 'shop' });
     clear(a);
     b.s.disconnect();
     await sleep(150);
     check('퇴장 시 다른 사용자에게 알림', got(a, 'players:leave', (p) => p.id === b.id));
     const b2 = io(BASE, { auth: { token: b.token }, transports: ['websocket'] });
     await new Promise<void>((r) => b2.on('connect', () => r()));
+    const rejoin = await emit(b2, 'park:join', { parkId: 'central-1' });
+    check('연결이 끊겼다 다시 들어오면 마지막 위치로 복원', lastW.ok && rejoin.ok && rejoin.spawn[0] === lastW.state[0] && rejoin.spawn[1] === lastW.state[1], [lastW.state, rejoin.spawn]);
+    const other = await emit(b2, 'park:join', { parkId: 'central-2' });
+    check('다른 공원에 들어가면 그 공원의 시작 위치', other.ok && Math.abs(other.spawn[1] - 10) < 2);
     const a2 = io(BASE, { auth: { token: a.token }, transports: ['websocket'] });
     const kicked = new Promise((r) => a.s.on('kicked', r));
     await new Promise<void>((r) => a2.on('connect', () => r()));

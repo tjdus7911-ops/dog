@@ -14,7 +14,7 @@ export function Joystick() {
   const area = useRef<HTMLDivElement>(null);
   const pid = useRef<number | null>(null);
   const chatOpen = useStore((s) => s.chatOpen);
-  const moreOpen = useStore((s) => s.moreOpen);
+  const moreOpen = useStore((s) => s.activeMenu === 'more' || s.activeMenu === 'home');
   // 채팅·더보기가 열리면 조이스틱을 숨긴다 (이동 입력도 함께 잠김)
   if (!isTouchDevice() || chatOpen || moreOpen) return null;
   // 보이는 원은 작게(110px), 손가락 인식 영역은 그보다 넓게(150px)
@@ -65,7 +65,7 @@ export function ActionBar() {
   const seated = !!benchSeated || !!furnUse;
   const getUp = () => (benchSeated ? standUp() : stopFurniture());
   const chatOpen = useStore((s) => s.chatOpen);
-  const moreOpen = useStore((s) => s.moreOpen);
+  const moreOpen = useStore((s) => s.activeMenu === 'more' || s.activeMenu === 'home');
   if (touch) {
     // 모바일: 하단 내비게이션 위 오른쪽 2×2 버튼 묶음, 채팅·더보기가 열리면 숨김
     if (chatOpen || moreOpen) return null;

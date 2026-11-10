@@ -233,3 +233,36 @@ export function spawnPoint(seed: number): [number, number] {
   const a = ((seed * 137.5) % 360) * (Math.PI / 180);
   return resolveCollision(Math.sin(a) * 1.4, 10 + Math.cos(a) * 1.2, 0.4);
 }
+
+// ---------------------------------------------------------------- 장소 바로 가기 (입구 앞 순간 이동)
+/**
+ * 장소 선택에서 고르면 그 장소의 '입구 앞'으로 바로 이동한다 (자동으로 걸어가지 않고, 안으로 바로 들어가지도 않음).
+ * 입구 안내 버튼 범위(r) 바깥 몇 걸음 앞에서, 입구를 바라보게 선다. 좌표는 서버가 이 표로만 정한다 (클라이언트가 보낸 좌표는 쓰지 않음).
+ */
+export type WarpId = 'plaza' | 'apartment' | 'cafe' | 'shop' | 'runner';
+export const WARP_IDS: WarpId[] = ['plaza', 'apartment', 'cafe', 'shop', 'runner'];
+export const isWarpId = (v: unknown): v is WarpId => typeof v === 'string' && (WARP_IDS as string[]).includes(v);
+/** 입구 앞에 설 거리 (입구 안내 범위 1.8~2.0m보다 조금 바깥) */
+const WARP_STEP = 2.7;
+const RA_OUT = { x: -RUNNER_ARENA.x / Math.hypot(RUNNER_ARENA.x, RUNNER_ARENA.z), z: -RUNNER_ARENA.z / Math.hypot(RUNNER_ARENA.x, RUNNER_ARENA.z) };
+/** 기준점 · 입구 쪽 방향(바라보는 방향, y축 회전) */
+const WARP_BASE: Record<WarpId, { x: number; z: number; rot: number }> = {
+  // 중앙 공원: 기본 입장 지점(광장 남쪽 길)에서 분수 쪽을 바라봄
+  plaza: { x: 0, z: 10, rot: Math.PI },
+  apartment: { x: APARTMENT_ENTRANCE.x, z: APARTMENT_ENTRANCE.z + WARP_STEP, rot: Math.PI },
+  cafe: { x: CAFE_ENTRANCE.x, z: CAFE_ENTRANCE.z + WARP_STEP, rot: Math.PI },
+  shop: { x: SHOP_ENTRANCE.x, z: SHOP_ENTRANCE.z + WARP_STEP, rot: Math.PI },
+  runner: { x: RUNNER_ARENA.entrance.x + RA_OUT.x * WARP_STEP, z: RUNNER_ARENA.entrance.z + RA_OUT.z * WARP_STEP, rot: Math.atan2(-RA_OUT.x, -RA_OUT.z) },
+};
+/**
+ * 순간 이동 위치 (사람 · 강아지): 여러 사람이 동시에 와도 겹치지 않게 사용자마다 옆으로 조금씩 비켜 서고,
+ * 벽·나무·벤치 안에 생기지 않도록 충돌 보정. 강아지는 사람 옆(입구 반대쪽 아님)에 선다.
+ */
+export function warpState(id: WarpId, userId: number): [number, number, number, number, number, number, number, number] {
+  const b = WARP_BASE[id];
+  const side = { x: Math.cos(b.rot), z: -Math.sin(b.rot) }; // 바라보는 방향의 오른쪽
+  const k = ((userId % 5) - 2) * 0.5;
+  const [x, z] = resolveCollision(b.x + side.x * k, b.z + side.z * k, 0.4);
+  const [dx, dz] = resolveCollision(x + side.x * 0.75 - Math.sin(b.rot) * 0.2, z + side.z * 0.75 - Math.cos(b.rot) * 0.2, 0.3);
+  return [Math.round(x * 100) / 100, Math.round(z * 100) / 100, b.rot, 0, Math.round(dx * 100) / 100, Math.round(dz * 100) / 100, b.rot, 0];
+}

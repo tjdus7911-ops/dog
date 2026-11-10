@@ -17,8 +17,8 @@ createRoot(document.getElementById('root')!).render(
 // 자동 화면 테스트용 훅: 브라우저 저장소에 mungle.e2e=1 이 있을 때만 노출 (일반 사용자에게는 없음)
 try {
   if (localStorage.getItem('mungle.e2e') === '1') {
-    void Promise.all([import('./store'), import('./game/local'), import('./game/CameraRig')]).then(([s, l, c]) => {
-      (window as unknown as Record<string, unknown>).__mungleTest = { set: s.set, get: s.get, local: l.local, cam: c.cam };
+    void Promise.all([import('./store'), import('./game/local'), import('./game/CameraRig'), import('./net/remote')]).then(([s, l, c, r]) => {
+      (window as unknown as Record<string, unknown>).__mungleTest = { set: s.set, get: s.get, local: l.local, cam: c.cam, rendered: r.rendered };
     });
   }
 } catch { /* 저장소 사용 불가 */ }

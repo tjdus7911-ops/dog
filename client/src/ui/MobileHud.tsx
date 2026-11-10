@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { drawBinsAndPoops } from './MiniMap';
 import { get, set, toast, useStore } from '../store';
-import { joinPark } from '../net/socket';
+import { joinPark, warpTo } from '../net/socket';
 import { api } from '../lib/api';
 import { local } from '../game/local';
 import { isTouchDevice, setMoveLocked } from '../game/input';
@@ -16,11 +16,15 @@ import {
   RUNNER_ARENA,
 } from '@shared/world';
 import type { MeetupView } from '@shared/community';
+import type { WarpId } from '@shared/world';
 import type { ScreenSlide } from '@shared/screen';
 import { PlacePicker } from './TopBar';
 import { openCommunity, fmtWhen } from './Community';
 import { Modal, PanelHeader } from './common';
 import { logout } from './App';
+import { Icon } from './icons';
+import { closeMenu, fromMenu, toggleMenu } from './menus';
+import { FEATURES } from '@shared/features';
 import { MOBILE_TOP_ROWS, NAV_H } from './layout';
 
 // ---------------------------------------------------------------- 장소 줄 (모바일 상단 두 번째 줄)
@@ -41,7 +45,7 @@ export function PlaceBar() {
 // ---------------------------------------------------------------- 하단 고정 내비게이션
 async function goHome() {
   const me = get().me!;
-  set({ moreOpen: false, panel: 'none', chatOpen: false });
+  set({ activeMenu: null, panel: 'none', chatOpen: false });
   if (me.role === 'guest') { set({ joinPrompt: true }); return; }
   if (me.residence) { await joinPark(homeSpaceId(me.id)); return; }
   toast('아직 입주한 집이 없어요. 로비 안내판에서 빈 호실에 입주해 보세요 🏠');
@@ -49,7 +53,7 @@ async function goHome() {
   set({ lobbyPanel: true });
 }
 async function goShop() {
-  set({ moreOpen: false, panel: 'none', chatOpen: false });
+  set({ activeMenu: null, panel: 'none', chatOpen: false });
   if (get().park?.kind !== 'shop' && !(await joinPark('shop-1'))) return;
   set({ shopOpen: true });
 }
@@ -59,7 +63,7 @@ export function BottomNav() {
   const park = useStore((s) => s.park);
   const panel = useStore((s) => s.panel);
   const chatOpen = useStore((s) => s.chatOpen);
-  const moreOpen = useStore((s) => s.moreOpen);
+  const moreOpen = useStore((s) => s.activeMenu === 'more');
   const unread = useStore((s) => s.chatUnread);
   const friendBadge = useStore((s) => s.incoming.length + s.friends.reduce((a, f) => a + f.unread, 0));
   const items: { id: string; icon: string; label: string; active: boolean; badge?: number; onClick: () => void }[] = [
@@ -67,13 +71,13 @@ export function BottomNav() {
     { id: 'shop', icon: '🛍️', label: '상점', active: park?.kind === 'shop', onClick: () => void goShop() },
     {
       id: 'friends', icon: '🐾', label: '친구', active: panel === 'friends', badge: friendBadge,
-      onClick: () => (DEMO ? toast('미리보기에서는 친구 기능을 쓸 수 없어요. (게임 서버에서 동작)') : me.role === 'guest' ? set({ joinPrompt: true }) : set({ panel: panel === 'friends' ? 'none' : 'friends', moreOpen: false, chatOpen: false })),
+      onClick: () => (DEMO ? toast('미리보기에서는 친구 기능을 쓸 수 없어요. (게임 서버에서 동작)') : me.role === 'guest' ? set({ joinPrompt: true }) : set({ panel: panel === 'friends' ? 'none' : 'friends', activeMenu: null, chatOpen: false })),
     },
     {
       id: 'chat', icon: '💬', label: '채팅', active: chatOpen, badge: unread,
-      onClick: () => (DEMO ? toast('미리보기에서는 채팅을 쓸 수 없어요. (게임 서버에서 동작)') : set({ chatOpen: !chatOpen, moreOpen: false, panel: 'none' })),
+      onClick: () => (DEMO ? toast('미리보기에서는 채팅을 쓸 수 없어요. (게임 서버에서 동작)') : set({ chatOpen: !chatOpen, activeMenu: null, panel: 'none' })),
     },
-    { id: 'more', icon: '☰', label: '더보기', active: moreOpen, onClick: () => set({ moreOpen: !moreOpen, panel: 'none', chatOpen: false }) },
+    { id: 'more', icon: '☰', label: '더보기', active: moreOpen, onClick: () => toggleMenu('more') },
   ];
   return (
     <nav aria-label="주 메뉴" className="absolute z-20 inset-x-0 bottom-0 bg-[#fffaf4]/92 backdrop-blur-md rounded-t-[22px] border-t-2 border-white shadow-[0_-6px_22px_rgba(90,64,51,.14)]"
@@ -81,7 +85,7 @@ export function BottomNav() {
       <ul className="grid grid-cols-5" style={{ height: NAV_H }}>
         {items.map((it) => (
           <li key={it.id} className="flex">
-            <button onClick={it.onClick} aria-pressed={it.active}
+            <button onClick={it.onClick} aria-pressed={it.active} data-menu-trigger={it.id === 'more' ? 'more' : undefined} data-testid={`nav-${it.id}`}
               className={`relative flex-1 flex flex-col items-center justify-center gap-0.5 select-none transition ${it.active ? 'text-peach-deep' : 'text-cocoa'}`}>
               <span className={`grid place-items-center w-11 h-7 rounded-full text-[19px] leading-none transition ${it.active ? 'bg-peach-soft' : ''}`}>{it.icon}</span>
               <span className={`text-[11px] font-display leading-none ${it.active ? 'text-peach-deep' : ''}`}>{it.label}</span>
@@ -95,51 +99,62 @@ export function BottomNav() {
 }
 
 // ---------------------------------------------------------------- 더보기
+// 아래에서 올라오는 시트 · 섹션 제목과 얇은 구분선 · 아이콘 없이 · 2열로 촘촘하게 · 길면 시트 안에서만 스크롤.
+// 다른 곳에서 바로 갈 수 있는 것은 빼 둠: 알림(상단 종) · 출석(상단 코인) · 애견카페(장소 선택) · 마을 지도(오른쪽 버튼)
 export function MoreSheet() {
   const me = useStore((s) => s.me)!;
-  const open = useStore((s) => s.moreOpen);
+  const open = useStore((s) => s.activeMenu === 'more');
   useEffect(() => { setMoveLocked(open, 'more'); return () => setMoveLocked(false, 'more'); }, [open]);
   if (!open) return null;
-  const close = () => set({ moreOpen: false });
-  const go = (fn: () => void) => () => { close(); fn(); };
-  const tiles: { icon: string; label: string; onClick: () => void; hide?: boolean }[] = [
-    { icon: '🐾', label: '산책 모임', onClick: go(() => openCommunity('meetups')) },
-    { icon: '🐶', label: '강아지 모임', onClick: go(() => openCommunity('clubs')) },
-    { icon: '📸', label: '강아지 자랑', onClick: go(() => openCommunity('posts')) },
-    { icon: '🗺️', label: '마을 지도', onClick: go(() => set({ mapOpen: true })) },
-    { icon: '📅', label: '동네 일정', onClick: go(() => set({ eventsOpen: true })) },
-    { icon: '📅', label: '출석 체크', onClick: go(() => set({ wallet: 'attendance' })), hide: me.role === 'guest' },
-    { icon: '🚚', label: '이사하기', onClick: go(() => set({ moveOpen: true })), hide: !me.residence },
-    { icon: '🏢', label: '아파트 로비', onClick: go(() => void joinPark('lobby-1')) },
-    { icon: '☕', label: '애견카페', onClick: go(() => void joinPark('cafe-1')) },
-    { icon: '📺', label: '스크린 신청', onClick: go(() => set({ screenSubmit: {} })), hide: DEMO },
-    { icon: '✨', label: '꾸미기', onClick: go(() => set({ panel: 'avatar' })) },
-    { icon: '🔔', label: '알림', onClick: go(() => set({ panel: 'notifications' })), hide: DEMO },
-    { icon: '🔒', label: '설정·차단', onClick: go(() => set({ panel: 'settings' })), hide: DEMO },
-    { icon: '🛡️', label: '운영 관리', onClick: go(() => set({ panel: 'admin' })), hide: DEMO || me.role !== 'admin' },
+  const guest = me.role === 'guest';
+  const sections: { title: string; items: { label: string; onClick: () => void; hide?: boolean; soft?: boolean }[] }[] = [
+    { title: '마을 생활', items: [
+      { label: '동네 일정', onClick: fromMenu(() => set({ eventsOpen: true })) },
+      { label: '아파트 로비', onClick: fromMenu(() => void joinPark('lobby-1')), hide: guest },
+      { label: '이사하기', onClick: fromMenu(() => set({ moveOpen: true })), hide: !me.residence },
+    ] },
+    { title: '동네', items: [
+      { label: '산책 모임', onClick: fromMenu(() => openCommunity('meetups')) },
+      { label: '강아지 자랑', onClick: fromMenu(() => openCommunity('posts')) },
+      { label: '강아지 모임', onClick: fromMenu(() => openCommunity('clubs')), hide: !FEATURES.dogClubs },
+    ] },
+    { title: '꾸미기', items: [
+      { label: '아바타·강아지 꾸미기', onClick: fromMenu(() => set({ panel: 'avatar' })) },
+      { label: '강아지 프로필·사진첩', onClick: fromMenu(() => set({ dogSheet: me.id })), hide: guest },
+      { label: '광장 스크린 신청', onClick: fromMenu(() => set({ screenSubmit: {} })), hide: DEMO || guest },
+    ] },
+    { title: '설정', items: [
+      { label: '개인정보·차단 설정', onClick: fromMenu(() => set({ panel: 'settings' })), hide: DEMO || guest },
+      { label: '운영 관리', onClick: fromMenu(() => set({ panel: 'admin' })), hide: DEMO || me.role !== 'admin' },
+      DEMO ? { label: '처음부터 다시 만들기', onClick: fromMenu(resetDemo), soft: true } : { label: guest ? '둘러보기 끝내기' : '로그아웃', onClick: fromMenu(logout), soft: true },
+    ] },
   ];
   return (
     <>
-      <div className="absolute inset-0 z-20 bg-[#5a403322]" onPointerDown={close} />
-      <section aria-label="더보기" className="mobile-sheet absolute z-20 inset-x-0 bg-[#fffaf4] rounded-t-[24px] border-t-2 border-white shadow-[0_-8px_30px_rgba(90,64,51,.18)] px-4 pt-2 pb-3"
-        style={{ bottom: `calc(var(--safe-b) + ${NAV_H}px)` }}>
-        <div className="mx-auto w-10 h-1.5 rounded-full bg-[#e9d8c6]" />
-        <div className="flex items-center gap-2 mt-2 mb-2">
-          <span className="font-display text-lg flex-1">더보기</span>
-          <span className="text-xs text-cocoa-soft truncate">{me.nickname} · 🐶 {me.dogName}</span>
+      <div className="absolute inset-x-0 top-0 z-20 bg-[#51473F24]" style={{ bottom: `calc(var(--safe-b) + ${NAV_H}px)` }} data-menu-backdrop onPointerDown={closeMenu} />
+      <section aria-label="더보기" data-menu-root="more" data-testid="more-sheet"
+        className="absolute z-20 inset-x-0 bg-[#FFFCF8] rounded-t-[20px] border-t border-[#EAE3DC] px-4 pt-2 pb-2.5 overflow-y-auto overscroll-contain scroll-soft text-[#51473F]"
+        style={{ bottom: `calc(var(--safe-b) + ${NAV_H}px)`, maxHeight: `min(560px, calc(100% - var(--safe-t) - ${NAV_H + 70}px))` }}>
+        <div className="mx-auto w-9 h-1 rounded-full bg-[#EAE3DC]" />
+        <div className="flex items-center gap-2 min-h-[44px]">
+          <h2 className="font-display text-[16px] flex-1">더보기</h2>
+          <span className="text-[12px] text-[#8A8078] truncate max-w-[45%]">{me.nickname} · {me.dogName}</span>
+          <button className="w-11 h-11 -mr-2 rounded-full grid place-items-center text-[#756B63]" onClick={closeMenu} aria-label="더보기 닫기"><Icon name="x" size={20} /></button>
         </div>
-        <div className="grid grid-cols-4 gap-2">
-          {tiles.filter((t) => !t.hide).map((t) => (
-            <button key={t.label} onClick={t.onClick} className="rounded-2xl bg-white py-2.5 flex flex-col items-center gap-1 shadow-[0_2px_0_#f1e2d2] active:scale-95 transition">
-              <span className="text-[22px] leading-none">{t.icon}</span>
-              <span className="text-[11px] font-display leading-tight">{t.label}</span>
-            </button>
-          ))}
-        </div>
-        <div className="flex justify-end mt-2">
-          {DEMO ? <button className="text-xs text-cocoa-soft px-2 py-2" onClick={resetDemo}>🔄 처음부터 다시 만들기</button>
-            : <button className="text-xs text-cocoa-soft px-2 py-2" onClick={logout}>🚪 로그아웃</button>}
-        </div>
+        {sections.map((sec) => {
+          const items = sec.items.filter((x) => !x.hide);
+          if (!items.length) return null;
+          return (
+            <div key={sec.title}>
+              <h3 className="text-[12px] text-[#8A8078] pt-2.5 pb-0.5 px-0.5 font-normal">{sec.title}</h3>
+              <div className="grid grid-cols-2 gap-x-4">
+                {items.map((it) => (
+                  <button key={it.label} onClick={it.onClick} className={`min-h-[46px] px-0.5 text-left text-[14px] border-b border-[#EAE3DC] active:bg-[#F7F1EA] ${it.soft ? 'text-[#8A8078]' : ''}`}>{it.label}</button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </section>
     </>
   );
@@ -182,15 +197,15 @@ export function QuickMenu() {
 
 // ---------------------------------------------------------------- 마을 지도
 // x·z: 이름표를 놓을 지도 위치 (광장 안 시설은 겹치지 않게 바깥쪽으로 비켜 표시), spot: 걸어갈 지점
-const LANDMARKS: { icon: string; label: string; x: number; z: number; spot?: { x: number; z: number } }[] = [
+const LANDMARKS: { icon: string; label: string; x: number; z: number; spot?: { x: number; z: number }; warp?: WarpId }[] = [
   { icon: '⛲', label: '분수 광장', x: 0, z: 4.5, spot: { x: 0, z: 4 } },
   { icon: '📺', label: '대형 스크린', x: BIG_SCREEN.x, z: BIG_SCREEN.z - 1.5, spot: { x: 0, z: -8.6 } },
   { icon: '📋', label: '모임 게시판', x: MEETING_BOARD.x + 6.5, z: MEETING_BOARD.z - 3, spot: { x: MEETING_BOARD.x * 0.78, z: MEETING_BOARD.z * 0.78 } },
   { icon: '📸', label: '포토존', x: PHOTO_ZONE.x - 5.5, z: PHOTO_ZONE.z - 3, spot: { x: PHOTO_ZONE.standX, z: PHOTO_ZONE.standZ } },
-  { icon: '🏢', label: '멍글 아파트', x: APARTMENT_ENTRANCE.x, z: APARTMENT_ENTRANCE.z - 3.5, spot: APARTMENT_ENTRANCE },
-  { icon: '☕', label: '애견카페', x: CAFE_ENTRANCE.x, z: CAFE_ENTRANCE.z - 3, spot: CAFE_ENTRANCE },
-  { icon: '🛍️', label: '애견샵', x: SHOP_ENTRANCE.x, z: SHOP_ENTRANCE.z - 3, spot: SHOP_ENTRANCE },
-  { icon: '🏃', label: '멍글런너', x: RUNNER_ARENA.x, z: RUNNER_ARENA.z + 1, spot: RUNNER_ARENA.entrance },
+  { icon: '🏢', label: '멍글 아파트', x: APARTMENT_ENTRANCE.x, z: APARTMENT_ENTRANCE.z - 3.5, warp: 'apartment' },
+  { icon: '☕', label: '애견카페', x: CAFE_ENTRANCE.x, z: CAFE_ENTRANCE.z - 3, warp: 'cafe' },
+  { icon: '🛍️', label: '애견샵', x: SHOP_ENTRANCE.x, z: SHOP_ENTRANCE.z - 3, warp: 'shop' },
+  { icon: '🏃', label: '멍글런너', x: RUNNER_ARENA.x, z: RUNNER_ARENA.z + 1, warp: 'runner' },
 ];
 
 function drawPark(g: CanvasRenderingContext2D, size: number, friendIds: Set<number>) {
@@ -246,10 +261,10 @@ export function VillageMap() {
   const k = (size / 2 - 6) / (WORLD_RADIUS + 1);
   const walkTo = (x: number, z: number) => { local.moveTarget = { x, z }; local.seatGoal = null; close(); toast('🐾 그쪽으로 걸어가요'); };
   const places = [
-    ...(inPark ? [] : [{ icon: '🌳', label: '중앙 공원으로', go: () => void joinPark('central-1', park?.kind === 'lobby' || park?.kind === 'cafe' || park?.kind === 'shop' ? park.kind : undefined) }]),
-    { icon: '🏢', label: '아파트 로비', go: () => void joinPark('lobby-1') },
-    { icon: '☕', label: '애견카페', go: () => void joinPark('cafe-1') },
-    { icon: '🛍️', label: '애견샵', go: () => void joinPark('shop-1') },
+    ...(inPark ? [] : [{ icon: '🌳', label: '중앙 공원으로', go: () => void warpTo('plaza') }]),
+    { icon: '🏢', label: '아파트 입구', go: () => void warpTo('apartment') },
+    { icon: '☕', label: '애견카페 입구', go: () => void warpTo('cafe') },
+    { icon: '🛍️', label: '애견샵 입구', go: () => void warpTo('shop') },
     ...(me?.residence ? [{ icon: '🏠', label: '우리 집', go: () => void joinPark(homeSpaceId(me.id)) }] : []),
   ];
   return (
@@ -260,14 +275,14 @@ export function VillageMap() {
           <div className="relative mx-auto" style={{ width: size, height: size }}>
             <canvas ref={ref} style={{ width: size, height: size }} className="rounded-full border-4 border-white shadow-md" />
             {LANDMARKS.map((l) => (
-              <button key={l.label} onClick={() => l.spot && walkTo(l.spot.x, l.spot.z)} title={`${l.label}(으)로 걸어가기`}
+              <button key={l.label} onClick={() => (l.warp ? (close(), void warpTo(l.warp)) : l.spot && walkTo(l.spot.x, l.spot.z))} title={l.warp ? `${l.label} 입구 앞으로 이동` : `${l.label}(으)로 걸어가기`}
                 className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/95 shadow px-1.5 py-0.5 text-[10px] font-display whitespace-nowrap border border-[#f1e2d2]"
                 style={{ left: size / 2 + l.x * k, top: size / 2 + l.z * k }}>
                 {l.icon} {l.label}
               </button>
             ))}
           </div>
-          <p className="text-[11px] text-cocoa-soft text-center mt-2">🔶 나 · 🟢 친구 · ⚪ 다른 산책러 · 🟩 배변봉투 휴지통 — 장소를 누르면 그쪽으로 걸어가요</p>
+          <p className="text-[11px] text-cocoa-soft text-center mt-2">🔶 나 · 🟢 친구 · ⚪ 다른 산책러 · 🟩 배변봉투 휴지통 — 건물을 누르면 입구 앞으로 바로 가요</p>
         </>
       ) : <p className="text-sm text-cocoa-soft bg-cream-2 rounded-2xl px-3 py-3">지금은 {park?.name ?? '실내'}에 있어요. 공원 지도는 공원에서 볼 수 있어요.</p>}
       <div className="mt-3 grid grid-cols-2 gap-2">

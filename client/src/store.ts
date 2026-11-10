@@ -18,6 +18,8 @@ export interface ViewerState {
 }
 
 export type CommunityTab = 'meetups' | 'clubs' | 'posts';
+/** 한 번에 하나만 열리는 메뉴: 장소 선택 · 내 메뉴(프로필) · 더보기 · 내 집 */
+export type MenuId = 'place' | 'profile' | 'more' | 'home';
 /** 멍글 동네 화면 상태: 탭 + 열어 본 모임/강아지 모임 */
 export interface CommunityView { tab: CommunityTab; meetupId?: number; clubId?: number; compose?: boolean }
 
@@ -86,7 +88,8 @@ interface State {
   /** 애견샵 카운터 패널 */
   shopOpen: boolean;
   /** 모바일 하단 '더보기' 메뉴 / 마을 지도 / 이벤트(동네 일정) 창 */
-  moreOpen: boolean;
+  /** 지금 열린 메뉴 하나 (장소 선택·내 메뉴·더보기·내 집) — 한 번에 하나만 (ui/menus.ts) */
+  activeMenu: MenuId | null;
   mapOpen: boolean;
   eventsOpen: boolean;
   /** 채팅을 닫아 둔 동안 새로 온 공원 채팅 수 */
@@ -165,7 +168,7 @@ export const useStore = create<State>()(() => ({
   meetupLive: [],
   meetupAlert: null,
   shopOpen: false,
-  moreOpen: false,
+  activeMenu: null,
   mapOpen: false,
   eventsOpen: false,
   chatUnread: 0,

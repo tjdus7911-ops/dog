@@ -8,6 +8,7 @@ import { setMoveLocked } from '../game/input';
 import { joinPark, openProfile } from '../net/socket';
 import { DEMO } from '../demo';
 import { PARKS } from '@shared/protocol';
+import { FEATURES } from '@shared/features';
 import { residenceLabel } from '@shared/apartment';
 import {
   CLUB_CATEGORIES, COMMENT_MAX_LEN, POST_MAX_LEN, SIDO, SIZE_RULES, TEMPER_RULES,
@@ -16,12 +17,13 @@ import {
 
 const TABS: { id: CommunityTab; icon: string; label: string }[] = [
   { id: 'meetups', icon: '🐾', label: '산책 모임' },
-  { id: 'clubs', icon: '🐶', label: '강아지 모임' },
+  // 강아지 모임은 초기 서비스에서 숨김 (FEATURES.dogClubs) — 데이터·서버는 그대로
+  ...(FEATURES.dogClubs ? [{ id: 'clubs' as const, icon: '🐶', label: '강아지 모임' }] : []),
   { id: 'posts', icon: '📸', label: '강아지 자랑' },
 ];
 
 export const openCommunity = (tab: CommunityTab = 'meetups', extra: { meetupId?: number; clubId?: number } = {}) =>
-  set({ community: { tab, ...extra }, panel: 'none', benchMenu: null, chatOpen: false });
+  set({ community: { tab: tab === 'clubs' && !FEATURES.dogClubs ? 'meetups' : tab, ...extra }, panel: 'none', benchMenu: null, chatOpen: false });
 const closeCommunity = () => set({ community: null });
 const nav = (patch: Partial<NonNullable<ReturnType<typeof get>['community']>>) => set((s) => ({ community: s.community ? { ...s.community, ...patch } : null }));
 
@@ -73,7 +75,7 @@ export function Community() {
           <h2 className="font-display text-2xl flex-1">멍글 동네</h2>
           <button className="btn btn-ghost w-11 h-11 text-lg" onClick={closeCommunity} aria-label="멍글 동네 닫기">✕</button>
         </header>
-        <nav className="px-3 pb-2 grid grid-cols-3 gap-1.5" role="tablist">
+        <nav className={`px-3 pb-2 grid ${TABS.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5`} role="tablist">
           {TABS.map((t) => (
             <button key={t.id} role="tab" aria-selected={view.tab === t.id}
               onClick={() => set({ community: { tab: t.id } })}
@@ -85,7 +87,7 @@ export function Community() {
         {DEMO && <p className="mx-4 mb-1 text-xs bg-cream-2 rounded-xl px-3 py-1.5 text-cocoa-soft">👀 미리보기에서는 이 기기에서 나 혼자만 보여요. 실제 서버 주소에서는 동네 사람들과 함께 쓸 수 있어요.</p>}
         <div className="flex-1 min-h-0 overflow-y-auto scroll-soft px-3 md:px-4 pb-4">
           {view.tab === 'meetups' && (view.meetupId ? <MeetupDetailView id={view.meetupId} /> : view.compose ? <MeetupForm /> : <MeetupList />)}
-          {view.tab === 'clubs' && (view.clubId ? <ClubDetailView id={view.clubId} /> : view.compose ? <ClubForm /> : <ClubList />)}
+          {view.tab === 'clubs' && FEATURES.dogClubs && (view.clubId ? <ClubDetailView id={view.clubId} /> : view.compose ? <ClubForm /> : <ClubList />)}
           {view.tab === 'posts' && <PostsTab />}
         </div>
       </section>

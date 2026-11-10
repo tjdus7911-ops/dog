@@ -23,6 +23,7 @@ import { HomeEditor, HomePanel } from './Home';
 import { CoinFx, WalletModal } from './Coins';
 import { MoveModal } from './Move';
 import { RunnerInviteCard } from '../runner/InviteCard';
+import { MenuGuards } from './menus';
 
 const AvatarEditor = lazy(() => import('./AvatarEditor'));
 const AdminPanel = lazy(() => import('./AdminPanel'));
@@ -40,7 +41,7 @@ export default function Game() {
   const community = useStore((s) => !!s.community);
   const touch = isTouchDevice();
   const chatOpen = useStore((s) => s.chatOpen);
-  const moreOpen = useStore((s) => s.moreOpen);
+  const moreOpen = useStore((s) => s.activeMenu === 'more' || s.activeMenu === 'home');
   // 강아지 메뉴·프로필·사진 보기·가입 안내가 열리면 이동 UI(조이스틱·액션 버튼)를 숨김
   const overlay = useOverlayOpen();
   const mobileChat = touch && chatOpen;
@@ -59,7 +60,8 @@ export default function Game() {
   }
   return (
     <div className="relative h-full w-full overflow-hidden">
-      <div className="absolute inset-0"><Scene /></div>
+      <MenuGuards />
+      <div className="absolute inset-0" data-scene><Scene /></div>
       {!photo && <>
         <TopBar />
         {touch ? <PlaceBar /> : kind === 'park' && !community && <MiniMap />}

@@ -8,7 +8,7 @@ import {
   BIN_REACH, CHAT_MAX_LEN, DOG_ANIM_MAX, HUMAN_ANIM_MAX, HumanAnim, NET_TICK_MS, PARKS, PET_REACH, POOP_REACH, RUN_SPEED,
   type ChatMessage, type PetEvent, type PoopInfo, type FriendEntry, type NetState, type ParkInfo, type PlayerSnapshot, type PublicProfile, type SeatMap,
 } from '../../shared/protocol';
-import { APARTMENT_ENTRANCE, BIN_BY_ID, CAFE_ENTRANCE, SHOP_ENTRANCE, SEAT_BY_ID, SEAT_REACH, WORLD_RADIUS, spawnPoint } from '../../shared/world';
+import { APARTMENT_ENTRANCE, BIN_BY_ID, CAFE_ENTRANCE, SHOP_ENTRANCE, SEAT_BY_ID, SEAT_REACH, WORLD_RADIUS, isWarpId, spawnPoint, warpState } from '../../shared/world';
 import { PLACES, homeSpaceId, insideSpace, parseSpace, spawnOf, type SpaceKind } from '../../shared/spaces';
 import { canVisit } from './access';
 import { furnitureSpots, planOf, tierOfBuilding, type FurnAction, type HomeTier, type PlacedItem } from '../../shared/home';
@@ -113,6 +113,7 @@ export function setupRealtime(io: Server) {
   const friendLimiter = new RateLimiter(20, 60_000);
   const reportLimiter = new RateLimiter(10, 3600_000);
   const lookupLimiter = new RateLimiter(120, 60_000);
+  const warpLimiter = new RateLimiter(30, 60_000);
 
   const parkInfo = (r: Room): ParkInfo => ({ id: r.id, name: r.name, count: r.players.size, capacity: capacityOf(r), kind: r.kind, icon: r.icon, ownerId: r.ownerId, ...(r.kind === 'home' ? { tier: r.tier ?? 1 } : {}) });
   const hidden = (s: Session, other: number) => s.blocked.has(other) || s.blockedBy.has(other);
@@ -150,9 +151,15 @@ export function setupRealtime(io: Server) {
     return changed;
   }
 
-  function leavePark(s: Session) {
+  /** 연결이 끊겼다 다시 들어올 때 같은 공간이면 마지막 위치로 (서버가 기억한 위치만 사용, 3분 동안) */
+  const lastSeen = new Map<number, { roomId: string; state: NetState; at: number }>();
+  const LAST_SEEN_MS = 3 * 60_000;
+  function leavePark(s: Session, remember = false) {
     if (!s.parkId) return;
     const room = rooms.get(s.parkId)!;
+    const me = room.players.get(s.userId);
+    if (remember && me) lastSeen.set(s.userId, { roomId: room.id, state: [...me.state] as NetState, at: Date.now() });
+    else lastSeen.delete(s.userId);
     releaseSeat(room, s.userId);
     // 정리 정책: 보호자가 공간을 떠나면(이동·접속 종료) 치우지 않은 배변도 함께 정리
     for (const [id, poop] of room.poops) if (poop.ownerId === s.userId) { room.poops.delete(id); io.to(room.id).emit('poop:remove', { id, reason: 'left' }); }
@@ -254,7 +261,7 @@ export function setupRealtime(io: Server) {
 
     // ---------- 공원 입장 ----------
     // ---------- 장소 입장 (공원 / 아파트 로비 / 개인 집) — 한 사용자는 한 공간에만 있음 ----------
-    socket.on('park:join', (data: { parkId?: string; from?: string } | undefined, ack: unknown) => {
+    socket.on('park:join', (data: { parkId?: string; from?: string; warp?: unknown } | undefined, ack: unknown) => {
       const profile = repo.getPublicProfile(userId);
       if (!profile) return fail(ack, '프로필을 찾을 수 없어요.');
       let room: Room | undefined;
@@ -281,11 +288,22 @@ export function setupRealtime(io: Server) {
       leavePark(session);
       // 건물에서 나오면 그 건물 입구 앞에 선다
       const door = data?.from === 'lobby' ? APARTMENT_ENTRANCE : data?.from === 'cafe' ? CAFE_ENTRANCE : data?.from === 'shop' ? SHOP_ENTRANCE : null;
-      const [x, z] = room.kind === 'park'
-        ? (door ? [door.x + ((userId % 5) - 2) * 0.5, door.z + 2.2] : spawnPoint(userId + Date.now() % 1000))
-        : [spawnOf(room.kind, room.tier)[0] + ((userId % 5) - 2) * 0.35, spawnOf(room.kind, room.tier)[1]];
-      const face = room.kind === 'park' && !door ? Math.PI : 0;
-      const state: NetState = [x, z, face, 0, x + 0.7, z + 0.3, face, 0];
+      // 장소 선택(입구 앞 바로 가기): 서버 표의 입구 좌표로만 (data.warp)
+      const warp = room.kind === 'park' && isWarpId(data?.warp) ? data.warp : null;
+      // 연결이 끊겼다 같은 공간으로 돌아오면 마지막 위치 (서버가 기억한 위치, 공간 안일 때만)
+      const seen = lastSeen.get(userId);
+      lastSeen.delete(userId);
+      const back = !warp && !door && seen && seen.roomId === room.id && Date.now() - seen.at < LAST_SEEN_MS && insideSpace(room.kind, seen.state[0], seen.state[1], room.tier) ? seen.state : null;
+      let state: NetState;
+      if (warp) state = warpState(warp, userId);
+      else if (back) state = [...back] as NetState;
+      else {
+        const [x, z] = room.kind === 'park'
+          ? (door ? [door.x + ((userId % 5) - 2) * 0.5, door.z + 2.2] : spawnPoint(userId + Date.now() % 1000))
+          : [spawnOf(room.kind, room.tier)[0] + ((userId % 5) - 2) * 0.35, spawnOf(room.kind, room.tier)[1]];
+        const face = room.kind === 'park' && !door ? Math.PI : 0;
+        state = [x, z, face, 0, x + 0.7, z + 0.3, face, 0];
+      }
       const player: Player = { userId, socket, profile, state, lastTs: Date.now(), dirty: true, walkSecs: 0, poopAt: nextPoopAt(), pooping: false, coinWalkM: 0, coinWalkS: 0 };
       const others: PlayerSnapshot[] = [...room.players.values()]
         .filter((p) => !hidden(session, p.userId))
@@ -302,6 +320,23 @@ export function setupRealtime(io: Server) {
     });
 
     socket.on('park:leave', (_: unknown, ack: unknown) => { leavePark(session); notifyFriendsPresence(userId); okAck(ack); });
+
+    // ---------- 장소 바로 가기: 같은 공원 안에서 입구 앞으로 순간 이동 ----------
+    // 목적지 이름만 받고 좌표는 서버 표(warpState)로 정함 → 잘못된 좌표로 갈 수 없음. 다른 사람 화면에는 미끄러지지 않고 바로 옮겨짐.
+    socket.on('park:warp', (data: { to?: unknown } | undefined, ack: unknown) => {
+      if (!warpLimiter.allow(String(userId))) return fail(ack, '잠시 후 다시 시도해 주세요.');
+      const room = session.parkId ? rooms.get(session.parkId) : undefined;
+      const p = room?.players.get(userId);
+      if (!room || !p) return fail(ack, '장소에 들어가 있지 않아요.');
+      if (room.kind !== 'park') return fail(ack, '공원에서만 바로 갈 수 있어요.');
+      if (!isWarpId(data?.to)) return fail(ack, '없는 장소예요.');
+      releaseSeat(room, userId);
+      p.state = warpState(data.to, userId);
+      p.lastTs = Date.now();
+      p.dirty = true;
+      emitToRoomFiltered(room, userId, 'players:warp', { userId, state: p.state });
+      okAck(ack, { state: p.state });
+    });
 
     // ---------- 위치/모션 동기화 (서버 측 검증) ----------
     socket.on('state', (s: unknown) => {
@@ -628,7 +663,7 @@ export function setupRealtime(io: Server) {
 
     socket.on('disconnect', () => {
       if (sessions.get(userId)?.socket !== socket) return; // 이미 새 접속으로 교체됨
-      leavePark(session);
+      leavePark(session, true);
       sessions.delete(userId);
       notifyFriendsPresence(userId);
     });

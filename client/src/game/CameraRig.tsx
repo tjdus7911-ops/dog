@@ -48,6 +48,19 @@ function clearDistance(t: THREE.Vector3, dir: THREE.Vector3, want: number) {
   return want;
 }
 
+/** 아바타 뒤쪽 방향(base)이 나무·건물에 막혀 있으면 가까운 옆 각도 중 트인 쪽을 고름 (장소 이동 직후 카메라가 머리에 붙지 않게) */
+function clearYaw(t: THREE.Vector3, base: number, pitch: number, dist: number) {
+  const cp = Math.cos(pitch);
+  let best = base, bestD = -1;
+  for (const o of [0, 0.2, -0.2, 0.4, -0.4, 0.6, -0.6, 0.8, -0.8, 1.0, -1.0]) {
+    const y = base + o;
+    const d = clearDistance(t, new THREE.Vector3(Math.sin(y) * cp, Math.sin(pitch), Math.cos(y) * cp), dist);
+    if (d >= dist * 0.85) return y;
+    if (d > bestD) { bestD = d; best = y; }
+  }
+  return best;
+}
+
 export function CameraRig() {
   const { camera, gl } = useThree();
   cam.project = (x, y, z) => {
@@ -131,7 +144,10 @@ export function CameraRig() {
       const kind = cam.pendingReset;
       cam.pendingReset = null;
       view.current = parkView();
-      if (kind === 'park') { cam.yaw = local.rot + Math.PI; cam.pitch = view.current.pitch; cam.dist = view.current.dist; }
+      if (kind === 'park') {
+        cam.pitch = view.current.pitch; cam.dist = view.current.dist;
+        cam.yaw = clearYaw(new THREE.Vector3(local.x, 1.05 + view.current.lookUp, local.z), local.rot + Math.PI, cam.pitch, cam.dist);
+      }
       else { cam.yaw = 0.55; cam.pitch = 0.62; cam.dist = kind === 'home' ? 7.2 : 7.8; }
       cam.lastUserInput = performance.now();
       curDist.current = cam.dist;
