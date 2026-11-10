@@ -4,14 +4,13 @@
 import * as THREE from 'three';
 import type { HumanAvatar } from '@shared/avatar';
 import { bone, group, onSurface, part, shape, templateCache } from './bake';
-import { lathe, mix, sculptSphere, smooth, smoothProfile, strand } from './sculpt';
+import { lathe, mix, sculptSphere, smooth, smoothProfile } from './sculpt';
 
 type V3 = [number, number, number];
 
 const EYE = '#1f1714';
 const WHITE = '#ffffff';
 const BLUSH = '#f7a3a0';
-const TONGUE = '#f2837e';
 const SOCK = '#fbf8f3';
 const SOLE = '#ece4d8';
 
@@ -28,6 +27,8 @@ const isLight = (hex: string) => { const c = new THREE.Color(hex); return c.r * 
 // 머리 기준값 (head 관절 좌표계) — 레퍼런스처럼 약간 가로로 넓은 큰 머리
 const HC: V3 = [0, 0.3, 0];
 const HR: V3 = [0.318, 0.3, 0.292];
+/** 얼굴 배치 (헤어스타일과 무관하게 고정) */
+const FACE = { eyeYaw: 0.31, eyePitch: -0.13, browPitch: 0.06 };
 
 /** 볼살 있는 머리 (단위 구 조형) */
 const HEAD_GEO = () => sculptSphere('humanHead', (d) => {
@@ -37,6 +38,12 @@ const HEAD_GEO = () => sculptSphere('humanHead', (d) => {
   const k = 1 + 0.055 * cheek;
   return new THREE.Vector3(d.x * k, y > 0.55 ? y * (1 - (y - 0.55) * 0.06) : y * (1 - 0.03 * smooth(-0.6, -1, y)), d.z * (1 + 0.035 * cheek));
 });
+
+/** 팔·다리 회전체 (원통 대신 어깨·허벅지는 둥글고 끝으로 갈수록 자연스럽게 가늘어짐) */
+const SLEEVE_LONG = () => lathe('sleeveL5', smoothProfile([[0.001, 0.052], [0.04, 0.042], [0.058, 0.005], [0.057, -0.06], [0.052, -0.13], [0.05, -0.17], [0.046, -0.18], [0.001, -0.182]], 26), 28);
+const SLEEVE_SHORT = () => lathe('sleeveS5', smoothProfile([[0.001, 0.052], [0.04, 0.042], [0.058, 0.005], [0.062, -0.06], [0.06, -0.085], [0.001, -0.086]], 20), 28);
+const ARM_SKIN = () => lathe('armSkin5', smoothProfile([[0.001, 0.0], [0.04, -0.01], [0.039, -0.08], [0.036, -0.13], [0.001, -0.14]], 18), 24);
+const LEG_GEO = () => lathe('leg5', smoothProfile([[0.001, 0.03], [0.05, 0.012], [0.059, -0.04], [0.055, -0.13], [0.05, -0.2], [0.001, -0.215]], 22), 28);
 
 export const HUMAN_LAYOUT = { headCenter: 1.0, chest: 0.5, hips: 0.3, feet: 0.05, top: 1.32 };
 
@@ -49,7 +56,7 @@ function buildHuman(a: HumanAvatar, bald = false): THREE.Group {
   const legColor = a.bottom === 'pants' ? a.bottomColor : a.skin;
   for (const side of [1, -1]) {
     const leg = bone(body, side > 0 ? 'legL' : 'legR', [side * 0.072, 0.305, 0]);
-    part(leg, shape.capsule(0.056, 0.13), legColor, [0, -0.12, 0]);
+    part(leg, LEG_GEO(), legColor, [0, 0, 0]);
     if (a.bottom !== 'pants') part(leg, shape.cyl(0.06, 0.062, 0.085, 20), SOCK, [0, -0.205, 0]);
     if (a.bottom === 'pants') part(leg, shape.torus(0.058, 0.011), shade(a.bottomColor, -0.06), [0, -0.205, 0], 1, [Math.PI / 2, 0, 0]);
     if (a.shoes === 'boots') {
@@ -138,13 +145,13 @@ function buildHuman(a: HumanAvatar, bald = false): THREE.Group {
   for (const side of [1, -1]) {
     const arm = bone(torso, side > 0 ? 'armL' : 'armR', [side * 0.155, 0.31, 0]);
     const g = group(arm, [0, 0, 0], [0, 0, side * 0.16]);
-    part(g, shape.ball(), sleeve, [side * 0.004, -0.02, 0], [0.058, 0.058, 0.058]); // 어깨
+    // 소매: 어깨에서 둥글게 시작해 손목으로 살짝 가늘어지는 회전체 (몸통 안에서 시작해 접합부가 보이지 않게)
     if (longSleeve) {
-      part(g, shape.capsule(0.052, 0.12), sleeve, [side * 0.012, -0.1, 0]);
-      part(g, shape.cyl(0.054, 0.052, 0.035, 20), shade(sleeve, -0.05), [side * 0.012, -0.18, 0]);
+      part(g, SLEEVE_LONG(), (p) => mix(sleeve, shade(sleeve, -0.04), smooth(-0.05, -0.17, p.y)), [side * 0.01, 0, 0]);
+      part(g, shape.torus(0.049, 0.011, Math.PI * 2, 8, 24), shade(sleeve, -0.05), [side * 0.012, -0.178, 0], 1, [Math.PI / 2, 0, 0]);
     } else {
-      part(g, shape.cyl(0.062, 0.058, 0.07, 20), sleeve, [side * 0.01, -0.05, 0]);
-      part(g, shape.capsule(0.04, 0.1), a.skin, [side * 0.012, -0.12, 0]);
+      part(g, SLEEVE_SHORT(), sleeve, [side * 0.01, 0, 0]);
+      part(g, ARM_SKIN(), a.skin, [side * 0.012, -0.06, 0]);
     }
     // 손 (엄지가 있는 동그란 손)
     part(g, shape.ball(), a.skin, [side * 0.014, -0.225, 0.004], [0.046, 0.052, 0.04]);
@@ -172,46 +179,40 @@ function buildHuman(a: HumanAvatar, bald = false): THREE.Group {
   // ---------- 머리 ----------
   const head = bone(torso, 'head', [0, 0.375, 0]);
   // 말랑한 얼굴: 볼살이 살짝 도톰하고 턱이 동그란 구 + 볼터치·턱 밑 그늘을 피부에 직접 그라데이션으로 칠함
-  const cheeks = [-1, 1].map((s) => new THREE.Vector3(...onSurface(HC, HR, s * 0.62, -0.3, 1.0)));
+  const cheeks = [-1, 1].map((s) => new THREE.Vector3(...onSurface(HC, HR, s * 0.56, -0.3, 1.0)));
   const skinShadow = shade(a.skin, -0.06);
   part(head, HEAD_GEO(), (p) => {
     let c = mix(a.skin, skinShadow, smooth(0.16, 0.3, HC[1] - p.y) * 0.6);
     for (const ch of cheeks) {
       const d = p.distanceTo(ch);
-      c = mix(c, BLUSH, (1 - smooth(0.02, 0.085, d)) * 0.75);
+      c = mix(c, BLUSH, (1 - smooth(0.015, 0.075, d)) * 0.6);
     }
     return c;
   }, HC, HR);
   // 귀 — 레퍼런스처럼 크고 동그랗게
-  for (const s of [-1, 1]) {
+  // 귀를 덮는 머리(단발·긴머리 등)일 때는 귀가 머리카락을 뚫고 보이지 않게 생략
+  const earsHidden = !bald && (HAIR_CUTS[a.hairStyle]?.side ?? 0) < -0.1;
+  for (const s of earsHidden ? [] : [-1, 1]) {
     const p = onSurface(HC, HR, s * 1.52, -0.06, 0.95);
     part(head, shape.ball(), a.skin, p, [0.038, 0.06, 0.05], [0, 0, s * -0.15]);
     part(head, shape.ball(), shade(a.skin, -0.05), [p[0] + s * 0.012, p[1], p[2] + 0.005], [0.02, 0.038, 0.028]);
   }
-  // 눈: 반짝이는 큰 눈 — 짙은 갈색 홍채(아래쪽이 밝은 그라데이션) + 검은 동공 + 하이라이트 2개 + 속눈썹 선
+  // 얼굴 (v5): 헤어스타일·모자와 무관하게 항상 같은 크기·위치로 그린다.
+  // 눈은 머리 표면에 거의 붙은 얇은 타원(튀어나오지 않게) — 또렷한 검은 눈 + 작은 하이라이트
+  const brow = mix(a.hairColor, '#6b4a36', 0.35).getStyle();
   for (const s of [-1, 1]) {
-    const yaw = s * 0.36, pitch = -0.1;
-    const ec = onSurface(HC, HR, yaw, pitch, 0.985);
-    part(head, shape.ball(24, 18), (p) => mix('#2a1a14', '#7a4a33', smooth(ec[1] - 0.01, ec[1] - 0.05, p.y) * 0.85), ec, [0.04, 0.056, 0.022], [0, yaw, 0], { gloss: true });
-    part(head, shape.ball(), EYE, onSurface(HC, HR, yaw, pitch + 0.02, 1.0), [0.024, 0.034, 0.016], [0, yaw, 0], { gloss: true });
-    part(head, shape.ball(), WHITE, onSurface(HC, HR, yaw + s * 0.0 + 0.05, pitch + 0.085, 1.045), [0.0145, 0.016, 0.008], [0, yaw, 0]);
-    part(head, shape.ball(), WHITE, onSurface(HC, HR, yaw - 0.035, pitch - 0.075, 1.035), 0.0065);
-    // 위 속눈썹 선 (바깥쪽 끝이 살짝 올라감)
-    const lash = onSurface(HC, HR, yaw, pitch + 0.035, 1.012);
-    part(head, shape.torus(0.046, 0.0075, 1.9, 6, 18), '#2a1a14', lash, [1, 1.12, 1], [0, yaw, Math.PI / 2 - 0.95 + s * 0.12]);
-    // 눈썹 (부드러운 아치)
-    if (a.hat !== 'cap' && a.hat !== 'bucket') {
-      const bp = onSurface(HC, HR, s * 0.35, 0.12, 1.0);
-      part(head, shape.torus(0.05, 0.0085, 1.3, 8, 16), '#9b6a45', bp, [1, 0.55, 1], [0, s * 0.35, Math.PI / 2 - 0.65]);
-    }
+    const yaw = s * FACE.eyeYaw, pitch = FACE.eyePitch;
+    const eg = group(head, onSurface(HC, HR, yaw, pitch, 0.998), [0, yaw, 0]);
+    part(eg, shape.ball(24, 18), EYE, [0, 0, 0], [0.033, 0.045, 0.012], [-pitch, 0, 0], { gloss: true });
+    part(head, shape.ball(12, 10), WHITE, onSurface(HC, HR, yaw + s * 0.028, pitch + 0.055, 1.025), [0.0105, 0.0115, 0.004], [0, yaw, 0]);
+    part(head, shape.ball(8, 6), WHITE, onSurface(HC, HR, yaw - s * 0.022, pitch - 0.05, 1.02), [0.0048, 0.0048, 0.003], [0, yaw, 0]);
+    // 얇고 자연스러운 눈썹 (살짝 둥근 아치)
+    part(head, shape.torus(0.048, 0.0052, 1.05, 6, 16), brow, onSurface(HC, HR, s * 0.34, FACE.browPitch, 1.0), [1, 0.5, 1], [0, s * 0.34, Math.PI / 2 - 0.52]);
   }
-  // 코 (작은 볼록)
-  part(head, shape.ball(), shade(a.skin, -0.04), onSurface(HC, HR, 0, -0.18, 0.995), [0.016, 0.012, 0.012]);
-  // 입: 크게 웃는 입 + 혀
-  const mp = onSurface(HC, HR, 0, -0.33, 1.0);
-  // 입: 작게 벌린 웃는 입 (위는 평평, 아래는 둥근 반달) + 안쪽 혀
-  part(head, shape.halfDisc(0.036), '#8e3530', [mp[0], mp[1] + 0.012, mp[2] + 0.006], [1.0, 0.85, 1], [0.33, 0, 0]);
-  part(head, shape.ball(), TONGUE, [mp[0], mp[1] - 0.009, mp[2] + 0.004], [0.017, 0.008, 0.004], [0.33, 0, 0]);
+  // 코 (아주 작게)
+  part(head, shape.ball(12, 10), shade(a.skin, -0.05), onSurface(HC, HR, 0, -0.2, 0.995), [0.012, 0.009, 0.009]);
+  // 입: 부드러운 미소 선
+  part(head, shape.torus(0.026, 0.0055, Math.PI * 0.75, 6, 18), '#a2493f', onSurface(HC, HR, 0, -0.3, 1.0), [1, 0.85, 1], [0.3, 0, Math.PI + Math.PI * 0.125]);
 
   if (!bald) buildHair(head, a);
   buildHat(head, a);
@@ -219,7 +220,7 @@ function buildHuman(a: HumanAvatar, bald = false): THREE.Group {
   if (a.accessory === 'glasses' || a.accessory === 'square_glasses') {
     const frame = '#4a3a33';
     for (const s of [-1, 1]) {
-      const p = onSurface(HC, HR, s * 0.34, -0.08, 1.075);
+      const p = onSurface(HC, HR, s * FACE.eyeYaw, FACE.eyePitch, 1.075);
       if (a.accessory === 'glasses') part(head, shape.torus(0.068, 0.0095), frame, p, 1, [0, s * 0.3, 0]);
       else part(head, shape.torus(0.08, 0.0095, Math.PI * 2, 6, 4), frame, p, [1, 0.82, 1], [0, s * 0.3, Math.PI / 4]);
       part(head, shape.capsule(0.007, 0.13), frame, onSurface(HC, HR, s * 0.98, -0.04, 1.02), 1, [Math.PI / 2, 0, 0]);
@@ -229,112 +230,83 @@ function buildHuman(a: HumanAvatar, bald = false): THREE.Group {
   return root;
 }
 
-/** 머리카락: 얼굴 부분이 열린 매끈한 헬멧형 껍질 + 결 홈 + 일자 앞머리 (레퍼런스 단발 구조) */
+/**
+ * 머리카락 (v5): 하나로 이어진 헤어 메시.
+ * 머리보다 조금 큰 구를 조형해서 ①얼굴 창(앞머리 선·구레나룻) 안쪽은 피부 속으로 부드럽게 말려 들어가고
+ * ②아래 끝(머리 길이)도 안쪽으로 말리며 ③아래쪽에만 아주 얕은 결을 넣는다. 가닥을 따로 붙이지 않아 경계가 자연스럽다.
+ */
+interface HairCut { fringe: number; win: number; back: number; side: number; bangs: number }
+const HAIR_CUTS: Record<string, HairCut> = {
+  bob: { fringe: 0.17, win: 0.98, back: -0.62, side: -0.5, bangs: 1 },
+  long: { fringe: 0.22, win: 0.98, back: -0.85, side: -0.62, bangs: 1 },
+  bun: { fringe: 0.26, win: 1.02, back: -0.35, side: -0.22, bangs: 0.7 },
+  twin: { fringe: 0.24, win: 1.0, back: -0.35, side: -0.25, bangs: 0.8 },
+  pony: { fringe: 0.26, win: 1.02, back: -0.35, side: -0.22, bangs: 0.7 },
+  short: { fringe: 0.34, win: 1.08, back: -0.2, side: 0.05, bangs: 0.5 },
+  spiky: { fringe: 0.38, win: 1.08, back: -0.2, side: 0.05, bangs: 0.3 },
+};
+function hairGeometry(style: string) {
+  const c = HAIR_CUTS[style] ?? HAIR_CUTS.bob;
+  return sculptSphere(`hair5${style}`, (d) => {
+    const yaw = Math.atan2(d.x, d.z);
+    const ay = Math.abs(yaw);
+    const pitch = Math.asin(Math.max(-1, Math.min(1, d.y)));
+    // 앞머리 선: 가운데가 가장 낮고 관자놀이로 갈수록 살짝 올라감 + 아주 약한 물결
+    const fringe = c.fringe + 0.07 * Math.pow(ay / c.win, 2) + 0.018 * Math.cos(yaw * 9) * c.bangs;
+    // 얼굴 창 안쪽 거리 (부드러운 최솟값 → 앞머리와 옆머리가 이어지는 모서리가 둥글게)
+    const sk = 0.06, ea = c.win - ay, eb = fringe - pitch;
+    const inWin = -sk * Math.log(Math.exp(-ea / sk) + Math.exp(-eb / sk)); // >0 이면 얼굴 창 안
+    // 머리 길이: 뒤(back) → 옆(side)으로 이어짐
+    const bottom = c.side + (c.back - c.side) * smooth(1.2, 2.6, ay);
+    const belowCut = bottom - pitch; // >0 이면 길이 아래
+    let k = 1;
+    k -= 0.15 * smooth(-0.02, 0.07, inWin);
+    k -= 0.18 * smooth(-0.03, 0.1, belowCut);
+    // 끝이 안쪽으로 둥글게 말리기 직전 살짝 도톰하게
+    k += 0.03 * smooth(-0.22, -0.06, belowCut) * (1 - smooth(-0.03, 0.06, belowCut));
+    // 앞머리 두께 (이마 위 볼륨)
+    k += 0.025 * c.bangs * smooth(0.45, 0.0, ay) * smooth(fringe + 0.45, fringe + 0.05, pitch) * (1 - smooth(-0.02, 0.05, inWin));
+    // 아래쪽만 아주 얕은 머리 결
+    k *= 1 + 0.008 * Math.cos(yaw * 22) * smooth(0.5, -0.2, pitch);
+    // 정수리는 살짝 납작하게
+    const y = d.y > 0.7 ? d.y * (1 - (d.y - 0.7) * 0.08) : d.y;
+    return new THREE.Vector3(d.x * k, y * k, d.z * k);
+  }, 72, 48);
+}
+
 function buildHair(head: THREE.Object3D, a: HumanAvatar) {
   const h = a.hairColor;
   const tie = '#f39a7b';
-  const R: V3 = [HR[0] * 1.09, HR[1] * 1.1, HR[2] * 1.11];
-  const C: V3 = [0, HC[1] + 0.012, -0.006];
-  const open = 0.88; // 얼굴 쪽 열린 각도(반폭)
-  /** 옆·뒤를 감싸는 껍질 (가닥 결 포함). bottom: 위에서부터 내려오는 깊이(π 비율) */
-  const shellTo = (bottom: number) => {
-    part(head, shape.hair(Math.PI / 2 + open, Math.PI * 2 - open * 2, Math.PI * bottom, 9), h, C, R);
-    part(head, shape.dome(0.3), h, C, R);
-  };
-  /** 일자 앞머리: 이마를 덮는 곡면에 세 갈래 결 */
-  const bangs = (bottom: number) => {
-    // 모자를 쓰면 앞머리를 모자 안쪽으로 (결이 모자 밖으로 비치지 않게)
-    const hat = a.hat !== 'none' && a.hat !== 'headphones';
-    const B: V3 = hat ? [R[0] * 0.995, R[1] * 0.99, R[2] * 1.0] : [R[0] * 1.012, R[1] * 1.01, R[2] * 1.035];
-    part(head, shape.hair(Math.PI / 2 - open - 0.1, open * 2 + 0.2, Math.PI * bottom, 3, hat ? 0 : 0.03), h, C, B);
-  };
+  const R: V3 = [HR[0] * 1.075, HR[1] * 1.08, HR[2] * 1.09];
+  const C: V3 = [0, HC[1] + 0.012, -0.004];
+  // 위는 살짝 밝고(윤기) 아래는 살짝 어둡게
+  const hi = shade(h, 0.06), lo = shade(h, -0.035);
+  part(head, hairGeometry(a.hairStyle), (p) => mix(lo, hi, smooth(-0.22, 0.2, p.y - C[1])), C, R);
   switch (a.hairStyle) {
-    case 'bob':
-      // 입체 단발: 매끈한 기본 볼륨 위에 가닥(끝이 안으로 말린 결)을 하나하나 얹는다
-      part(head, shape.hair(Math.PI / 2 + open, Math.PI * 2 - open * 2, Math.PI * 0.74, 9, 0.012), shade(h, -0.06), C, [R[0] * 0.985, R[1] * 0.99, R[2] * 0.985]);
-      part(head, shape.dome(0.3), h, C, R);
-      bobStrands(head, a, C, R, open);
-      break;
     case 'long':
-      shellTo(0.8);
-      bangs(0.43);
-      // 등 뒤로 내려오는 긴 머리
-      part(head, shape.ball(), h, [0, HC[1] - 0.32, -0.15], [0.29, 0.26, 0.13]);
-      for (const s of [-1, 1]) part(head, shape.ball(), h, [s * 0.27, HC[1] - 0.3, 0.0], [0.07, 0.2, 0.09]);
+      part(head, shape.ball(), lo, [0, HC[1] - 0.3, -0.16], [0.27, 0.25, 0.12]);
+      for (const s of [-1, 1]) part(head, shape.ball(), h, [s * 0.26, HC[1] - 0.29, -0.01], [0.065, 0.19, 0.085]);
       break;
     case 'bun':
-      shellTo(0.62);
-      bangs(0.43);
       part(head, shape.ball(), h, [0, HC[1] + 0.34, -0.1], 0.115);
       part(head, shape.torus(0.075, 0.02), tie, [0, HC[1] + 0.26, -0.075], 1, [Math.PI / 2 + 0.3, 0, 0]);
       break;
     case 'twin':
-      shellTo(0.66);
-      bangs(0.43);
       for (const s of [-1, 1]) {
-        part(head, shape.ball(), h, [s * 0.39, HC[1] - 0.08, -0.06], [0.075, 0.16, 0.075], [0, 0, s * 0.3]);
-        part(head, shape.ball(), tie, [s * 0.35, HC[1] + 0.04, -0.06], 0.03);
+        part(head, shape.ball(), h, [s * 0.38, HC[1] - 0.08, -0.06], [0.075, 0.16, 0.075], [0, 0, s * 0.3]);
+        part(head, shape.ball(), tie, [s * 0.34, HC[1] + 0.04, -0.06], 0.03);
       }
       break;
     case 'pony':
-      shellTo(0.64);
-      bangs(0.43);
       part(head, shape.ball(), h, [0, HC[1] - 0.1, -0.38], [0.08, 0.19, 0.08], [0.45, 0, 0]);
       part(head, shape.ball(), tie, [0, HC[1] + 0.04, -0.34], 0.035);
       break;
-    case 'short':
-      shellTo(0.56);
-      bangs(0.36);
-      break;
     case 'spiky':
-      shellTo(0.56);
-      bangs(0.34);
       for (let i = 0; i < 7; i++) {
         const yaw = (i / 7) * Math.PI * 2 + 0.3;
         part(head, shape.cone(0.06, 0.14), h, onSurface(C, R, yaw, 0.95, 0.98), 1, [Math.cos(yaw) * 0.55, 0, -Math.sin(yaw) * 0.55]);
       }
       break;
-  }
-}
-
-/** 단발 가닥: 뒤·옆은 정수리에서 턱선까지 흘러내려 끝이 안쪽으로 말리고, 앞머리는 이마로 내려온다 */
-function bobStrands(head: THREE.Object3D, a: HumanAvatar, C: V3, R: V3, open: number) {
-  const h = a.hairColor;
-  const light = shade(h, 0.07), dark = shade(h, -0.06);
-  const paint = (p: THREE.Vector3) => mix(dark, light, smooth(-0.2, 0.15, p.y - C[1]));
-  const P = (yaw: number, pitch: number, k: number) => onSurface(C, R, yaw, pitch, k);
-  // 모자를 쓰면 가닥이 모자 테두리 아래에서 시작 (모자를 뚫고 나오지 않게)
-  const hat = a.hat === 'cap' || a.hat === 'bucket' || a.hat === 'beanie';
-  const top = hat ? 0.12 : 0.85;
-  // 뒤·옆 가닥
-  const n = 21;
-  const from = open + 0.12, to = Math.PI * 2 - open - 0.12;
-  for (let i = 0; i < n; i++) {
-    const yaw = from + ((to - from) * i) / (n - 1);
-    const sway = Math.sin(i * 1.7) * 0.05;
-    const jit = Math.sin(i * 2.9) * 0.5 + 0.5; // 가닥마다 굵기·길이를 조금씩 다르게
-    const nearFace = 1 - Math.min(1, Math.abs(Math.atan2(Math.sin(yaw), Math.cos(yaw))) / 1.6); // 얼굴 쪽일수록 1
-    const end = -0.5 - nearFace * 0.04 + (jit - 0.5) * 0.06;
-    const pts: V3[] = [
-      ...(hat ? [P(yaw, 0.2, 0.97), P(yaw + sway * 0.4, top, 1.03)] : [P(yaw, 0.85, 0.96), P(yaw + sway * 0.3, 0.45, 1.03)]), P(yaw + sway * 0.6, hat ? -0.08 : 0.05, 1.065),
-      P(yaw + sway, end + 0.25, 1.085), P(yaw + sway, end, 1.06), P(yaw + sway * 0.8, end - 0.07, 0.95),
-    ];
-    part(head, strand(pts, 0.07 + jit * 0.025, 0.026, { center: C, flat: 0.4 + jit * 0.15 }), paint);
-  }
-  // 앞머리 (모자를 쓰면 이마 아래로 살짝 보이는 정도)
-  const bangs = [-0.78, -0.5, -0.24, 0.02, 0.27, 0.52, 0.78];
-  bangs.forEach((yaw, i) => {
-    const tipPitch = 0.1 + Math.abs(yaw) * 0.12 + (i % 2) * 0.03;
-    const pts: V3[] = hat
-      ? [P(yaw * 0.95, 0.3, 0.97), P(yaw, 0.2, 1.03), P(yaw * 1.02, tipPitch + 0.0, 1.035), P(yaw * 1.06 + (yaw > 0 ? 0.03 : -0.03), tipPitch - 0.07, 1.01)]
-      : [P(yaw * 0.25, 1.0, 0.95), P(yaw * 0.6, 0.7, 1.05), P(yaw * 0.92, 0.42, 1.085), P(yaw * 1.02, tipPitch + 0.06, 1.075), P(yaw * 1.06 + (yaw > 0 ? 0.03 : -0.03), tipPitch, 1.04)];
-    part(head, strand(pts, 0.07, 0.026, { center: C, flat: 0.4 }), paint);
-  });
-  // 귀 앞 옆머리
-  for (const sd of [-1, 1]) {
-    const yaw = sd * (open + 0.02);
-    const pts: V3[] = [hat ? P(yaw * 0.95, 0.2, 0.98) : P(yaw * 0.9, 0.6, 1.0), P(yaw, hat ? 0.1 : 0.25, 1.06), P(yaw * 1.02, -0.1, 1.09), P(yaw * 1.0, -0.42, 1.07), P(yaw * 0.94, -0.52, 0.98)];
-    part(head, strand(pts, 0.065, 0.028, { center: C, flat: 0.45 }), paint);
   }
 }
 

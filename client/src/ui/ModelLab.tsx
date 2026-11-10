@@ -14,14 +14,18 @@ const corgi: DogAvatar = { ...BREED_PRESETS[q.get('breed') ?? 'corgi'].dog, harn
 
 function Cam() {
   const { camera } = useThree();
-  const views: Record<string, [number[], number[]]> = {
-    front: [[0, 0.75, 2.6], [0, 0.6, 0]], three: [[1.7, 0.95, 2.0], [0, 0.55, 0]], side: [[2.6, 0.7, 0], [0, 0.55, 0]],
-    back: [[0.3, 0.9, -2.6], [0, 0.6, 0]], face: [[-0.25, 1.05, 1.05], [-0.25, 1.0, 0]], dogface: [[0.42, 0.6, 1.6], [0.42, 0.42, 0.1]],
-    dogside: [[1.9, 0.5, 0.15], [0.42, 0.32, 0.15]], dog3: [[1.5, 0.75, 1.2], [0.42, 0.33, 0.1]],
-  };
-  const [p, t] = views[VIEW] ?? views.front;
-  camera.position.set(p[0], p[1], p[2]);
-  camera.lookAt(t[0], t[1], t[2]);
+  // 대상별 거리·높이: 사람은 키 약 1.3, 강아지는 약 0.65
+  const human = WHO === 'human';
+  const both = WHO === 'both';
+  const ty = human ? 0.62 : both ? 0.55 : 0.33;
+  const d = human ? 2.7 : both ? 3.2 : 1.6;
+  const eye = ty + (human ? 0.12 : 0.1);
+  const dirs: Record<string, [number, number]> = { front: [0, 1], side: [1, 0], back: [0, -1], three: [0.7, 0.72], face: [0, 1] };
+  const [x, z] = dirs[VIEW] ?? dirs.front;
+  const k = VIEW === 'face' ? 0.42 : 1;
+  const fy = VIEW === 'face' ? (human ? 1.0 : 0.42) : ty;
+  camera.position.set(x * d * k, (VIEW === 'face' ? fy + 0.03 : eye), z * d * k);
+  camera.lookAt(0, fy, 0);
   return null;
 }
 
@@ -35,8 +39,8 @@ function Actors() {
   });
   return (
     <>
-      {WHO !== 'dog' && <group position={[-0.25, 0, 0]}><Human avatar={human} driver={hd} /></group>}
-      {WHO !== 'human' && <group position={[0.42, 0, 0.1]}><Dog avatar={corgi} driver={dd} /></group>}
+      {WHO !== 'dog' && <group position={[WHO === 'both' ? -0.3 : 0, 0, 0]}><Human avatar={human} driver={hd} /></group>}
+      {WHO !== 'human' && <group position={[WHO === 'both' ? 0.45 : 0, 0, 0]} rotation={[0, WHO === 'dog' ? 0 : -0.3, 0]}><Dog avatar={corgi} driver={dd} /></group>}
     </>
   );
 }
