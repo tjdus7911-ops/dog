@@ -15,7 +15,7 @@ import { local } from './local';
 import { rendered, sample } from '../net/remote';
 import { leaveSeat, sendState, sitOnSeat } from '../net/socket';
 import { openProfile } from '../net/socket';
-import { useStore } from '../store';
+import { get, useStore } from '../store';
 import { petLow } from './fx';
 import { furn, stepFurnitureGoal, stopDogTask, stopFurniture } from './furniture';
 import { spotHeight } from '@shared/home';
@@ -285,10 +285,10 @@ export function RemotePlayer({ profile }: { profile: PublicProfile }) {
 
     // 집 가구 위(소파·침대·강아지 침대)에 앉거나 누워 있으면 그 자리 높이로
     const furnPose = ha === HumanAnim.Sit || ha === HumanAnim.Lie || ha === HumanAnim.Sleep;
-    const hh = layout && furnPose ? spotHeight(layout, x, z, 'human') : 0;
+    const hh = layout && furnPose ? spotHeight(layout, x, z, 'human', undefined, get().home?.tier ?? 1) : 0;
     const hy = hh > 0 ? (ha === HumanAnim.Sit ? hh - SEAT_HEIGHT : hh) : 0;
     const dogPose = da === DogAnim.Sit || da === DogAnim.Lie || da === DogAnim.Sleep;
-    const dy = layout && dogPose ? spotHeight(layout, dx, dz, 'dog') : 0;
+    const dy = layout && dogPose ? spotHeight(layout, dx, dz, 'dog', undefined, get().home?.tier ?? 1) : 0;
     refs.human.current.position.set(x, hy, z);
     if (refs.blob?.current) refs.blob.current.visible = hh === 0;
     refs.human.current.rotation.set(0, rot, 0);

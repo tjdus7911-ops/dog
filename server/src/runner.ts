@@ -5,6 +5,7 @@ import { all, db, one, run } from './db';
 import * as repo from './db';
 import { requireAuth, type AuthedRequest } from './auth';
 import { RateLimiter } from './moderation';
+import { earn } from './coins';
 import {
   COURSES, COURSE_BY_ID, JUDGE, RUNNER_GAME_VERSION, buildChart, judgeRun, kstWeek, kstWeekStart, normalizedPoints,
   type Chart, type RunnerInput,
@@ -162,7 +163,10 @@ export function registerRunner(app: express.Express, deps: RunnerDeps) {
       deps.changed();
     }
     const best = one('SELECT * FROM runner_best WHERE user_id=? AND course=?', uid, course) as unknown as Best;
+    // 완주 보상: 서버가 검증한 정상 완주만, 하루 3번 (기록 번호마다 1번)
+    const coin = earn(uid, 'runner', `run-${sess.id}`);
     res.json({
+      coin,
       result: { score: r.score, maxCombo: r.maxCombo, counts: r.counts, accuracy: r.accuracy, points },
       newBest, best: { score: best.score, accuracy: best.accuracy / 10000, maxCombo: best.max_combo, achievedAt: best.achieved_at },
       rank: rankOfBest(course, best), prevRank, total: Number(one('SELECT COUNT(*) n FROM runner_best WHERE course=?', course)?.n ?? 0),

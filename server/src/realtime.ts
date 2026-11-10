@@ -9,9 +9,10 @@ import {
   type ChatMessage, type PetEvent, type PoopInfo, type FriendEntry, type NetState, type ParkInfo, type PlayerSnapshot, type PublicProfile, type SeatMap,
 } from '../../shared/protocol';
 import { APARTMENT_ENTRANCE, BIN_BY_ID, CAFE_ENTRANCE, SHOP_ENTRANCE, SEAT_BY_ID, SEAT_REACH, WORLD_RADIUS, spawnPoint } from '../../shared/world';
-import { PLACES, SPAWNS, homeSpaceId, insideSpace, parseSpace, type SpaceKind } from '../../shared/spaces';
+import { PLACES, homeSpaceId, insideSpace, parseSpace, spawnOf, type SpaceKind } from '../../shared/spaces';
 import { canVisit } from './access';
-import { furnitureSpots, type FurnAction, type PlacedItem } from '../../shared/home';
+import { furnitureSpots, planOf, tierOfBuilding, type FurnAction, type HomeTier, type PlacedItem } from '../../shared/home';
+import { coinHooks } from './coins';
 
 /** 집 가구 배치 캐시 (앉기·눕기 자세 검증용) — 배치가 저장되면 비움 */
 const layoutCache = new Map<number, { layout: PlacedItem[]; at: number }>();
@@ -25,11 +26,10 @@ function homeLayout(ownerId: number) {
 /** 집 안에서 해당 동작을 할 수 있는 가구 자리 근처인지 */
 function nearFurniture(ownerId: number | undefined, x: number, z: number, kinds: FurnAction[]) {
   if (!ownerId) return false;
-  return furnitureSpots(homeLayout(ownerId)).some((p) => p.actions.some((a) => kinds.includes(a)) && p.human.some((h) => Math.hypot(h.x - x, h.z - z) < 0.45));
+  return furnitureSpots(homeLayout(ownerId), tierOfBuilding(repo.getResidence(ownerId)?.building)).some((p) => p.actions.some((a) => kinds.includes(a)) && p.human.some((h) => Math.hypot(h.x - x, h.z - z) < 0.45));
 }
 
 const CAPACITY = Number(process.env.MUNGLE_PARK_CAPACITY ?? 30);
-const HOME_CAPACITY = 10;
 const REPORT_REASONS = ['욕설/비하', '도배/스팸', '불쾌한 닉네임/사진', '사칭/사기', '기타'];
 /** 배변 이벤트: 산책(걷기·달리기) 누적 시간이 MIN~MAX초 사이의 임의 값에 도달하면 CHANCE 확률로 발생 */
 const POOP_MIN_S = Number(process.env.MUNGLE_POOP_MIN_S ?? 300);
@@ -50,6 +50,9 @@ interface Player {
   dirty: boolean;
   /** 이번 공간에서 산책한 누적 시간(초)과 다음 배변 기준 */
   walkSecs: number;
+  /** 산책 코인용 누적 거리(m)·시간(초) — 보상을 받으면 0부터 다시 */
+  coinWalkM: number;
+  coinWalkS: number;
   poopAt: number;
   /** 배변 자세 중 (서버가 시작한 이벤트) */
   pooping: boolean;
@@ -60,8 +63,9 @@ interface Room {
   name: string;
   kind: SpaceKind;
   icon: string;
-  /** 개인 집이면 집주인 id */
+  /** 개인 집이면 집주인 id · 집 등급 */
   ownerId?: number;
+  tier?: HomeTier;
   players: Map<number, Player>;
   /** 신고 시 맥락으로 첨부할 최근 채팅 */
   recentChat: ChatMessage[];
@@ -88,7 +92,8 @@ interface Session {
 export function setupRealtime(io: Server) {
   // 상설 장소(공원·아파트 로비)는 미리 만들고, 개인 집은 누군가 들어갈 때 만들고 비면 정리한다
   const rooms = new Map<string, Room>(PLACES.map((p) => [p.id, { id: p.id, name: p.name, kind: p.kind, icon: p.icon, players: new Map(), recentChat: [], seats: new Map(), poops: new Map() }]));
-  const capacityOf = (r: Room) => (r.kind === 'home' ? HOME_CAPACITY : CAPACITY);
+  // 집 정원은 등급별 (원룸 10 · 투룸 12 · 쓰리룸 16)
+  const capacityOf = (r: Room) => (r.kind === 'home' ? planOf(r.tier).capacity : CAPACITY);
   function getOrCreateRoom(spaceId: string): Room | null {
     const existing = rooms.get(spaceId);
     if (existing) return existing;
@@ -97,7 +102,8 @@ export function setupRealtime(io: Server) {
     const owner = repo.getPublicProfile(sp.ownerId);
     const res = repo.getResidence(sp.ownerId);
     if (!owner || !res) return null;
-    const room: Room = { id: spaceId, name: `${owner.nickname}네 집 (${res.unit}호)`, kind: 'home', icon: '🏠', ownerId: sp.ownerId, players: new Map(), recentChat: [], seats: new Map(), poops: new Map() };
+    const tier = tierOfBuilding(res.building);
+    const room: Room = { id: spaceId, name: `${owner.nickname}네 집 (${res.building}동 ${res.unit}호)`, kind: 'home', icon: '🏠', ownerId: sp.ownerId, tier, players: new Map(), recentChat: [], seats: new Map(), poops: new Map() };
     rooms.set(spaceId, room);
     return room;
   }
@@ -108,7 +114,7 @@ export function setupRealtime(io: Server) {
   const reportLimiter = new RateLimiter(10, 3600_000);
   const lookupLimiter = new RateLimiter(120, 60_000);
 
-  const parkInfo = (r: Room): ParkInfo => ({ id: r.id, name: r.name, count: r.players.size, capacity: capacityOf(r), kind: r.kind, icon: r.icon, ownerId: r.ownerId });
+  const parkInfo = (r: Room): ParkInfo => ({ id: r.id, name: r.name, count: r.players.size, capacity: capacityOf(r), kind: r.kind, icon: r.icon, ownerId: r.ownerId, ...(r.kind === 'home' ? { tier: r.tier ?? 1 } : {}) });
   const hidden = (s: Session, other: number) => s.blocked.has(other) || s.blockedBy.has(other);
 
   // ---------- 인증 ----------
@@ -277,10 +283,10 @@ export function setupRealtime(io: Server) {
       const door = data?.from === 'lobby' ? APARTMENT_ENTRANCE : data?.from === 'cafe' ? CAFE_ENTRANCE : data?.from === 'shop' ? SHOP_ENTRANCE : null;
       const [x, z] = room.kind === 'park'
         ? (door ? [door.x + ((userId % 5) - 2) * 0.5, door.z + 2.2] : spawnPoint(userId + Date.now() % 1000))
-        : [SPAWNS[room.kind][0] + ((userId % 5) - 2) * 0.35, SPAWNS[room.kind][1]];
+        : [spawnOf(room.kind, room.tier)[0] + ((userId % 5) - 2) * 0.35, spawnOf(room.kind, room.tier)[1]];
       const face = room.kind === 'park' && !door ? Math.PI : 0;
       const state: NetState = [x, z, face, 0, x + 0.7, z + 0.3, face, 0];
-      const player: Player = { userId, socket, profile, state, lastTs: Date.now(), dirty: true, walkSecs: 0, poopAt: nextPoopAt(), pooping: false };
+      const player: Player = { userId, socket, profile, state, lastTs: Date.now(), dirty: true, walkSecs: 0, poopAt: nextPoopAt(), pooping: false, coinWalkM: 0, coinWalkS: 0 };
       const others: PlayerSnapshot[] = [...room.players.values()]
         .filter((p) => !hidden(session, p.userId))
         .map((p) => ({ profile: p.profile, state: p.state }));
@@ -311,7 +317,7 @@ export function setupRealtime(io: Server) {
       if (curRoom.kind === 'park') {
         const r = Math.hypot(x, z);
         if (r > WORLD_RADIUS + 0.5) { x *= WORLD_RADIUS / r; z *= WORLD_RADIUS / r; }
-      } else if (!insideSpace(curRoom.kind, x, z)) {
+      } else if (!insideSpace(curRoom.kind, x, z, curRoom.tier)) {
         socket.emit('correct', p.state);
         return;
       }
@@ -340,6 +346,12 @@ export function setupRealtime(io: Server) {
       if (danim === 7 && !p.pooping) danim = 0;
       // 산책 시간 누적 (걷기·달리기)
       if (anim === HumanAnim.Walk || anim === HumanAnim.Run) p.walkSecs += dt;
+      // 산책 코인: 공원에서 실제로 걸은 거리·시간 (속도 검증을 통과한 이동만 누적)
+      if (curRoom.kind === 'park' && !session.guest && (anim === HumanAnim.Walk || anim === HumanAnim.Run) && moved > 0.02) {
+        p.coinWalkM += moved; p.coinWalkS += dt;
+        const done = coinHooks.walkProgress(userId, p.coinWalkM, p.coinWalkS);
+        if (done) { p.coinWalkM = 0; p.coinWalkS = 0; }
+      }
       p.state = [round(x), round(z), round(rot), anim, round(dx), round(dz), round(drot), danim];
       p.lastTs = now;
       p.dirty = true;
@@ -622,6 +634,15 @@ export function setupRealtime(io: Server) {
     });
   });
 
+  // 동네 모임 참여 확인: 온라인 모임이 열리는 공원에 실제로 있는 시간을 주기적으로 센다
+  const MEETUP_TICK_S = Number(process.env.MUNGLE_MEETUP_TICK_S ?? 30);
+  setInterval(() => {
+    for (const room of rooms.values()) {
+      if (room.kind !== 'park') continue;
+      for (const pl of room.players.values()) if (!sessions.get(pl.userId)?.guest) coinHooks.meetupPresence(pl.userId, room.id, MEETUP_TICK_S);
+    }
+  }, MEETUP_TICK_S * 1000).unref();
+
   return {
     /** 프로필이 수정되면 같은 공원 사용자에게 갱신 전파 */
     profileChanged(userId: number) {
@@ -643,6 +664,19 @@ export function setupRealtime(io: Server) {
     notify(userId: number, event: string, payload: unknown) { sessions.get(userId)?.socket.emit(event, payload); },
     /** 집 꾸미기가 바뀌면 그 집에 있는 사람들에게 알림 */
     homeUpdated(ownerId: number) { layoutCache.delete(ownerId); io.to(homeSpaceId(ownerId)).emit('home:updated', { ownerId }); },
+    /** 집주인이 이사하면: 옛집에 있던 사람은 로비로 (집주인은 새집으로 다시 들어감) */
+    homeMoved(ownerId: number) {
+      layoutCache.delete(ownerId);
+      const room = rooms.get(homeSpaceId(ownerId));
+      if (!room) return;
+      for (const pl of [...room.players.values()]) {
+        const s = sessions.get(pl.userId);
+        if (!s) continue;
+        leavePark(s);
+        s.socket.emit('space:kicked', { reason: pl.userId === ownerId ? '' : '집주인이 새집으로 이사했어요. 로비에서 새 주소로 방문해 주세요.', moved: true });
+      }
+      rooms.delete(room.id);
+    },
     /** 방문 권한이 사라진 사람은 집에서 내보냄 (공개 범위 변경·차단 등) */
     recheckHome(ownerId: number) {
       const room = rooms.get(homeSpaceId(ownerId));

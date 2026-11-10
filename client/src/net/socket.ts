@@ -8,7 +8,10 @@ import { DEMO } from '../demo';
 import { api } from '../lib/api';
 import { setSpace } from '../game/space';
 import { cam } from '../game/CameraRig';
-import { PLACES, SPAWNS, homeSpaceId } from '@shared/spaces';
+import { PLACES, homeSpaceId, spawnOf } from '@shared/spaces';
+import type { CoinEarned } from '@shared/coins';
+import { tierOfBuilding } from '@shared/home';
+import { onCoinEarned } from '../ui/Coins';
 import { APARTMENT_ENTRANCE, BIN_BY_ID, CAFE_ENTRANCE, SHOP_ENTRANCE } from '@shared/world';
 import { ACTION_MS, PET_LOW, binOpenAt, petLow, playPet } from '../game/fx';
 import { onLayoutChanged, resetFurniture } from '../game/furniture';
@@ -75,7 +78,12 @@ export function connect() {
       set({ connection: 'kicked', kickReason: e.message === 'banned' ? '이용이 정지된 계정이에요.' : '로그인이 만료되었어요. 다시 로그인해 주세요.' });
     }
   });
-  s.on('space:kicked', ({ reason }: { reason: string }) => { toast(reason); void joinPark('lobby-1'); });
+  s.on('space:kicked', ({ reason, moved }: { reason: string; moved?: boolean }) => {
+    // 내가 이사해서 옛집에서 나온 경우: 이사 화면이 새집으로 다시 들여보냄
+    if (moved && !reason) return;
+    toast(reason); void joinPark('lobby-1');
+  });
+  s.on('coins:earned', (e: CoinEarned) => onCoinEarned(e));
   s.on('home:updated', ({ ownerId }: { ownerId: number }) => { if (get().park?.ownerId === ownerId) void loadHome(ownerId); });
   s.on('visit:request', (v: { fromId: number; nickname: string; dogName: string }) => {
     notify({ id: `visit-${v.fromId}-${Date.now()}`, kind: 'system', fromId: v.fromId, fromNickname: v.nickname, text: `${v.nickname}님이 우리 집 방문을 신청했어요. 집 정보에서 승인할 수 있어요.`, ts: Date.now() });
@@ -250,7 +258,7 @@ function enterSpace(park: ParkInfo, spawn: NetState) {
   local.seated = null; local.seatGoal = null; local.moveTarget = null;
   local.jumpY = 0; local.jumpV = 0;
   cam.pendingReset = park.kind;
-  setSpace(park.kind);
+  setSpace(park.kind, [], park.tier ?? 1);
   const moved = get().park?.id !== park.id;
   local.action = null; local.poopStart = 0; local.petHold = null;
   resetFurniture();
@@ -264,10 +272,10 @@ function demoJoin(id: string, from?: DoorFrom) {
   const me = get().me!;
   let park: ParkInfo;
   if (place) park = { ...place, count: 1, capacity: 1 };
-  else if (id === `home-${me.id}` && me.residence) park = { id, name: `${me.nickname}네 집 (${me.residence.unit}호)`, kind: 'home', icon: '🏠', ownerId: me.id, count: 1, capacity: 1 };
+  else if (id === `home-${me.id}` && me.residence) park = { id, name: `${me.nickname}네 집 (${me.residence.building}동 ${me.residence.unit}호)`, kind: 'home', icon: '🏠', ownerId: me.id, count: 1, capacity: 1, tier: tierOfBuilding(me.residence.building) };
   else { toast('미리보기에서는 다른 집에 들어갈 수 없어요.', 'error'); return false; }
   const door = from === 'lobby' ? APARTMENT_ENTRANCE : from === 'cafe' ? CAFE_ENTRANCE : from === 'shop' ? SHOP_ENTRANCE : null;
-  const [x, z] = park.kind === 'park' ? (door ? [door.x, door.z + 2.2] : [0.6, 10]) : SPAWNS[park.kind];
+  const [x, z] = park.kind === 'park' ? (door ? [door.x, door.z + 2.2] : [0.6, 10]) : spawnOf(park.kind, park.tier ?? 1);
   const face = park.kind === 'park' && !door ? Math.PI : 0;
   enterSpace(park, [x, z, face, 0, x + 0.7, z + 0.3, face, 0]);
   return true;
@@ -279,7 +287,7 @@ export async function loadHome(ownerId: number) {
     const r = await api<{ home: HomeView }>(`/api/home/${ownerId === get().me?.id ? 'me' : ownerId}`);
     if (get().park?.ownerId !== ownerId) return;
     set({ home: r.home });
-    setSpace('home', r.home.layout);
+    setSpace('home', r.home.layout, r.home.tier ?? 1);
     onLayoutChanged(r.home.layout);
   } catch (e) { toast((e as Error).message, 'error'); }
 }

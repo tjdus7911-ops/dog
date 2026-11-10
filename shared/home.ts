@@ -23,6 +23,8 @@ export interface FurnitureType {
   desc?: string;
   /** 애견샵 분류 */
   category?: 'bed' | 'decor';
+  /** 이 등급 집으로 이사하면 선물로 받는 가구 (애견샵에는 없음) */
+  gift?: HomeTier;
 }
 
 /** 입주 선물로 받는 기본 가구 세트 */
@@ -49,8 +51,12 @@ export const FURNITURE: FurnitureType[] = [
   { id: 'bed_sky', label: '하늘색 침대', icon: '🩵', count: 1, r: 0.95, shop: true, category: 'bed', desc: '구름 무늬 하늘색 침대' },
   { id: 'bed_wood', label: '원목 프레임 침대', icon: '🪵', count: 1, r: 0.95, shop: true, category: 'bed', desc: '따뜻한 원목 헤드보드 침대' },
   { id: 'dog_cushion', label: '강아지 전용 쿠션 침대', icon: '🐾', count: 1, r: 0.5, shop: true, category: 'bed', desc: '몸을 둥글게 말고 자기 좋은 도넛 쿠션' },
+  // ---- 3동(쓰리룸) 입주 선물: 강아지 놀이방 시설 (애견샵에는 없음) ----
+  { id: 'play_tunnel', label: '강아지 놀이 터널', icon: '🌈', count: 1, r: 0.75, shop: true, gift: 3, desc: '쏙 들어갔다 나오는 무지개 터널' },
+  { id: 'ball_pit', label: '강아지 볼풀', icon: '🫧', count: 1, r: 0.8, shop: true, gift: 3, desc: '알록달록 공이 가득한 볼풀' },
+  { id: 'play_steps', label: '강아지 계단 놀이대', icon: '🪜', count: 1, r: 0.6, shop: true, gift: 3, desc: '오르락내리락 3단 계단' },
 ];
-export const SHOP_ITEMS = FURNITURE.filter((f) => f.shop).map(({ id, label, icon, desc, category }) => ({ id, label, icon, desc: desc ?? '', category: category ?? 'decor' }));
+export const SHOP_ITEMS = FURNITURE.filter((f) => f.shop && !f.gift).map(({ id, label, icon, desc, category }) => ({ id, label, icon, desc: desc ?? '', category: category ?? 'decor' }));
 export const FURNITURE_BY_ID = new Map(FURNITURE.map((f) => [f.id, f]));
 
 /** 방 크기 (바닥 중심 기준 반폭) */
@@ -99,7 +105,8 @@ export const DEFAULT_LAYOUT: PlacedItem[] = [
 ];
 
 /** 배치 데이터 검증: 보유 개수·방 범위·형식. 올바르면 정리된 배치를, 아니면 null */
-export function validateLayout(v: unknown, owned?: ReadonlySet<string>): PlacedItem[] | null {
+export function validateLayout(v: unknown, owned?: ReadonlySet<string>, tier: HomeTier = 1): PlacedItem[] | null {
+  const plan = PLANS[tier] ?? PLANS[1];
   if (!Array.isArray(v) || v.length > 40) return null;
   const seen = new Set<string>();
   const out: PlacedItem[] = [];
@@ -110,7 +117,9 @@ export function validateLayout(v: unknown, owned?: ReadonlySet<string>): PlacedI
     const n = Number(it.n), x = Number(it.x), z = Number(it.z), rot = Number(it.rot);
     if (!f || !Number.isInteger(n) || n < 0 || n >= f.count) return null;
     if (f.shop && owned && !owned.has(f.id)) return null;
-    if (![x, z].every(Number.isFinite) || Math.abs(x) > ROOM_HALF_W || Math.abs(z) > ROOM_HALF_D) return null;
+    if (![x, z].every(Number.isFinite) || Math.abs(x) > plan.halfW || Math.abs(z) > plan.halfD) return null;
+    // 방 사이 벽 위에는 둘 수 없음 (액자처럼 작은 소품도 벽 안에 묻히지 않게)
+    if (plan.walls.some((w) => Math.abs(x - w.x) < w.hw + 0.12 && Math.abs(z - w.z) < w.hd + 0.12)) return null;
     if (!Number.isInteger(rot) || rot < 0 || rot > 3) return null;
     const key = itemKey({ type: f.id, n });
     if (seen.has(key)) return null;
@@ -162,8 +171,12 @@ export interface HomeView {
   likes: number;
   likedByMe: boolean;
   isOwner: boolean;
-  /** 집주인이 애견샵에서 받은 가구 id (집주인에게만) */
+  /** 집주인이 애견샵·이사 선물로 받은 가구 id (집주인에게만) */
   owned: string[];
+  /** 집 등급 (1동 원룸 · 2동 투룸 · 3동 쓰리룸) */
+  tier: HomeTier;
+  /** 벽지·바닥재 */
+  style: HomeStyle;
   guestbook: GuestbookEntry[];
 }
 
@@ -216,17 +229,158 @@ export function toWorld(item: Pick<PlacedItem, 'x' | 'z' | 'rot'>, s: { x: numbe
 }
 export interface PlacedInteract { key: string; type: string; actions: FurnAction[]; human: InteractSpot[]; dog: InteractSpot[]; approach: InteractSpot[] }
 /** 배치된 가구의 상호작용 자리 (방 좌표) */
-export function furnitureSpots(layout: PlacedItem[]): PlacedInteract[] {
+export function furnitureSpots(layout: PlacedItem[], tier: HomeTier = 1): PlacedInteract[] {
+  const plan = PLANS[tier] ?? PLANS[1];
   return layout.filter((i) => FURNITURE_INTERACT[i.type]?.actions.length).map((i) => {
     const f = FURNITURE_INTERACT[i.type];
-    return { key: itemKey(i), type: i.type, actions: f.actions, human: f.human.map((s) => toWorld(i, s)), dog: f.dog.map((s) => toWorld(i, s)), approach: f.approach.map((a) => toWorld(i, a)).filter((a, k) => k === 0 || (Math.abs(a.x) < ROOM_HALF_W - 0.35 && Math.abs(a.z) < ROOM_HALF_D - 0.35)) };
+    return { key: itemKey(i), type: i.type, actions: f.actions, human: f.human.map((s) => toWorld(i, s)), dog: f.dog.map((s) => toWorld(i, s)), approach: f.approach.map((a) => toWorld(i, a)).filter((a, k) => k === 0 || insidePlan(plan, a.x, a.z, 0.35)) };
   });
 }
 /** 앉거나 누운 캐릭터의 높이: 가구 자리 근처면 그 자리 높이 (다른 사람 화면에서도 같은 높이로 보이게) */
-export function spotHeight(layout: PlacedItem[], x: number, z: number, who: 'human' | 'dog', kinds?: FurnAction[]) {
-  for (const p of furnitureSpots(layout)) {
+export function spotHeight(layout: PlacedItem[], x: number, z: number, who: 'human' | 'dog', kinds?: FurnAction[], tier: HomeTier = 1) {
+  for (const p of furnitureSpots(layout, tier)) {
     if (kinds && !p.actions.some((a) => kinds.includes(a))) continue;
     for (const s of who === 'human' ? p.human : p.dog) if (Math.hypot(s.x - x, s.z - z) < 0.3) return s.y;
   }
   return 0;
+}
+
+// ---------------------------------------------------------------- 아파트 등급별 평면도
+/**
+ * 1동 원룸 · 2동 투룸 · 3동 쓰리룸 — 실제로 구조가 다른 3D 공간.
+ * 좌표: 바닥 중심 (0,0), 뒷벽(-z)·왼쪽 벽(-x)은 높은 외벽, 앞·오른쪽은 카메라 쪽이라 열어 둔다.
+ * 방 사이 벽(walls)은 충돌 상자이며, 문(door) 자리는 비워 둔다.
+ */
+export type HomeTier = 1 | 2 | 3;
+export interface WallBox { x: number; z: number; hw: number; hd: number }
+export interface RoomZone { id: 'studio' | 'living' | 'bed' | 'play'; label: string; x0: number; x1: number; z0: number; z1: number }
+export interface FloorPlan {
+  tier: HomeTier;
+  building: string;
+  name: string;
+  type: string;
+  rooms: number;
+  price: number;
+  halfW: number;
+  halfD: number;
+  zones: RoomZone[];
+  /** 방 사이 벽 (충돌·배치 금지) */
+  walls: WallBox[];
+  /** 문틀 위치 (장식) — 벽이 x축 방향이면 axis 'x' */
+  doors: { x: number; z: number; axis: 'x' | 'z'; w: number }[];
+  spawn: [number, number];
+  /** 동시에 들어올 수 있는 인원 (친구 방문) */
+  capacity: number;
+  features: string[];
+  /** 새로 입주했을 때 기본 배치 */
+  defaultLayout: PlacedItem[];
+  /** 액자를 거는 자리 (이사 때 사진 액자를 옮겨 거는 곳) */
+  frameSlots: { x: number; z: number; rot: number }[];
+}
+
+const L = (type: string, n: number, x: number, z: number, rot = 0): PlacedItem => ({ type, n, x, z, rot });
+export const PLANS: Record<HomeTier, FloorPlan> = {
+  1: {
+    tier: 1, building: '1', name: '멍글아파트 1동', type: '원룸', rooms: 1, price: 500,
+    halfW: ROOM_HALF_W, halfD: ROOM_HALF_D,
+    zones: [{ id: 'studio', label: '거실 겸 침실', x0: -ROOM_HALF_W, x1: ROOM_HALF_W, z0: -ROOM_HALF_D, z1: ROOM_HALF_D }],
+    walls: [], doors: [], spawn: [0.8, 2.2], capacity: 10,
+    features: ['거실 겸 침실 원룸', '소파·탁자·강아지 침대·액자 기본 제공', '가구 배치·꾸미기'],
+    defaultLayout: DEFAULT_LAYOUT,
+    frameSlots: [{ x: -1.2, z: -2.75, rot: 0 }, { x: 0.4, z: -2.75, rot: 0 }, { x: -2.6, z: -2.75, rot: 0 }, { x: -3.35, z: -1.2, rot: 1 }, { x: -3.35, z: 0.4, rot: 1 }, { x: 2.8, z: -2.75, rot: 0 }],
+  },
+  2: {
+    tier: 2, building: '2', name: '멍글아파트 2동', type: '투룸', rooms: 2, price: 3000,
+    halfW: 5.4, halfD: 3.4,
+    zones: [
+      { id: 'living', label: '거실 · 강아지 놀이 공간', x0: -5.4, x1: 0.8, z0: -3.4, z1: 3.4 },
+      { id: 'bed', label: '침실', x0: 0.8, x1: 5.4, z0: -3.4, z1: 3.4 },
+    ],
+    // 거실 | 침실 사이 벽 (문: z 0.4~1.6)
+    walls: [{ x: 0.8, z: -1.5, hw: 0.1, hd: 1.9 }, { x: 0.8, z: 2.5, hw: 0.1, hd: 0.9 }],
+    doors: [{ x: 0.8, z: 1.0, axis: 'z', w: 1.2 }],
+    spawn: [-1.6, 2.4], capacity: 12,
+    features: ['거실과 침실이 나뉜 투룸', '침실에 사람 침대 선물', '강아지 놀이 공간', '더 넓은 가구 배치 공간'],
+    defaultLayout: [
+      L('rug', 0, -2.4, 0.2), L('sofa', 0, -2.4, -2.55), L('table', 0, -2.4, -1.0), L('lamp', 0, -0.2, -2.9),
+      L('dogbed', 0, -4.5, 2.3), L('bowl', 0, -4.9, 0.9), L('ball', 0, -3.6, 1.6), L('bone', 0, -4.2, 0.4),
+      L('plant', 0, -4.9, -2.9), L('frame', 0, -3.8, -3.15),
+      L('bed_cream', 0, 3.4, -2.0), L('shelf', 0, 1.35, -2.4, 1), L('plant', 1, 5.0, 2.9), L('frame', 1, 2.4, -3.15),
+    ],
+    frameSlots: [{ x: -3.8, z: -3.15, rot: 0 }, { x: 2.4, z: -3.15, rot: 0 }, { x: -1.2, z: -3.15, rot: 0 }, { x: 4.6, z: -3.15, rot: 0 }, { x: -5.15, z: -1.0, rot: 1 }, { x: -5.15, z: 0.8, rot: 1 }],
+  },
+  3: {
+    tier: 3, building: '3', name: '멍글아파트 3동', type: '쓰리룸', rooms: 3, price: 10000,
+    halfW: 6.2, halfD: 4.4,
+    zones: [
+      { id: 'living', label: '거실', x0: -6.2, x1: 6.2, z0: -0.4, z1: 4.4 },
+      { id: 'bed', label: '침실', x0: -6.2, x1: 0, z0: -4.4, z1: -0.4 },
+      { id: 'play', label: '강아지 놀이방', x0: 0, x1: 6.2, z0: -4.4, z1: -0.4 },
+    ],
+    // 거실 뒤쪽 가로 벽 (문 두 개: x -3.6~-2.4 / 2.4~3.6) + 침실 | 놀이방 사이 세로 벽
+    walls: [
+      { x: -4.9, z: -0.4, hw: 1.3, hd: 0.1 }, { x: 0, z: -0.4, hw: 2.4, hd: 0.1 }, { x: 4.9, z: -0.4, hw: 1.3, hd: 0.1 },
+      { x: 0, z: -2.4, hw: 0.1, hd: 2.0 },
+    ],
+    doors: [{ x: -3.0, z: -0.4, axis: 'x', w: 1.2 }, { x: 3.0, z: -0.4, axis: 'x', w: 1.2 }],
+    spawn: [0, 3.4], capacity: 16,
+    features: ['거실 · 침실 · 강아지 놀이방', '놀이 터널·볼풀·계단 놀이대 선물', '친구 16명까지 함께 놀 수 있는 큰 거실', '가장 넓은 꾸미기 공간'],
+    defaultLayout: [
+      L('rug', 0, 0, 1.9), L('sofa', 0, 0, 0.35), L('table', 0, 0, 1.7), L('lamp', 0, -1.9, 0.15),
+      L('dogbed', 0, -5.2, 3.5), L('bowl', 0, -5.6, 2.1), L('plant', 0, 5.7, 0.2), L('frame', 0, -5.95, 1.4, 1),
+      L('bed_cream', 0, -3.0, -3.0), L('shelf', 0, -5.75, -2.3, 1), L('plant', 1, -0.5, -3.9), L('frame', 1, -4.8, -4.15),
+      L('play_tunnel', 0, 2.2, -2.4, 1), L('ball_pit', 0, 4.7, -3.0), L('play_steps', 0, 4.9, -1.25, 3), L('ball', 0, 3.2, -1.3), L('ball', 1, 1.2, -3.6), L('bone', 0, 1.0, -1.2),
+    ],
+    frameSlots: [{ x: -5.95, z: 1.4, rot: 1 }, { x: -4.8, z: -4.15, rot: 0 }, { x: 3.2, z: -4.15, rot: 0 }, { x: -1.6, z: -4.15, rot: 0 }, { x: -5.95, z: 3.0, rot: 1 }, { x: 5.4, z: -4.15, rot: 0 }],
+  },
+};
+export const HOME_TIERS: HomeTier[] = [1, 2, 3];
+/** 동 → 집 등급 (1동 원룸 · 2동 투룸 · 3동 쓰리룸, 그 밖은 원룸) */
+export const tierOfBuilding = (building: string | null | undefined): HomeTier => (building === '3' ? 3 : building === '2' ? 2 : 1);
+export const planOf = (tier: number | null | undefined) => PLANS[(tier === 2 || tier === 3 ? tier : 1) as HomeTier];
+/** 평면도 안쪽인지 (margin만큼 안쪽, 방 사이 벽 제외) */
+export function insidePlan(plan: FloorPlan, x: number, z: number, margin = 0) {
+  if (Math.abs(x) > plan.halfW - margin || Math.abs(z) > plan.halfD - margin) return false;
+  return !plan.walls.some((w) => Math.abs(x - w.x) < w.hw + margin && Math.abs(z - w.z) < w.hd + margin);
+}
+/** 좌표가 어느 방인지 */
+export const zoneAt = (plan: FloorPlan, x: number, z: number) => plan.zones.find((r) => x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1) ?? null;
+
+/**
+ * 이사한 새집의 첫 배치: 새 평면도의 기본 가구를 놓고, 사진을 건 액자는 새집 벽에 옮겨 건다.
+ * 이전 집의 가구 위치는 쓰지 않는다 (구조가 달라서). 나머지 가구는 보관함에서 다시 꺼내 배치.
+ */
+export function movedLayout(prev: PlacedItem[], tier: HomeTier): PlacedItem[] {
+  const plan = PLANS[tier];
+  const framed = prev.filter((i) => i.type === 'frame' && i.photo);
+  const out = plan.defaultLayout.filter((i) => i.type !== 'frame').map((i) => ({ ...i }));
+  // 사진 액자 → 액자 자리 순서대로 (디자인·크기·사진 맞춤 유지), 없으면 기본 빈 액자
+  const frames = framed.length ? framed : plan.defaultLayout.filter((i) => i.type === 'frame');
+  frames.slice(0, plan.frameSlots.length).forEach((f, k) => {
+    const s = plan.frameSlots[k];
+    out.push({ ...f, x: s.x, z: s.z, rot: s.rot });
+  });
+  return out;
+}
+
+/** 벽지·바닥재 */
+export const WALLPAPERS = [
+  { id: 'cream', label: '크림', color: '#fff1dc', side: '#fde3d6' },
+  { id: 'peach', label: '피치', color: '#fde0cf', side: '#f9cdb8' },
+  { id: 'sage', label: '세이지', color: '#e3efdc', side: '#d3e6c9' },
+  { id: 'sky', label: '하늘', color: '#e2f1f6', side: '#cfe6ef' },
+  { id: 'lilac', label: '라일락', color: '#efe6fa', side: '#e0d3f2' },
+] as const;
+export const FLOORINGS = [
+  { id: 'oak', label: '원목', color: '#e3c39c', line: '#d2ae85' },
+  { id: 'maple', label: '밝은 원목', color: '#f0d9b5', line: '#e2c79c' },
+  { id: 'walnut', label: '짙은 원목', color: '#c99a6b', line: '#b5865a' },
+  { id: 'tile', label: '크림 타일', color: '#f4ebdf', line: '#e5d8c6' },
+] as const;
+export interface HomeStyle { wall: (typeof WALLPAPERS)[number]['id']; floor: (typeof FLOORINGS)[number]['id'] }
+export const DEFAULT_STYLE: HomeStyle = { wall: 'cream', floor: 'oak' };
+export function validateStyle(v: unknown): HomeStyle | null {
+  const o = v as Record<string, unknown> | null;
+  if (!o || !WALLPAPERS.some((w) => w.id === o.wall) || !FLOORINGS.some((f) => f.id === o.floor)) return null;
+  return { wall: o.wall as HomeStyle['wall'], floor: o.floor as HomeStyle['floor'] };
 }

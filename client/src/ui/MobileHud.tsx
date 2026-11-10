@@ -108,6 +108,8 @@ export function MoreSheet() {
     { icon: '📸', label: '강아지 자랑', onClick: go(() => openCommunity('posts')) },
     { icon: '🗺️', label: '마을 지도', onClick: go(() => set({ mapOpen: true })) },
     { icon: '📅', label: '동네 일정', onClick: go(() => set({ eventsOpen: true })) },
+    { icon: '📅', label: '출석 체크', onClick: go(() => set({ wallet: 'attendance' })), hide: me.role === 'guest' },
+    { icon: '🚚', label: '이사하기', onClick: go(() => set({ moveOpen: true })), hide: !me.residence },
     { icon: '🏢', label: '아파트 로비', onClick: go(() => void joinPark('lobby-1')) },
     { icon: '☕', label: '애견카페', onClick: go(() => void joinPark('cafe-1')) },
     { icon: '📺', label: '스크린 신청', onClick: go(() => set({ screenSubmit: {} })), hide: DEMO },

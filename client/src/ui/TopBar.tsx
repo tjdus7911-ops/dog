@@ -9,6 +9,7 @@ import { DEMO, resetDemo } from '../demo';
 import { residenceLabel } from '@shared/apartment';
 import { openCommunity } from './Community';
 import { isTouchDevice } from '../game/input';
+import { CoinChip } from './Coins';
 
 export function TopBar() {
   const me = useStore((s) => s.me)!;
@@ -37,6 +38,8 @@ export function TopBar() {
       {/* 장소 선택: 공원 · 멍글 아파트 (모바일은 두 번째 줄로 이동) */}
       {!touch && <PlacePicker />}
       {!touch && <CommunityButton />}
+      {/* 코인 칩: 잔액 + 오늘 출석 전이면 빨간 점 → 누르면 출석 체크·지갑 */}
+      {!guest && <CoinChip />}
       {!DEMO && !guest && <button className="btn btn-ghost w-11 h-11 shrink-0 relative pointer-events-auto" onClick={() => { toggle('notifications'); }} aria-label="알림">
         🔔{notifUnread > 0 && <Badge n={notifUnread} />}
       </button>}
@@ -58,7 +61,9 @@ export function TopBar() {
               <MenuItem onClick={() => set({ joinPrompt: true })}>🐶 회원가입하고 입주하기</MenuItem>
               <MenuItem onClick={() => void goSignup()}>🚪 둘러보기 끝내기</MenuItem>
             </> : <>
+            <MenuItem onClick={() => set({ wallet: 'attendance' })}>📅 출석 체크 · 🪙 코인 지갑</MenuItem>
             <MenuItem onClick={() => { set({ panel: 'none', benchMenu: null }); void joinPark('lobby-1'); }}>🏢 아파트 로비</MenuItem>
+            {me.residence && <MenuItem onClick={() => set({ moveOpen: true })}>🚚 이사하기 (아파트 업그레이드)</MenuItem>}
             {!DEMO && <MenuItem onClick={() => set({ screenSubmit: {} })}>📺 광장 스크린에 올리기</MenuItem>}
             <MenuItem onClick={() => set({ panel: 'avatar' })}>✨ 아바타·강아지 꾸미기</MenuItem>
             <MenuItem onClick={() => set({ dogSheet: me.id })}>🐶 우리 강아지 프로필·사진첩</MenuItem>

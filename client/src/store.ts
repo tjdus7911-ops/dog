@@ -1,3 +1,4 @@
+import type { CoinStatus } from '@shared/coins';
 import { create } from 'zustand';
 import type { HomeView } from '@shared/home';
 import type { ScreenSlide } from '@shared/screen';
@@ -109,6 +110,11 @@ interface State {
   /** 멍글런너를 열면서 랭킹 창부터 보여 줄지 (광장 스크린에서 누름) */
   runnerRank: boolean;
   runnerVersion: number;
+  /** 멍글 코인: 지갑 상태 / 열린 창 (출석·지갑) / 획득 애니메이션 / 이사 선택 화면 */
+  coins: CoinStatus | null;
+  wallet: 'attendance' | 'wallet' | null;
+  coinFx: { id: number; amount: number; label: string }[];
+  moveOpen: boolean;
   /** 집 가구: 쓰고 있는 가구·동작 / 강아지 혼자 쉬는 가구 / 열린 가구 메뉴 */
   furnUse: { key: string; action: 'sit' | 'lie' | 'sleep' } | null;
   dogTaskKey: string | null;
@@ -169,6 +175,10 @@ export const useStore = create<State>()(() => ({
   joinPrompt: false,
   lobbyFocus: null,
   runner: false,
+  coins: null,
+  wallet: null,
+  coinFx: [],
+  moveOpen: false,
   runnerRank: false,
   runnerVersion: 0,
   furnUse: null,

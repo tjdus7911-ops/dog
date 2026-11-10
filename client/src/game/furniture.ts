@@ -1,6 +1,6 @@
 // 집 가구 상호작용 (공통): 소파 앉기 · 침대 눕기/잠자기 · 강아지 침대 쉬기/잠자기 · 액자 사진 보기
 // 가구별 자리·동작 데이터는 shared/home.ts 의 FURNITURE_INTERACT 하나로 관리한다.
-import { ROOM_HALF_D, ROOM_HALF_W, furnitureSpots, type FurnAction, type InteractSpot, type PlacedInteract, type PlacedItem } from '@shared/home';
+import { furnitureSpots, insidePlan, planOf, type FurnAction, type InteractSpot, type PlacedInteract, type PlacedItem } from '@shared/home';
 import { get, set, toast } from '../store';
 import { local } from './local';
 import { rendered } from '../net/remote';
@@ -27,7 +27,8 @@ export const ACTION_LABEL: Record<FurnAction, string> = {
 };
 
 const layout = () => get().home?.layout ?? [];
-const spotsOf = (key: string, l: PlacedItem[] = layout()) => furnitureSpots(l).find((p) => p.key === key) ?? null;
+const tier = () => get().home?.tier ?? 1;
+const spotsOf = (key: string, l: PlacedItem[] = layout()) => furnitureSpots(l, tier()).find((p) => p.key === key) ?? null;
 /** 다른 사람(강아지)이 이미 쓰는 자리인지 */
 function taken(s: InteractSpot, who: 'human' | 'dog') {
   let t = false;
@@ -76,7 +77,7 @@ export function applyFurniture(key: string, action: FurnAction) {
 
 /** 다가갈 자리: 방 안에 있는 곳 중 지금 위치에서 가장 가까운 곳 (벽 쪽이 아닌 열린 쪽) */
 function nearestApproach(p: PlacedInteract) {
-  const inRoom = p.approach.filter((a) => Math.abs(a.x) < ROOM_HALF_W - 0.35 && Math.abs(a.z) < ROOM_HALF_D - 0.35);
+  const inRoom = p.approach.filter((a) => insidePlan(planOf(tier()), a.x, a.z, 0.35));
   const list = inRoom.length ? inRoom : p.approach;
   return list.reduce((b, a) => (Math.hypot(a.x - local.x, a.z - local.z) < Math.hypot(b.x - local.x, b.z - local.z) ? a : b));
 }

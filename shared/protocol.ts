@@ -50,6 +50,8 @@ export interface ParkInfo {
   icon: string;
   /** 개인 집이면 집주인 id */
   ownerId?: number;
+  /** 개인 집 등급 (1 원룸 · 2 투룸 · 3 쓰리룸) */
+  tier?: 1 | 2 | 3;
 }
 
 /** 사람 애니메이션 상태 */

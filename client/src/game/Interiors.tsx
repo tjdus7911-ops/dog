@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import type { UnitInfo } from '@shared/apartment';
-import { ROOM_HALF_D, ROOM_HALF_W } from '@shared/home';
+import { DEFAULT_STYLE, FLOORINGS, WALLPAPERS, planOf, type HomeStyle, type HomeTier } from '@shared/home';
 import { geo, mat } from './lowpoly';
 import { FurnitureModel } from './Furniture';
 import { FURNITURE_INTERACT } from '@shared/home';
@@ -11,7 +11,6 @@ import { itemKey } from '@shared/home';
 import { set, useStore } from '../store';
 import { api } from '../lib/api';
 
-const W = ROOM_HALF_W, D = ROOM_HALF_D;
 
 /** 로비 실내: 따뜻한 원목 바닥, 크림색 벽, 우편함 벽(호실 수만큼), 소파·화분·조명 */
 export function LobbyRoom({ units }: { units: UnitInfo[] }) {
@@ -74,31 +73,89 @@ export function LobbyRoom({ units }: { units: UnitInfo[] }) {
 }
 
 
-export function HomeRoom() {
+/** 개인 집 실내: 등급별 평면도(원룸 · 투룸 · 쓰리룸)와 벽지·바닥재 */
+export function HomeRoom({ tier = 1, style = DEFAULT_STYLE }: { tier?: HomeTier; style?: HomeStyle }) {
+  const plan = planOf(tier);
+  const W = plan.halfW, D = plan.halfD;
+  const wp = WALLPAPERS.find((w) => w.id === style.wall) ?? WALLPAPERS[0];
+  const fl = FLOORINGS.find((f) => f.id === style.floor) ?? FLOORINGS[0];
+  const planks = Math.round((W * 2) / 0.8);
+  // 창문: 원룸은 하나, 투룸은 거실·침실, 쓰리룸은 침실·놀이방 + 거실 옆벽
+  const windows: [number, number][] = tier === 1 ? [[1.6, -D]] : tier === 2 ? [[-1.4, -D], [4.3, -D]] : [[-2.4, -D], [3.0, -D]];
   return (
     <group>
-      {/* 원목 바닥 */}
-      <mesh geometry={geo.box(W * 2, 0.1, D * 2)} material={mat('#e3c39c')} position={[0, -0.05, 0]} />
-      {Array.from({ length: 8 }).map((_, i) => <mesh key={i} geometry={geo.box(0.02, 0.102, D * 2)} material={mat('#d2ae85')} position={[-W + (i + 1) * (W * 2) / 9, -0.045, 0]} />)}
-      {/* 뒷벽 + 왼쪽 벽 (앞·오른쪽은 열어 둠) */}
-      <mesh geometry={geo.box(W * 2 + 0.2, 3.2, 0.2)} material={mat('#fff1dc')} position={[0, 1.6, -D - 0.1]} />
-      <mesh geometry={geo.box(0.2, 3.2, D * 2 + 0.2)} material={mat('#fde3d6')} position={[-W - 0.1, 1.6, 0]} />
+      {/* 바닥 */}
+      <mesh geometry={geo.box(W * 2, 0.1, D * 2)} material={mat(fl.color)} position={[0, -0.05, 0]} receiveShadow />
+      {Array.from({ length: planks - 1 }).map((_, i) => <mesh key={i} geometry={geo.box(0.02, 0.102, D * 2)} material={mat(fl.line)} position={[-W + (i + 1) * (W * 2) / planks, -0.045, 0]} />)}
+      {/* 방마다 바닥 분위기: 침실은 포근한 카펫, 놀이방은 발바닥 매트, 투룸 거실엔 강아지 놀이 공간 */}
+      {plan.zones.map((z) => z.id === 'bed' ? (
+        <mesh key={z.id} geometry={geo.box(z.x1 - z.x0 - 0.5, 0.012, z.z1 - z.z0 - 0.5)} material={mat('#f6e3ea')} position={[(z.x0 + z.x1) / 2, 0.006, (z.z0 + z.z1) / 2]} />
+      ) : z.id === 'play' ? (
+        <group key={z.id}>
+          <mesh geometry={geo.box(z.x1 - z.x0 - 0.4, 0.014, z.z1 - z.z0 - 0.4)} material={mat('#e3efdc')} position={[(z.x0 + z.x1) / 2, 0.007, (z.z0 + z.z1) / 2]} />
+          {[[1.0, -3.2], [2.0, -1.0], [3.6, -3.9], [5.4, -2.0]].map(([x, zz], i) => <Paw key={i} x={x} z={zz} color="#c9e2bd" />)}
+        </group>
+      ) : null)}
+      {tier === 2 && (
+        <group position={[-4.2, 0, 1.5]}>
+          <mesh geometry={geo.circle(1.1, 24)} material={mat('#e3efdc')} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]} />
+          <Paw x={0.4} z={-0.3} color="#c9e2bd" /><Paw x={-0.4} z={0.4} color="#c9e2bd" />
+        </group>
+      )}
+      {/* 뒷벽 + 왼쪽 외벽 (앞·오른쪽은 카메라 쪽이라 열어 둠) */}
+      <mesh geometry={geo.box(W * 2 + 0.2, 3.2, 0.2)} material={mat(wp.color)} position={[0, 1.6, -D - 0.1]} />
+      <mesh geometry={geo.box(0.2, 3.2, D * 2 + 0.2)} material={mat(wp.side)} position={[-W - 0.1, 1.6, 0]} />
       <mesh geometry={geo.box(W * 2 + 0.2, 0.22, 0.24)} material={mat('#f7c9b4')} position={[0, 0.11, -D - 0.08]} />
       <mesh geometry={geo.box(0.24, 0.22, D * 2 + 0.2)} material={mat('#f7c9b4')} position={[-W - 0.08, 0.11, 0]} />
-      {/* 창문: 밖에 하늘·나무 */}
-      <group position={[1.6, 1.85, -D + 0.01]}>
-        <mesh geometry={geo.box(1.7, 1.25, 0.06)} material={mat('#ffffff')} />
-        <mesh geometry={geo.box(1.5, 1.05, 0.07)} material={mat('#bfe3f7')} />
-        <mesh geometry={geo.ico(0.28, 1)} material={mat('#8fc27a')} position={[-0.4, -0.3, 0.05]} />
-        <mesh geometry={geo.box(0.05, 1.05, 0.09)} material={mat('#ffffff')} />
-        <mesh geometry={geo.box(1.5, 0.05, 0.09)} material={mat('#ffffff')} />
-        {[-1, 1].map((s) => <mesh key={s} geometry={geo.box(0.32, 1.35, 0.05)} material={mat('#f4a6b8')} position={[s * 0.95, 0, 0.08]} />)}
-      </group>
+      {windows.map(([x, z], i) => (
+        <group key={i} position={[x, 1.85, z + 0.01]}>
+          <mesh geometry={geo.box(1.7, 1.25, 0.06)} material={mat('#ffffff')} />
+          <mesh geometry={geo.box(1.5, 1.05, 0.07)} material={mat('#bfe3f7')} />
+          <mesh geometry={geo.ico(0.28, 1)} material={mat('#8fc27a')} position={[-0.4, -0.3, 0.05]} />
+          <mesh geometry={geo.box(0.05, 1.05, 0.09)} material={mat('#ffffff')} />
+          <mesh geometry={geo.box(1.5, 0.05, 0.09)} material={mat('#ffffff')} />
+          {[-1, 1].map((s) => <mesh key={s} geometry={geo.box(0.32, 1.35, 0.05)} material={mat('#f4a6b8')} position={[s * 0.95, 0, 0.08]} />)}
+        </group>
+      ))}
+      {/* 방 사이 벽: 허리 높이로 낮게 (안쪽이 잘 보이게), 둥근 윗면 */}
+      {plan.walls.map((w, i) => (
+        <group key={i} position={[w.x, 0, w.z]}>
+          <mesh geometry={geo.box(w.hw * 2, 1.3, w.hd * 2)} material={mat(wp.side)} position={[0, 0.65, 0]} castShadow />
+          <mesh geometry={geo.box(w.hw * 2 + 0.08, 0.08, w.hd * 2 + 0.08)} material={mat('#fff8ef')} position={[0, 1.34, 0]} />
+          <mesh geometry={geo.box(w.hw * 2 + 0.04, 0.18, w.hd * 2 + 0.04)} material={mat('#f7c9b4')} position={[0, 0.09, 0]} />
+        </group>
+      ))}
+      {/* 출입구: 양쪽 기둥 + 발바닥 장식 */}
+      {plan.doors.map((d, i) => (
+        <group key={i} position={[d.x, 0, d.z]}>
+          {[-1, 1].map((k) => (
+            <group key={k} position={d.axis === 'x' ? [k * (d.w / 2 + 0.06), 0, 0] : [0, 0, k * (d.w / 2 + 0.06)]}>
+              <mesh geometry={geo.cyl(0.09, 0.11, 1.6, 8)} material={mat('#fff1dc')} position={[0, 0.8, 0]} />
+              <mesh geometry={geo.sphere(0.13, 10, 8)} material={mat('#f39a7b')} position={[0, 1.66, 0]} />
+            </group>
+          ))}
+        </group>
+      ))}
       {/* 벽 선반 + 발바닥 장식 */}
       <mesh geometry={geo.box(1.2, 0.06, 0.25)} material={mat('#c99a6b')} position={[-W + 0.15, 1.9, -0.6]} rotation={[0, Math.PI / 2, 0]} />
-      <mesh geometry={geo.cyl(0.16, 0.16, 0.04, 8)} material={mat('#f39a7b')} position={[-1.8, 2.3, -D + 0.02]} rotation={[Math.PI / 2, 0, 0]} />
+      <mesh geometry={geo.cyl(0.16, 0.16, 0.04, 8)} material={mat('#f39a7b')} position={[tier === 1 ? -1.8 : -W + 1.0, 2.3, -D + 0.02]} rotation={[Math.PI / 2, 0, 0]} />
     </group>
   );
+}
+function Paw({ x, z, color }: { x: number; z: number; color: string }) {
+  return (
+    <group position={[x, 0.016, z]}>
+      <mesh geometry={geo.circle(0.16, 12)} material={mat(color)} rotation={[-Math.PI / 2, 0, 0]} />
+      {[[-0.15, -0.17], [-0.05, -0.23], [0.05, -0.23], [0.15, -0.17]].map(([a, b], i) => <mesh key={i} geometry={geo.circle(0.055, 10)} material={mat(color)} rotation={[-Math.PI / 2, 0, 0]} position={[a, 0.001, b]} />)}
+    </group>
+  );
+}
+
+/** 지금 있는 집 (평면도·벽지는 집 정보가 오기 전에는 입장한 공간의 등급으로) */
+export function CurrentHomeRoom() {
+  const home = useStore((s) => s.home);
+  const tier = useStore((s) => s.home?.tier ?? s.park?.tier ?? 1);
+  return <HomeRoom tier={tier} style={home?.style} />;
 }
 
 

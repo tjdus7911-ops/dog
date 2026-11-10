@@ -2,7 +2,7 @@
 // 장소가 늘어나면 PLACES에 추가하고, 이동 범위/충돌은 spaceCollider에 규칙을 추가하면 된다.
 import { PARKS } from './protocol';
 import { resolveCollision, WORLD_RADIUS } from './world';
-import { FURNITURE_BY_ID, ROOM_HALF_D, ROOM_HALF_W, type PlacedItem } from './home';
+import { FURNITURE_BY_ID, planOf, type HomeTier, type PlacedItem } from './home';
 
 export type SpaceKind = 'park' | 'lobby' | 'home' | 'cafe' | 'shop';
 
@@ -73,14 +73,16 @@ function pushOutBox(x: number, z: number, r: number, b: { x: number; z: number; 
 export type Collider = (x: number, z: number, r: number) => [number, number];
 
 /** 공간별 이동 가능 범위 + 장애물 */
-export function spaceCollider(kind: SpaceKind, layout: PlacedItem[] = []): Collider {
+export function spaceCollider(kind: SpaceKind, layout: PlacedItem[] = [], tier: HomeTier = 1): Collider {
   if (kind === 'park') return resolveCollision;
-  const hw = kind === 'home' ? ROOM_HALF_W - 0.25 : kind === 'lobby' ? LOBBY_HALF_W : SHOP_HALF_W;
-  const hd = kind === 'home' ? ROOM_HALF_D - 0.25 : kind === 'lobby' ? LOBBY_HALF_D : SHOP_HALF_D;
+  const plan = planOf(tier);
+  const hw = kind === 'home' ? plan.halfW - 0.25 : kind === 'lobby' ? LOBBY_HALF_W : SHOP_HALF_W;
+  const hd = kind === 'home' ? plan.halfD - 0.25 : kind === 'lobby' ? LOBBY_HALF_D : SHOP_HALF_D;
   const circles = kind === 'home'
     ? layout.filter((i) => !WALKABLE.has(i.type)).map((i) => ({ x: i.x, z: i.z, r: (FURNITURE_BY_ID.get(i.type)?.r ?? 0.4) * 0.85 }))
     : kind === 'cafe' ? CAFE_TABLES.map((t) => ({ ...t, r: 0.55 })) : [];
-  const boxes = kind === 'lobby' ? LOBBY_OBSTACLES : kind === 'cafe' ? [CAFE_COUNTER] : kind === 'shop' ? [SHOP_COUNTER, ...SHOP_SHELVES] : [];
+  // 집: 방 사이 벽은 통과할 수 없음 (문 자리만 지나감)
+  const boxes = kind === 'lobby' ? LOBBY_OBSTACLES : kind === 'cafe' ? [CAFE_COUNTER] : kind === 'shop' ? [SHOP_COUNTER, ...SHOP_SHELVES] : kind === 'home' ? plan.walls : [];
   return (x, z, r) => {
     for (let k = 0; k < 2; k++) {
       for (const c of circles) {
@@ -96,9 +98,13 @@ export function spaceCollider(kind: SpaceKind, layout: PlacedItem[] = []): Colli
 }
 
 /** 서버 검증용: 공간 안에 있는 좌표인지 (여유 포함) */
-export function insideSpace(kind: SpaceKind, x: number, z: number) {
+export function insideSpace(kind: SpaceKind, x: number, z: number, tier: HomeTier = 1) {
   if (kind === 'park') return Math.hypot(x, z) <= WORLD_RADIUS + 0.5;
-  const hw = kind === 'home' ? ROOM_HALF_W : kind === 'lobby' ? LOBBY_HALF_W : SHOP_HALF_W;
-  const hd = kind === 'home' ? ROOM_HALF_D : kind === 'lobby' ? LOBBY_HALF_D : SHOP_HALF_D;
+  const plan = planOf(tier);
+  const hw = kind === 'home' ? plan.halfW : kind === 'lobby' ? LOBBY_HALF_W : SHOP_HALF_W;
+  const hd = kind === 'home' ? plan.halfD : kind === 'lobby' ? LOBBY_HALF_D : SHOP_HALF_D;
   return Math.abs(x) <= hw + 0.3 && Math.abs(z) <= hd + 0.3;
 }
+
+/** 공간 시작 위치 (집은 등급별 평면도의 현관 쪽) */
+export const spawnOf = (kind: Exclude<SpaceKind, 'park'>, tier: HomeTier = 1): [number, number] => (kind === 'home' ? planOf(tier).spawn : SPAWNS[kind]);

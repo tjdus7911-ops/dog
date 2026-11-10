@@ -191,6 +191,41 @@ export function FurnitureModel({ type, n, photo, item, onOpen }: { type: string;
       );
     case 'bed_cream': case 'bed_pink': case 'bed_sky': case 'bed_wood':
       return <Bed kind={type} />;
+    // ---- 3동 강아지 놀이방 시설 ----
+    case 'play_tunnel':
+      return (
+        <group>
+          {/* 무지개 줄무늬 반원 터널 (앞뒤로 강아지가 드나드는 방향 = z) */}
+          {['#f39a7b', '#f6c453', '#a9cfa0', '#8fd3e8', '#b9a6e6'].map((c, i) => (
+            <mesh key={i} geometry={geo.torus(0.42, 0.07, Math.PI, 8, 18)} material={mat(c)} position={[0, 0.02, -0.6 + i * 0.3]} />
+          ))}
+          <mesh geometry={geo.box(1.0, 0.03, 1.5)} material={mat('#fff6e8')} position={[0, 0.015, 0]} />
+        </group>
+      );
+    case 'ball_pit':
+      return (
+        <group>
+          <mesh geometry={geo.cyl(0.78, 0.8, 0.34, 18)} material={mat('#8fd3e8')} position={[0, 0.17, 0]} />
+          <mesh geometry={geo.torus(0.74, 0.08, Math.PI * 2, 6, 24)} material={mat('#fff6e8')} position={[0, 0.34, 0]} rotation={[Math.PI / 2, 0, 0]} />
+          {Array.from({ length: 22 }, (_, i) => {
+            const a = i * 2.4, r = 0.18 + (i % 4) * 0.13;
+            return <mesh key={i} geometry={geo.sphere(0.1, 8, 6)} material={mat(['#f39a7b', '#f6c453', '#a9cfa0', '#f4a6b8', '#b9a6e6'][i % 5])} position={[Math.cos(a) * r, 0.36 + (i % 3) * 0.04, Math.sin(a) * r]} />;
+          })}
+        </group>
+      );
+    case 'play_steps':
+      return (
+        <group>
+          {/* 3단 계단 놀이대 (낮은 쪽이 +z) */}
+          {[0, 1, 2].map((k) => (
+            <group key={k}>
+              <mesh geometry={geo.box(0.9, 0.18 * (k + 1), 0.36)} material={mat(['#f7c9b4', '#a9cfa0', '#f6c453'][k])} position={[0, 0.09 * (k + 1), 0.36 - k * 0.36]} />
+              <mesh geometry={geo.box(0.92, 0.04, 0.38)} material={mat(C.cream)} position={[0, 0.18 * (k + 1) + 0.02, 0.36 - k * 0.36]} />
+            </group>
+          ))}
+          <mesh geometry={geo.cyl(0.07, 0.07, 0.04, 10)} material={mat(C.coral)} position={[0, 0.58, -0.36]} />
+        </group>
+      );
     case 'dog_cushion':
       return (
         <group>

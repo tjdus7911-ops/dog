@@ -20,6 +20,8 @@ import { Community, MeetupAlert } from './Community';
 import { isTouchDevice } from '../game/input';
 import { BottomNav, EventsPanel, MoreSheet, PlaceBar, QuickMenu, VillageMap } from './MobileHud';
 import { HomeEditor, HomePanel } from './Home';
+import { CoinFx, WalletModal } from './Coins';
+import { MoveModal } from './Move';
 
 const AvatarEditor = lazy(() => import('./AvatarEditor'));
 const AdminPanel = lazy(() => import('./AdminPanel'));
@@ -48,6 +50,7 @@ export default function Game() {
       <div className="relative h-full w-full overflow-hidden">
         <Suspense fallback={<div className="h-full grid place-items-center bg-cream font-display text-xl">🏃 멍글런너 준비 중…</div>}><RunnerApp /></Suspense>
         <InteractionOverlays />
+        <CoinFx />
         <ConnectionOverlay />
       </div>
     );
@@ -88,6 +91,9 @@ export default function Game() {
       {dmWith && <DmWindow profile={dmWith} />}
       {popup && <ProfilePopup />}
       {report && <ReportDialog profile={report} />}
+      <WalletModal />
+      <MoveModal />
+      <CoinFx />
       <ConnectionOverlay />
     </div>
   );

@@ -11,7 +11,8 @@
     "test:persist": "tsx test/persist.test.ts",
     "test:community": "tsx test/community.test.ts",
     "test:interaction": "tsx test/interaction.test.ts",
-    "test:runner": "tsx test/runner.test.ts"
+    "test:runner": "tsx test/runner.test.ts",
+    "test:economy": "tsx test/economy.test.ts"
   },
   "dependencies": {
     "express": "^4.21.0",

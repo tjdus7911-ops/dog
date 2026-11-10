@@ -95,6 +95,7 @@ async function main() {
     const local = judgeRun(chart, goodInputs);
     check('서버가 입력 기록으로 점수 재계산 (보낸 점수 무시)', ok.status === 200 && ok.body.result.score === local.score && ok.body.result.score !== 999999, ok.body);
     check('첫 기록은 최고 기록 갱신 + 1위', ok.body.newBest === true && ok.body.rank === 1);
+    check('서버가 확인한 정상 완주 → 50코인', ok.body.coin?.amount === 50 && ok.body.coin?.kind === 'runner');
     check('같은 기록 번호 재제출 거부', (await finish(a.token, s5.body.runId, goodInputs)).status === 409);
     const s6 = await start(a.token); await wait();
     const dup = await finish(a.token, s6.body.runId, goodInputs);
@@ -137,6 +138,13 @@ async function main() {
     const screen = await api('/api/screen', undefined, a.token);
     const slide = screen.body.slides.find((x: any) => x.kind === 'runner');
     check('광장 스크린에 코스별 랭킹 슬라이드', slide && slide.course === 'elise' && slide.ranking.length === 3 && slide.ranking[0].nickname === '런너A' && slide.ranking[0].dogName === '콩떡', slide);
+    // 완주 코인은 하루 3번까지 (a: s5, s7 이후 2번 더)
+    const s8 = await start(a.token); await wait();
+    const third = await finish(a.token, s8.body.runId, play(70, 21));
+    const s9 = await start(a.token); await wait();
+    const fourth = await finish(a.token, s9.body.runId, play(70, 22));
+    check('완주 코인 하루 최대 3번', third.body.coin?.amount === 50 && fourth.status === 200 && fourth.body.coin === null, [third.body.coin, fourth.body.coin]);
+    check('실패한 제출(너무 빨리 끝남)은 코인 없음', !fast.body.coin);
     const d = await user('rund01', '런너D', '밤톨');
     const sd1 = await start(d.token); await wait();
     const first = await finish(d.token, sd1.body.runId, play(70, 5, 2));

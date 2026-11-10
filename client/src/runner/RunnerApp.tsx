@@ -212,7 +212,7 @@ export default function RunnerApp() {
 }
 
 // ---------------------------------------------------------------- 결과
-interface Saved { newBest: boolean; best: { score: number }; rank: number; prevRank: number | null; total: number }
+interface Saved { newBest: boolean; best: { score: number }; rank: number; prevRank: number | null; total: number; coin?: { amount: number } | null }
 function ResultScreen({ res, avatar, human, practiceOnly, onSaved, onRetry, onCourses, onExit, onRanking }: {
   res: { r: RunResult; inputs: PlayGame['inputs']; runId: string | null; course: CourseInfo; prevBest: number | null }; avatar: DogAvatar; human: HumanAvatar; practiceOnly: boolean;
   onSaved: () => void; onRetry: () => void; onCourses: () => void; onExit: () => void; onRanking: () => void;
@@ -278,6 +278,9 @@ function ResultScreen({ res, avatar, human, practiceOnly, onSaved, onRetry, onCo
                 기록을 저장하지 못했어요. {err}
                 <button className="btn btn-coral w-full py-2 mt-2" onClick={() => void save()}>🔄 다시 저장하기</button>
               </div>
+            )}
+            {saved && (
+              <p className="text-center text-[13px] mb-1.5" data-testid="runner-coin">{saved.coin ? <>🪙 완주 보상 <b className="text-[#e2a21c]">+{saved.coin.amount}코인</b></> : <span className="text-cocoa-soft">오늘 받을 수 있는 완주 코인(하루 3번)을 모두 받았어요</span>}</p>
             )}
             {saved && (
               <button className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#fde3d6] py-2" onClick={onRanking} data-testid="runner-rank">

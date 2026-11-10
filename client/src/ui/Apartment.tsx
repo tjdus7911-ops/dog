@@ -2,7 +2,9 @@
 // 동·호실은 가상 공간 정보이며 실제 주소와 연결하지 않는다.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { residenceLabel, type BuildingInfo, type UnitInfo } from '@shared/apartment';
-import { HOME_VISIBILITY } from '@shared/home';
+import { HOME_VISIBILITY, PLANS, planOf, tierOfBuilding } from '@shared/home';
+import { coinFmt, type CoinStatus } from '@shared/coins';
+import { loadCoins } from './Coins';
 import type { MyProfile, PublicProfile } from '@shared/protocol';
 import type { DogAvatar } from '@shared/avatar';
 import { api } from '../lib/api';
@@ -66,7 +68,7 @@ function UnitGrid({ b, selected, onSelect, selectable, onVisit }: { b: BuildingD
                         </div>
                       </div>
                     ) : <div className="mt-1.5 text-[11px] text-cocoa-soft">입주 완료</div>
-                  ) : <div className="mt-1.5 text-[11px] text-cocoa-soft">{selectable ? '입주 가능' : '빈 집'}</div>}
+                  ) : <div className="mt-1.5 text-[10px] sm:text-[11px] text-cocoa-soft whitespace-nowrap">{selectable ? '입주 가능' : '빈 집'}</div>}
                 </button>
               );
             })}
@@ -80,18 +82,22 @@ function UnitGrid({ b, selected, onSelect, selectable, onVisit }: { b: BuildingD
 /** 입주 화면: 빈 호실을 골라 입주 확정 */
 export function MoveIn({ onDone, embedded }: { onDone: () => void; embedded?: boolean }) {
   const { data, error, reload } = useApartment();
-  const [buildingId, setBuildingId] = useState<string | null>(null);
+  const buildingId: string | null = null;
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const b = data?.buildings.find((x) => x.id === (buildingId ?? data.buildings[0]?.id));
+  // 첫 입주는 1동 원룸만 (2동·3동은 코인을 모아 이사)
+  const b = data?.buildings.find((x) => x.id === (buildingId ?? '1'));
   const free = b?.units.filter((u) => !u.occupied).length ?? 0;
+  const coins = useStore((s) => s.coins);
+  useEffect(() => { void loadCoins(); }, []);
+  const price = PLANS[1].price;
 
   async function confirm() {
     if (!b || !selected) return;
     setBusy(true);
     try {
-      const r = await api<{ profile: MyProfile }>('/api/apartment/move-in', { body: { building: b.id, unit: selected } });
-      set({ me: r.profile });
+      const r = await api<{ profile: MyProfile; coins?: CoinStatus }>('/api/apartment/move-in', { body: { building: b.id, unit: selected } });
+      set({ me: r.profile, ...(r.coins ? { coins: r.coins } : {}) });
       toast(`🎉 ${residenceLabel(r.profile.residence)}에 입주했어요! 이웃들과 친하게 지내요`);
       onDone();
     } catch (e) {
@@ -114,11 +120,12 @@ export function MoveIn({ onDone, embedded }: { onDone: () => void; embedded?: bo
       {!data && !error && <p className="text-center text-cocoa-soft py-8">호실 정보를 불러오는 중…</p>}
       {data && b && (
         <>
-          {data.buildings.length > 1 && (
-            <div className="flex gap-2 mb-3">{data.buildings.map((x) => (
-              <button key={x.id} type="button" className={`btn px-3 py-1.5 text-sm ${x.id === b.id ? 'btn-peach' : 'btn-ghost'}`} onClick={() => { setBuildingId(x.id); setSelected(null); }}>{x.name}</button>
-            ))}</div>
-          )}
+          <div className="rounded-2xl bg-[linear-gradient(135deg,#fff4cf,#fde3d6)] px-3 py-2 mb-3 text-sm flex items-center gap-2" data-testid="movein-cost">
+            <span className="text-2xl">🔑</span>
+            <span className="flex-1 leading-tight"><b>{PLANS[1].name} · {PLANS[1].type}</b><br /><span className="text-xs text-cocoa-soft">입주비 {coinFmt(price)}코인 (가입 선물 {coinFmt(price)}코인으로 무료 입주)</span></span>
+            {coins && <span className="font-display text-[#e2a21c] whitespace-nowrap">🪙 {coinFmt(coins.balance)}</span>}
+          </div>
+          {coins && coins.balance < price && <p className="text-sm text-[#c4553a] bg-[#fff0ec] rounded-xl px-3 py-2 mb-2">입주까지 {coinFmt(price - coins.balance)}코인 남았어요! 출석 체크와 산책으로 코인을 모아 보세요.</p>}
           <div className="flex items-center justify-between mb-2">
             <span className="font-display">{b.name}</span>
             <span className="text-xs text-cocoa-soft">입주 가능 {free}/{b.units.length}호</span>
@@ -127,8 +134,8 @@ export function MoveIn({ onDone, embedded }: { onDone: () => void; embedded?: bo
           <p className="text-[11px] text-cocoa-soft mt-3">※ 동·호실은 멍글마을 안의 가상 주소예요. 실제 주소와는 관계없어요.</p>
           <div className="flex gap-2 mt-4">
             <button type="button" className="btn btn-ghost flex-1 py-3" onClick={onDone}>{embedded ? '닫기' : '나중에 하기'}</button>
-            <button type="button" className="btn btn-coral flex-[2] py-3 text-lg" disabled={!selected || busy} onClick={confirm}>
-              {busy ? '입주 처리 중…' : selected ? `${selected}호로 입주하기 🏠` : '호실을 골라 주세요'}
+            <button type="button" className="btn btn-coral flex-[2] py-3 text-lg" disabled={!selected || busy || (!!coins && coins.balance < price)} onClick={confirm}>
+              {busy ? '입주 처리 중…' : selected ? `${selected}호로 입주하기 🏠 (🪙${coinFmt(price)})` : '호실을 골라 주세요'}
             </button>
           </div>
         </>
@@ -275,7 +282,8 @@ export function LobbyPanel() {
   const focus = useStore((s) => s.lobbyFocus);
   // 친구 목록에서 '집 놀러 가기' → 로비에 오면 그 집 문 앞 안내
   useEffect(() => { if (focus !== null) { setCard({ id: focus, door: true }); set({ lobbyFocus: null, lobbyPanel: false }); } }, [focus]);
-  const b = data?.buildings[0];
+  const [tab, setTab] = useState<string | null>(null);
+  const b = data?.buildings.find((x) => x.id === (tab ?? me.residence?.building ?? '1')) ?? data?.buildings[0];
   const close = () => set({ lobbyPanel: false });
 
   return (
@@ -289,7 +297,7 @@ export function LobbyPanel() {
         <aside className="above-nav absolute z-30 inset-x-0 bottom-0 max-h-[min(72%,calc(100%-224px))] md:inset-x-auto md:right-3 md:top-[74px] md:bottom-3 md:w-[420px] md:max-h-none panel !rounded-b-none md:!rounded-[22px] p-4 overflow-y-auto scroll-soft pop"
           style={{ paddingBottom: 'calc(var(--safe-b) + 16px)' }}>
           <div className="flex items-center gap-2">
-            <h2 className="font-display text-xl flex-1">📋 {b?.name ?? '멍글 아파트'} 호실 안내판</h2>
+            <h2 className="font-display text-xl flex-1">📋 멍글 아파트 호실 안내판</h2>
             <button className="btn btn-ghost w-11 h-11" onClick={close} aria-label="안내판 닫기">✕</button>
           </div>
           {moving ? <MoveIn embedded onDone={() => setMoving(false)} /> : (
@@ -299,7 +307,10 @@ export function LobbyPanel() {
                 {me.residence ? (
                   <>
                     <div className="flex-1 min-w-0"><div className="font-display">우리 집 · {residenceLabel(me.residence)}</div><div className="text-xs text-cocoa-soft">{me.dogName}와(과) 함께 살아요</div></div>
-                    <button className="btn btn-coral px-4 min-h-[44px] text-sm" onClick={() => void joinPark(homeSpaceId(me.id))}>들어가기</button>
+                    <div className="flex flex-col gap-1">
+                      <button className="btn btn-coral px-4 min-h-[44px] text-sm" onClick={() => void joinPark(homeSpaceId(me.id))}>들어가기</button>
+                      <button className="btn btn-ghost px-3 min-h-[36px] text-xs" onClick={() => set({ moveOpen: true })}>🚚 이사하기</button>
+                    </div>
                   </>
                 ) : (
                   <>
@@ -311,7 +322,17 @@ export function LobbyPanel() {
               <NeighborBox />
               {error && <p className="text-sm text-[#c4553a] bg-[#fff0ec] rounded-xl px-3 py-2 mt-3">{error}</p>}
               {!data && !error && <p className="text-cocoa-soft py-6 text-center">불러오는 중…</p>}
-              {b && <div className="mt-3"><UnitGrid b={b} selectable={false} onVisit={(id) => setCard({ id })} /></div>}
+              {data && (
+                <div className="grid grid-cols-3 gap-1 bg-cream-2 rounded-full p-1 text-sm mt-3" role="tablist" aria-label="동 선택">
+                  {data.buildings.map((x) => (
+                    <button key={x.id} role="tab" aria-selected={x.id === b?.id} className={`btn py-1.5 ${x.id === b?.id ? 'bg-white shadow-sm' : 'text-cocoa-soft'}`} onClick={() => setTab(x.id)}>
+                      {x.id}동 <span className="text-[11px]">{planOf(tierOfBuilding(x.id)).type}</span>{me.residence?.building === x.id ? ' 🏠' : ''}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {b && <p className="text-[11px] text-cocoa-soft mt-1.5">{b.id === me.residence?.building ? '🏘️ 우리 동 이웃들이에요.' : `${b.name} 주민들이에요.`} 입주 {b.units.filter((u) => u.occupied).length}/{b.units.length}호</p>}
+              {b && <div className="mt-2"><UnitGrid b={b} selectable={false} onVisit={(id) => setCard({ id })} /></div>}
               {b && <p className="text-[11px] text-cocoa-soft mt-2">주민이 사는 호실을 누르면 집주인과 강아지 프로필을 보고 들어가거나 방문을 신청할 수 있어요.</p>}
               {DEMO && <p className="text-[11px] text-cocoa-soft mt-2">미리보기에서는 다른 주민 없이 내 집만 표시돼요.</p>}
             </>

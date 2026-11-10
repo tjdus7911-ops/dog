@@ -3,7 +3,8 @@
 // AI 강아지 사진 분석은 Claude 앱 안에서 열었을 때 보는 사람의 Claude로 실행한다 (sample 기능).
 import { DEFAULT_DOG, DEFAULT_HUMAN, validateDog, validateHuman } from '@shared/avatar';
 import { DEFAULT_PRIVACY, type MyProfile } from '@shared/protocol';
-import { DEFAULT_LAYOUT, validateLayout, type HomeVisibility, type PlacedItem } from '@shared/home';
+import { DEFAULT_STYLE, PLANS, movedLayout, tierOfBuilding, validateLayout, validateStyle, type HomeStyle, type HomeTier, type HomeVisibility, type PlacedItem } from '@shared/home';
+import { COIN_LABEL, COIN_REWARDS, kstDay, type CoinKind, type CoinStatus, type CoinTx } from '@shared/coins';
 import { APARTMENT_BUILDINGS, isValidUnit, unitsOf } from '@shared/apartment';
 import { interpretDogFeatures, jsonPrompt, type DogPhotoKind } from '@shared/dogAnalysis';
 import { demoClaimed, demoCommunity } from './demoCommunity';
@@ -81,9 +82,52 @@ export async function demoApi(path: string, opts: { method?: string; body?: any 
     const { building, unit } = opts.body ?? {};
     if (!isValidUnit(String(building), String(unit))) throw new Error('존재하지 않는 호실이에요.');
     if (cur.residence) throw new Error('이미 입주한 집이 있어요.');
+    if (tierOfBuilding(String(building)) !== 1) throw new Error('처음에는 1동 원룸에 입주할 수 있어요.');
+    const w = wallet();
+    if (w.balance < PLANS[1].price) throw new Error(`입주까지 ${(PLANS[1].price - w.balance).toLocaleString('ko-KR')}코인 남았어요!`);
+    addTx(w, -PLANS[1].price, 'movein', `${PLANS[1].name} ${unit}호 입주`);
     const next = { ...cur, residence: { building: String(building), unit: String(unit) } };
     saveDemoProfile(next);
-    return { profile: next };
+    return { profile: next, coins: demoCoinStatus(w) };
+  }
+  // ---- 코인 (미리보기: 이 기기에만 저장) ----
+  if (path === '/api/coins') return { coins: demoCoinStatus(wallet()) };
+  if (path === '/api/coins/attendance') {
+    const w = wallet();
+    const day = kstDay(Date.now());
+    if (w.att[day]) throw new Error('오늘은 이미 출석했어요. 내일 또 만나요!');
+    const streak = (w.att[kstDay(Date.now() - 86400_000)] ?? 0) + 1;
+    w.att[day] = streak;
+    const got = [{ amount: 100, kind: 'attendance', label: `출석 ${streak}일째`, balance: addTx(w, 100, 'attendance') }];
+    if (streak % 7 === 0) got.push({ amount: 300, kind: 'streak7', label: `${streak}일 연속 출석 보너스`, balance: addTx(w, 300, 'streak7') });
+    return { streak, got, coins: demoCoinStatus(w) };
+  }
+  if (path === '/api/apartment/plans') {
+    const w = wallet();
+    const t = cur.residence ? tierOfBuilding(cur.residence.building) : null;
+    return {
+      balance: w.balance, current: t, residence: cur.residence,
+      plans: ([1, 2, 3] as HomeTier[]).map((k) => {
+        const p = PLANS[k];
+        const status = t === k ? 'current' : t !== null && k < t ? 'past' : t === null ? (k === 1 ? 'available' : 'locked') : t + 1 === k ? (w.balance >= p.price ? 'available' : 'insufficient') : 'locked';
+        return { tier: k, building: p.building, name: p.name, type: p.type, rooms: p.rooms, price: p.price, features: p.features, capacity: p.capacity, free: 12, status, need: Math.max(0, p.price - w.balance) };
+      }),
+    };
+  }
+  if (path === '/api/apartment/move') {
+    const w = wallet();
+    if (!cur.residence) throw new Error('먼저 1동 원룸에 입주해 주세요.');
+    const tier = tierOfBuilding(String(opts.body?.building));
+    const t = tierOfBuilding(cur.residence.building);
+    if (tier !== t + 1) throw new Error('1동 → 2동 → 3동 순서로 이사할 수 있어요.');
+    const p = PLANS[tier];
+    if (w.balance < p.price) throw new Error(`이사까지 ${(p.price - w.balance).toLocaleString('ko-KR')}코인 남았어요! 산책과 멍글런너를 즐기며 코인을 모아보세요.`);
+    addTx(w, -p.price, 'move', `${p.name} 101호로 이사`);
+    const next = { ...cur, residence: { building: p.building, unit: '101' } };
+    saveDemoProfile(next);
+    const h = loadDemoHome();
+    saveDemoHome({ ...h, layout: movedLayout(h.layout, tier) });
+    return { residence: next.residence, profile: next, coins: demoCoinStatus(w), home: demoHomeView(next) };
   }
   // 우리 집 (미리보기: 내 집만, 브라우저에 저장)
   if (path.startsWith('/api/home/') && path.endsWith('/access')) {
@@ -95,23 +139,20 @@ export async function demoApi(path: string, opts: { method?: string; body?: any 
   }
   if (path.startsWith('/api/home/')) {
     if (!cur.residence) throw new Error('먼저 아파트에 입주해 주세요.');
-    const KEYH = 'mungle.demo.home';
-    let saved: { layout: PlacedItem[]; visibility: HomeVisibility } = { layout: DEFAULT_LAYOUT, visibility: 'public' };
-    try { const raw = localStorage.getItem(KEYH); if (raw) saved = { ...saved, ...JSON.parse(raw) }; } catch { /* 무시 */ }
+    const tier = tierOfBuilding(cur.residence.building);
+    let saved = loadDemoHome();
     if (path === '/api/home/me/layout') {
-      const layout = validateLayout(opts.body?.layout, new Set(demoClaimed()));
+      const layout = validateLayout(opts.body?.layout, new Set(demoOwned(tier)), tier);
       if (!layout) throw new Error('가구 배치 정보가 올바르지 않아요.');
       saved = { ...saved, layout };
     } else if (path === '/api/home/me/visibility') saved = { ...saved, visibility: opts.body?.visibility ?? 'public' };
-    else if (path !== '/api/home/me' && path !== `/api/home/${cur.id}`) throw new Error('미리보기에서는 다른 집에 방문할 수 없어요.');
-    try { localStorage.setItem(KEYH, JSON.stringify(saved)); } catch { /* 무시 */ }
-    return {
-      home: {
-        ownerId: cur.id, owner: { nickname: cur.nickname, dogName: cur.dogName, dogPhoto: cur.dogPhoto, human: cur.human, dog: cur.dog },
-        residence: cur.residence, visibility: saved.visibility, layout: validateLayout(saved.layout) ?? DEFAULT_LAYOUT,
-        likes: 0, likedByMe: false, isOwner: true, guestbook: [], owned: demoClaimed(),
-      },
-    };
+    else if (path === '/api/home/me/style') {
+      const st = validateStyle(opts.body?.style);
+      if (!st) throw new Error('벽지·바닥재 정보가 올바르지 않아요.');
+      saved = { ...saved, style: st };
+    } else if (path !== '/api/home/me' && path !== `/api/home/${cur.id}`) throw new Error('미리보기에서는 다른 집에 방문할 수 없어요.');
+    saveDemoHome(saved);
+    return { home: demoHomeView(cur) };
   }
   const community = demoCommunity(path, opts, cur);
   if (community !== undefined) return community;
@@ -174,4 +215,60 @@ async function analyzeInClaude(photos: { kind: DogPhotoKind; dataUrl: string }[]
   const r = interpretDogFeatures(raw);
   if (!r.ok) throw new Error(r.error);
   return r.result;
+}
+
+// ---------- 미리보기 집 · 코인 (브라우저에만 저장) ----------
+type DemoHome = { layout: PlacedItem[]; visibility: HomeVisibility; style: HomeStyle };
+const KEYH = 'mungle.demo.home';
+function loadDemoHome(): DemoHome {
+  const p = loadDemoProfile().profile;
+  const tier = tierOfBuilding(p.residence?.building);
+  let saved: DemoHome = { layout: PLANS[tier].defaultLayout, visibility: 'public', style: { ...DEFAULT_STYLE } };
+  try { const raw = localStorage.getItem(KEYH); if (raw) saved = { ...saved, ...JSON.parse(raw) }; } catch { /* 무시 */ }
+  return saved;
+}
+function saveDemoHome(h: DemoHome) { try { localStorage.setItem(KEYH, JSON.stringify(h)); } catch { /* 무시 */ } }
+/** 애견샵에서 받은 가구 + 등급별 이사 선물 */
+function demoOwned(tier: HomeTier) {
+  const gifts = [...(tier >= 2 ? ['bed_cream'] : []), ...(tier >= 3 ? ['play_tunnel', 'ball_pit', 'play_steps'] : [])];
+  return [...new Set([...demoClaimed(), ...gifts])];
+}
+function demoHomeView(cur: MyProfile) {
+  const tier = tierOfBuilding(cur.residence?.building);
+  const saved = loadDemoHome();
+  return {
+    ownerId: cur.id, owner: { nickname: cur.nickname, dogName: cur.dogName, dogPhoto: cur.dogPhoto, human: cur.human, dog: cur.dog },
+    residence: cur.residence, visibility: saved.visibility, layout: validateLayout(saved.layout, undefined, tier) ?? PLANS[tier].defaultLayout,
+    likes: 0, likedByMe: false, isOwner: true, guestbook: [], owned: demoOwned(tier), tier, style: validateStyle(saved.style) ?? DEFAULT_STYLE,
+  };
+}
+type DemoWallet = { balance: number; tx: CoinTx[]; att: Record<string, number> };
+const KEYC = 'mungle.demo.coins';
+function wallet(): DemoWallet {
+  try { const raw = localStorage.getItem(KEYC); if (raw) return JSON.parse(raw); } catch { /* 무시 */ }
+  // 처음: 신규 가입 선물 (이미 입주한 미리보기 사용자는 입주비 소급 없음)
+  const w: DemoWallet = { balance: 0, tx: [], att: {} };
+  if (!loadDemoProfile().profile.residence) addTx(w, COIN_REWARDS.signup.amount, 'signup');
+  else saveWallet(w);
+  return w;
+}
+function saveWallet(w: DemoWallet) { try { localStorage.setItem(KEYC, JSON.stringify(w)); } catch { /* 무시 */ } }
+function addTx(w: DemoWallet, amount: number, kind: CoinKind, memo = '') {
+  w.balance += amount;
+  w.tx.unshift({ id: (w.tx[0]?.id ?? 0) + 1, amount, kind, memo: memo || COIN_LABEL[kind], balance: w.balance, ts: Date.now() });
+  w.tx = w.tx.slice(0, 60);
+  saveWallet(w);
+  return w.balance;
+}
+function demoCoinStatus(w: DemoWallet): CoinStatus {
+  const today = kstDay(Date.now());
+  const t = w.att[today], y = w.att[kstDay(Date.now() - 86400_000)];
+  const streak = t ?? y ?? 0;
+  return {
+    balance: w.balance,
+    todayEarned: w.tx.filter((x) => x.amount > 0 && kstDay(x.ts) === today).reduce((a, x) => a + x.amount, 0),
+    earned: w.tx.filter((x) => x.amount > 0).slice(0, 20), spent: w.tx.filter((x) => x.amount < 0).slice(0, 20),
+    attendance: { claimedToday: !!t, streak, cycleDone: t ? ((streak - 1) % 7) + 1 : streak % 7, today },
+    daily: { walk: { count: 0, max: 3 }, runner: { count: 0, max: 3 }, meetup: { count: 0, max: 1 } },
+  };
 }

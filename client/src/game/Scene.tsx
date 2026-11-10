@@ -2,7 +2,7 @@ import { Canvas } from '@react-three/fiber';
 import { AdaptiveDpr, PerformanceMonitor } from '@react-three/drei';
 import { useRef, useState } from 'react';
 import { World } from './World';
-import { CafeSpace, HomeFurniture, HomeRoom, LobbySpace, ShopSpace } from './Interiors';
+import { CafeSpace, CurrentHomeRoom, HomeFurniture, LobbySpace, ShopSpace } from './Interiors';
 import { BigScreen } from './BigScreen';
 import { CameraRig } from './CameraRig';
 import { ClickToMove } from './ClickToMove';
@@ -39,7 +39,7 @@ export function Scene() {
       <ShadowFlags key={kind} cast={kind === 'park'}>
         {kind === 'park' && <><World /><BigScreen /><Bins /><Poops /><RunnerArena /></>}
         {kind === 'lobby' && <LobbySpace />}
-        {kind === 'home' && <><HomeRoom /><HomeFurniture /></>}
+        {kind === 'home' && <><CurrentHomeRoom /><HomeFurniture /></>}
         {kind === 'cafe' && <CafeSpace />}
         {kind === 'shop' && <ShopSpace />}
       </ShadowFlags>

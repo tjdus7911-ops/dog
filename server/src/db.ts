@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_DOG, DEFAULT_HUMAN, GUEST_DOG, GUEST_HUMAN, normalizeDog, normalizeHuman, type DogAvatar, type HumanAvatar } from '../../shared/avatar';
 import { DEFAULT_DOG_PROFILE, type DogProfileSettings } from '../../shared/protocol';
-import { DEFAULT_LAYOUT, validateLayout, type HomeVisibility, type PlacedItem } from '../../shared/home';
+import { DEFAULT_STYLE, PLANS, tierOfBuilding, validateLayout, validateStyle, type HomeStyle, type HomeTier, type HomeVisibility, type PlacedItem } from '../../shared/home';
 import { DEFAULT_PRIVACY, type FriendStatus, type MyProfile, type PrivacySettings, type PublicProfile, type Residence } from '../../shared/protocol';
 
 export const DATA_DIR = process.env.MUNGLE_DATA_DIR ?? path.resolve(import.meta.dirname, '../data');
@@ -112,6 +112,8 @@ CREATE TABLE IF NOT EXISTS guestbook (
 );
 CREATE INDEX IF NOT EXISTS idx_guestbook_home ON guestbook(home_id, created_at);
 `);
+// 마이그레이션: 집 벽지·바닥재 (기존 집은 기본값)
+try { db.exec('ALTER TABLE homes ADD COLUMN style TEXT'); } catch { /* 이미 있음 */ }
 // 이웃(같은 동 주민끼리 신청·수락) / 집 방문 신청
 db.exec(`
 CREATE TABLE IF NOT EXISTS neighbors (
@@ -156,6 +158,27 @@ export type Row = Record<string, any>;
 export const one = (sql: string, ...p: any[]) => db.prepare(sql).get(...p) as Row | undefined;
 export const all = (sql: string, ...p: any[]) => db.prepare(sql).all(...p) as Row[];
 export const run = (sql: string, ...p: any[]) => db.prepare(sql).run(...p);
+
+/**
+ * 트랜잭션: fn 안에서 오류가 나면 모두 되돌린다 (코인 차감 + 거주 정보 변경을 한 번에).
+ * 중첩 호출은 SAVEPOINT로 처리한다.
+ */
+let txDepth = 0;
+export function transaction<T>(fn: () => T): T {
+  const sp = `sp${txDepth}`;
+  db.exec(txDepth === 0 ? 'BEGIN IMMEDIATE' : `SAVEPOINT ${sp}`);
+  txDepth++;
+  try {
+    const r = fn();
+    txDepth--;
+    db.exec(txDepth === 0 ? 'COMMIT' : `RELEASE ${sp}`);
+    return r;
+  } catch (e) {
+    txDepth--;
+    db.exec(txDepth === 0 ? 'ROLLBACK' : `ROLLBACK TO ${sp}; RELEASE ${sp}`);
+    throw e;
+  }
+}
 
 // ---------- users / sessions ----------
 export function createUser(username: string, passHash: string, salt: string, nickname: string, dogName: string) {
@@ -226,16 +249,21 @@ export function listResidents(building: string) {
 }
 
 // ---------- 개인 집 ----------
-export function getHome(userId: number): { visibility: HomeVisibility; layout: PlacedItem[] } {
-  const r = one('SELECT visibility, layout FROM homes WHERE user_id = ?', userId);
-  if (!r) return { visibility: 'public', layout: DEFAULT_LAYOUT.map((i) => ({ ...i })) };
-  return { visibility: r.visibility, layout: validateLayout(JSON.parse(r.layout)) ?? DEFAULT_LAYOUT.map((i) => ({ ...i })) };
+/** 집 등급: 사는 동으로 정해짐 (1동 원룸 · 2동 투룸 · 3동 쓰리룸) */
+export const homeTier = (userId: number): HomeTier => tierOfBuilding(getResidence(userId)?.building);
+export function getHome(userId: number): { visibility: HomeVisibility; layout: PlacedItem[]; style: HomeStyle; tier: HomeTier } {
+  const tier = homeTier(userId);
+  const r = one('SELECT visibility, layout, style FROM homes WHERE user_id = ?', userId);
+  const def = () => PLANS[tier].defaultLayout.map((i) => ({ ...i }));
+  if (!r) return { visibility: 'public', layout: def(), style: { ...DEFAULT_STYLE }, tier };
+  // 기존 배치는 그대로 (검증은 가구 소유 확인 없이 형식·범위만 — 저장할 때 이미 확인됨)
+  return { visibility: r.visibility, layout: validateLayout(JSON.parse(r.layout), undefined, tier) ?? def(), style: (r.style && validateStyle(JSON.parse(r.style))) || { ...DEFAULT_STYLE }, tier };
 }
-export function saveHome(userId: number, h: { visibility?: HomeVisibility; layout?: PlacedItem[] }) {
+export function saveHome(userId: number, h: { visibility?: HomeVisibility; layout?: PlacedItem[]; style?: HomeStyle }) {
   const cur = getHome(userId);
-  run(`INSERT INTO homes (user_id, visibility, layout, updated_at) VALUES (?,?,?,?)
-    ON CONFLICT(user_id) DO UPDATE SET visibility=excluded.visibility, layout=excluded.layout, updated_at=excluded.updated_at`,
-  userId, h.visibility ?? cur.visibility, JSON.stringify(h.layout ?? cur.layout), Date.now());
+  run(`INSERT INTO homes (user_id, visibility, layout, style, updated_at) VALUES (?,?,?,?,?)
+    ON CONFLICT(user_id) DO UPDATE SET visibility=excluded.visibility, layout=excluded.layout, style=excluded.style, updated_at=excluded.updated_at`,
+  userId, h.visibility ?? cur.visibility, JSON.stringify(h.layout ?? cur.layout), JSON.stringify(h.style ?? cur.style), Date.now());
 }
 export const countLikes = (homeId: number) => Number(one('SELECT COUNT(*) AS n FROM home_likes WHERE home_id = ?', homeId)?.n ?? 0);
 export const hasLiked = (homeId: number, userId: number) => !!one('SELECT 1 FROM home_likes WHERE home_id = ? AND user_id = ?', homeId, userId);

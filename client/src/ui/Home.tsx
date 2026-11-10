@@ -5,8 +5,8 @@ import { Canvas, type ThreeEvent } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import {
-  FRAME_SCALE, FRAME_STYLES, FURNITURE, FURNITURE_BY_ID, GUESTBOOK_MAX_LEN, HOME_VISIBILITY, ROOM_HALF_D, ROOM_HALF_W, itemKey,
-  type HomeView, type HomeVisibility, type PlacedItem,
+  FLOORINGS, FRAME_SCALE, FRAME_STYLES, FURNITURE, FURNITURE_BY_ID, GUESTBOOK_MAX_LEN, HOME_VISIBILITY, WALLPAPERS, insidePlan, itemKey, planOf, zoneAt,
+  type HomeStyle, type HomeView, type HomeVisibility, type PlacedItem,
 } from '@shared/home';
 import { residenceLabel } from '@shared/apartment';
 import { api } from '../lib/api';
@@ -22,7 +22,6 @@ import { DEMO } from '../demo';
 import { resizeImage } from '../lib/image';
 import { Modal } from './common';
 
-const W = ROOM_HALF_W, D = ROOM_HALF_D;
 
 function Furniture({ item, photo, selected, editing, onSelect, onDragStart }: {
   item: PlacedItem; photo: string | null; selected: boolean; editing: boolean;
@@ -44,7 +43,7 @@ const ringOff = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: tru
 const selectedRing = (on: boolean) => (on ? ringOn : ringOff);
 
 /** 편집 중 드래그를 받는 바닥 판 */
-function DragFloor({ active, onMove, onEnd }: { active: boolean; onMove: (x: number, z: number) => void; onEnd: () => void }) {
+function DragFloor({ active, onMove, onEnd, W, D }: { active: boolean; onMove: (x: number, z: number) => void; onEnd: () => void; W: number; D: number }) {
   const hit = useMemo(() => new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }), []);
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]} material={hit}
@@ -64,6 +63,8 @@ export function HomeEditor() {
   const [saving, setSaving] = useState(false);
   const [picker, setPicker] = useState<string | null>(null);
   const [frameTool, setFrameTool] = useState<'style' | 'size' | 'fit' | 'move' | null>(null);
+  const [style, setStyle] = useState<HomeStyle | null>(home?.style ?? null);
+  const [styleOpen, setStyleOpen] = useState(false);
   useEffect(() => setFrameTool(null), [sel]);
   // PC(넓은 화면): 3D 화면 위에 메뉴 / 모바일: 3D 화면 아래에 메뉴
   const [wide, setWide] = useState(() => window.matchMedia('(min-width: 768px)').matches);
@@ -74,6 +75,14 @@ export function HomeEditor() {
     return () => mq.removeEventListener('change', on);
   }, []);
   if (!home) return null;
+  // 등급별 평면도: 방 크기·방 사이 벽 (벽 위로는 옮길 수 없음)
+  const plan = planOf(home.tier);
+  const W = plan.halfW, D = plan.halfD;
+  const fits = (x: number, z: number) => insidePlan(plan, x, z, 0.12) && Math.abs(x) <= W - 0.3 && Math.abs(z) <= D - 0.3;
+  const moveTo = (key: string, x: number, z: number) => {
+    const nx = THREE.MathUtils.clamp(Math.round(x * 10) / 10, -W + 0.3, W - 0.3), nz = THREE.MathUtils.clamp(Math.round(z * 10) / 10, -D + 0.3, D - 0.3);
+    if (fits(nx, nz)) update(key, { x: nx, z: nz });
+  };
 
   const placed = new Set(draft.map(itemKey));
   // 기본 가구 + 애견샵에서 받은 가구
@@ -83,8 +92,13 @@ export function HomeEditor() {
   const close = () => set({ homeEdit: false });
   function update(key: string, patch: Partial<PlacedItem>) { setDraft((d) => d.map((i) => (itemKey(i) === key ? { ...i, ...patch } : i))); }
   function place(type: string, n: number) {
-    const spots: [number, number][] = [[0, 0.5], [1.2, 0.5], [-1.2, 0.5], [0, -1], [1.2, -1], [-1.2, -1], [2.4, 1.5], [-2.4, 1.5]];
-    const spot = spots.find(([x, z]) => draft.every((i) => Math.hypot(i.x - x, i.z - z) > 0.8)) ?? [0, 0.5];
+    // 방마다 빈 자리를 찾아 놓기 (벽·다른 가구와 겹치지 않게)
+    const spots: [number, number][] = [];
+    for (const zn of plan.zones) {
+      const cx = (zn.x0 + zn.x1) / 2, cz = (zn.z0 + zn.z1) / 2;
+      for (const [dx, dz] of [[0, 0.5], [1.2, 0.5], [-1.2, 0.5], [0, -0.8], [1.2, -0.8], [-1.2, -0.8], [2.2, 1.3], [-2.2, 1.3]]) spots.push([cx + dx, cz + dz]);
+    }
+    const spot = spots.find(([x, z]) => fits(x, z) && draft.every((i) => Math.hypot(i.x - x, i.z - z) > 0.8)) ?? [plan.spawn[0], plan.spawn[1] - 1];
     const item = { type, n, x: spot[0], z: spot[1], rot: 0 };
     setDraft((d) => [...d, item]);
     setSel(itemKey(item));
@@ -92,9 +106,10 @@ export function HomeEditor() {
   async function save() {
     setSaving(true);
     try {
-      const r = await api<{ home: HomeView }>('/api/home/me/layout', { method: 'PUT', body: { layout: draft } });
+      let r = await api<{ home: HomeView }>('/api/home/me/layout', { method: 'PUT', body: { layout: draft } });
+      if (style && (style.wall !== home!.style.wall || style.floor !== home!.style.floor)) r = await api<{ home: HomeView }>('/api/home/me/style', { method: 'PUT', body: { style } });
       set({ home: r.home, homeEdit: false });
-      setSpace('home', r.home.layout);
+      setSpace('home', r.home.layout, r.home.tier);
       onLayoutChanged(r.home.layout);
       toast('집 꾸미기를 저장했어요 🏠');
     } catch (e) { toast((e as Error).message, 'error'); } finally { setSaving(false); }
@@ -106,10 +121,11 @@ export function HomeEditor() {
             <FrameMenu item={selItem} tool={frameTool} setTool={setFrameTool}
               onPhoto={() => setPicker(itemKey(selItem))}
               onUpdate={(patch) => update(itemKey(selItem), patch)}
-              onRemove={() => { setDraft((d) => d.filter((i) => itemKey(i) !== sel)); setSel(null); }} />
+              onRemove={() => { setDraft((d) => d.filter((i) => itemKey(i) !== sel)); setSel(null); }}
+              onMove={(x, z) => moveTo(itemKey(selItem), x, z)} />
           ) : selItem ? (
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-display text-sm flex-1 min-w-[100px]">{FURNITURE_BY_ID.get(selItem.type)?.icon} {FURNITURE_BY_ID.get(selItem.type)?.label}</span>
+              <span className="font-display text-sm flex-1 min-w-[100px]">{FURNITURE_BY_ID.get(selItem.type)?.icon} {FURNITURE_BY_ID.get(selItem.type)?.label}{plan.zones.length > 1 && <span className="text-[11px] text-cocoa-soft font-body"> · {zoneAt(plan, selItem.x, selItem.z)?.label ?? ''}</span>}</span>
               <span className="text-[11px] text-cocoa-soft hidden sm:inline">끌어서 옮겨요</span>
               <button className="btn btn-ghost px-3 min-h-[44px] text-sm" onClick={() => update(itemKey(selItem), { rot: (selItem.rot + 1) % 4 })}>↻ 회전</button>
               <button className="btn btn-ghost px-3 min-h-[44px] text-sm" onClick={() => { setDraft((d) => d.filter((i) => itemKey(i) !== sel)); setSel(null); }}>📦 보관</button>
@@ -120,22 +136,36 @@ export function HomeEditor() {
   return (
     <div className="absolute inset-0 z-40 flex flex-col md:flex-row bg-cream">
       <div className="relative h-[55%] md:h-full md:flex-1 min-w-0">
-        <Canvas camera={{ position: [4.2, 5.6, 7.6], fov: 40 }} dpr={[1, 2]}>
+        <Canvas camera={{ position: [4.2 * (W / 3.6), 5.6 * (D / 3.0), 7.6 * (D / 3.0)], fov: 40 }} dpr={[1, 2]}>
           <color attach="background" args={['#fff4e8']} />
           <hemisphereLight args={['#fffaf2', '#efe2cc', 2.0]} />
           <directionalLight position={[3, 6, 4]} intensity={1.1} color="#fff6e8" />
-          <HomeRoom />
+          <HomeRoom tier={home.tier} style={style ?? home.style} />
           {draft.map((i) => (
             <Furniture key={itemKey(i)} item={i} photo={home.owner.dogPhoto} editing selected={sel === itemKey(i)}
               onSelect={() => setSel(itemKey(i))} onDragStart={() => setDragging(true)} />
           ))}
-          <DragFloor active={dragging && !!sel}
-            onMove={(x, z) => sel && update(sel, { x: THREE.MathUtils.clamp(Math.round(x * 10) / 10, -W + 0.3, W - 0.3), z: THREE.MathUtils.clamp(Math.round(z * 10) / 10, -D + 0.3, D - 0.3) })}
+          <DragFloor active={dragging && !!sel} W={W} D={D}
+            onMove={(x, z) => sel && moveTo(sel, x, z)}
             onEnd={() => setDragging(false)} />
-          <OrbitControls enabled={!dragging} enablePan={false} target={[0, 0.6, 0]} minDistance={5} maxDistance={12} minPolarAngle={0.5} maxPolarAngle={1.25}
+          <OrbitControls enabled={!dragging} enablePan={false} target={[0, 0.6, 0]} minDistance={5} maxDistance={12 * (W / 3.6)} minPolarAngle={0.5} maxPolarAngle={1.25}
             minAzimuthAngle={-0.2} maxAzimuthAngle={1.3} />
         </Canvas>
-        <div className="absolute top-3 left-3 panel !rounded-full px-4 py-2 font-display">🛠️ 집 꾸미기</div>
+        <div className="absolute top-3 left-3 panel !rounded-full px-4 py-2 font-display">🛠️ 집 꾸미기 · {plan.type}</div>
+        <button className="absolute top-3 right-3 btn btn-ghost px-3 min-h-[40px] text-sm" onClick={() => setStyleOpen(!styleOpen)} data-testid="style-btn">🎨 벽지·바닥</button>
+        {styleOpen && (
+          <div className="absolute top-14 right-3 panel p-3 w-[min(92vw,300px)] pop" data-testid="style-panel">
+            <div className="font-display text-sm">🧱 벽지</div>
+            <div className="grid grid-cols-5 gap-1.5 mt-1">
+              {WALLPAPERS.map((w) => <button key={w.id} className={`rounded-xl border-2 h-12 text-[10px] ${(style ?? home.style).wall === w.id ? 'border-[#f4776a]' : 'border-white'}`} style={{ background: w.color }} onClick={() => setStyle({ ...(style ?? home.style), wall: w.id })}>{w.label}</button>)}
+            </div>
+            <div className="font-display text-sm mt-2">🪵 바닥재</div>
+            <div className="grid grid-cols-4 gap-1.5 mt-1">
+              {FLOORINGS.map((f) => <button key={f.id} className={`rounded-xl border-2 h-12 text-[10px] ${(style ?? home.style).floor === f.id ? 'border-[#f4776a]' : 'border-white'}`} style={{ background: f.color }} onClick={() => setStyle({ ...(style ?? home.style), floor: f.id })}>{f.label}</button>)}
+            </div>
+            <p className="text-[10px] text-cocoa-soft mt-1.5">저장하기를 누르면 적용돼요.</p>
+          </div>
+        )}
         {wide && <div className="absolute inset-x-2 bottom-2 panel p-2.5">{selBar}</div>}
       </div>
       <aside className="md:w-[380px] flex-1 md:flex-none min-h-0 overflow-y-auto scroll-soft p-4 bg-cream-2/60">
@@ -223,7 +253,7 @@ export function HomePanel() {
               : <span className="w-14 h-14 rounded-full grid place-items-center text-2xl border-2 border-white shadow" style={{ background: home.owner.dog.coat }}>🐶</span>}
             <div className="flex-1 min-w-0">
               <div className="font-display text-lg truncate">{home.owner.nickname} · 🐶 {home.owner.dogName}</div>
-              <div className="text-xs text-cocoa-soft">멍글 아파트 {residenceLabel(home.residence)}</div>
+              <div className="text-xs text-cocoa-soft">멍글 아파트 {residenceLabel(home.residence)} · {planOf(home.tier).type}</div>
             </div>
             <button className={`btn px-3 min-h-[44px] text-sm ${home.likedByMe ? 'btn-coral' : 'btn-ghost'}`} disabled={home.isOwner || DEMO} onClick={like}
               title={home.isOwner ? '내 집에는 누를 수 없어요' : '좋아요'}>❤️ {home.likes}</button>
@@ -241,6 +271,17 @@ export function HomePanel() {
                 </div>
               ))}
               <p className="text-[10px] text-cocoa-soft mt-1">승인하면 2시간 동안 들어올 수 있어요.</p>
+            </div>
+          )}
+
+          {home.isOwner && (
+            <div className="mt-3 rounded-2xl bg-[linear-gradient(135deg,#fff4cf,#fde3d6)] p-3 flex items-center gap-2">
+              <span className="text-2xl">🚚</span>
+              <div className="flex-1 min-w-0 leading-tight">
+                <div className="font-display text-sm">{home.tier < 3 ? `${planOf(home.tier + 1).name} ${planOf(home.tier + 1).type}로 이사` : '가장 넓은 쓰리룸에 살고 있어요'}</div>
+                <div className="text-[11px] text-cocoa-soft">{home.tier < 3 ? `이사 비용 ${planOf(home.tier + 1).price.toLocaleString('ko-KR')}코인 · 가구와 사진은 그대로` : '친구들을 초대해 함께 놀아요'}</div>
+              </div>
+              <button className="btn btn-coral px-3 min-h-[44px] text-sm" data-testid="open-move" onClick={() => set({ moveOpen: true, homePanel: false })}>이사하기</button>
             </div>
           )}
 
@@ -290,14 +331,14 @@ export function HomePanel() {
 const FRAME_ICON: Record<string, string> = { wood: '🟫', white: '⬜', pink: '🩷', round: '⭕', polaroid: '📷' };
 
 /** 액자를 선택했을 때 메뉴: 사진 넣기/변경 · 디자인 · 회전 · 크기 · 위치 · 제거 (+ 사진 맞추기) */
-function FrameMenu({ item, tool, setTool, onPhoto, onUpdate, onRemove }: {
+function FrameMenu({ item, tool, setTool, onPhoto, onUpdate, onRemove, onMove }: {
   item: PlacedItem; tool: 'style' | 'size' | 'fit' | 'move' | null; setTool: (t: 'style' | 'size' | 'fit' | 'move' | null) => void;
-  onPhoto: () => void; onUpdate: (p: Partial<PlacedItem>) => void; onRemove: () => void;
+  onPhoto: () => void; onUpdate: (p: Partial<PlacedItem>) => void; onRemove: () => void; onMove: (x: number, z: number) => void;
 }) {
   const fit = item.fit ?? { z: 1, x: 0, y: 0 };
   const scale = item.scale ?? 1;
   const b = (on: boolean) => `btn min-h-[44px] px-1.5 text-[12px] whitespace-nowrap ${on ? 'btn-peach' : 'btn-ghost'}`;
-  const nudge = (dx: number, dz: number) => onUpdate({ x: THREE.MathUtils.clamp(Math.round((item.x + dx) * 10) / 10, -W + 0.3, W - 0.3), z: THREE.MathUtils.clamp(Math.round((item.z + dz) * 10) / 10, -D + 0.3, D - 0.3) });
+  const nudge = (dx: number, dz: number) => onMove(item.x + dx, item.z + dz);
   return (
     <div data-testid="frame-menu">
       <div className="flex items-center gap-2 mb-1.5">

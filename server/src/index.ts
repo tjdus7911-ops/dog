@@ -8,7 +8,9 @@ import * as repo from './db';
 import * as persist from './persist';
 import { canVisit } from './access';
 import { APARTMENT_BUILDINGS, isValidUnit, unitsOf, type UnitInfo } from '../../shared/apartment';
-import { GUESTBOOK_MAX_LEN, HOME_VISIBILITY, validateLayout, type HomeView, type HomeVisibility } from '../../shared/home';
+import { FURNITURE, GUESTBOOK_MAX_LEN, HOME_VISIBILITY, PLANS, movedLayout, tierOfBuilding, validateLayout, validateStyle, type HomeTier, type HomeView, type HomeVisibility } from '../../shared/home';
+import { CoinError, applyTx, balanceOf, coinStatus, grantSignup, nowOf, registerCoins, setCoinNotifier, testFault } from './coins';
+import { all, one, run, transaction } from './db';
 import { hashPassword, issueToken, requireAdmin, requireAuth, revokeToken, userFromToken, verifyPassword, type AuthedRequest } from './auth';
 import { setupRealtime } from './realtime';
 import { filterProfanity, RateLimiter, sanitize } from './moderation';
@@ -67,6 +69,8 @@ app.post('/api/auth/signup', (req, res) => {
   if (repo.findUserByName(username)) return res.status(409).json({ error: '이미 사용 중인 아이디예요.' });
   const { hash, salt } = hashPassword(password);
   const id = repo.createUser(username, hash, salt, nickname, dogName);
+  // 신규 가입 선물 500코인 (계정당 1회) → 1동 원룸 입주비로 사용
+  grantSignup(id);
   res.json({ token: issueToken(id), profile: repo.getMyProfile(id) });
 });
 
@@ -250,16 +254,122 @@ app.get('/api/apartment', requireAuth, (req, res) => {
   res.json({ buildings, mine: repo.getResidence(me) });
 });
 
+/** 첫 입주: 1동 원룸만, 입주비 500코인 (가입 선물로 실질 무료). 코인 차감과 입주를 한 트랜잭션으로 */
 app.post('/api/apartment/move-in', requireAuth, (req, res) => {
   const me = (req as AuthedRequest).userId;
   const building = String(req.body?.building ?? '');
   const unit = String(req.body?.unit ?? '');
   if (!isValidUnit(building, unit)) return res.status(400).json({ error: '존재하지 않는 호실이에요.' });
-  const r = repo.moveIn(me, building, unit);
-  if (!r.ok) return res.status(409).json({ error: r.reason === 'already' ? '이미 입주한 집이 있어요.' : '방금 다른 주민이 입주한 호실이에요. 다른 호실을 골라 주세요.' });
+  if (tierOfBuilding(building) !== 1) return res.status(400).json({ error: '처음에는 1동 원룸에 입주할 수 있어요. 코인을 모아 2동·3동으로 이사해 보세요!', code: 'order' });
+  const price = PLANS[1].price;
+  if (repo.getResidence(me)) return res.status(409).json({ error: '이미 입주한 집이 있어요.' });
+  const bal = balanceOf(me);
+  if (bal < price) return res.status(400).json({ error: `입주까지 ${(price - bal).toLocaleString('ko-KR')}코인 남았어요! 출석과 산책으로 코인을 모아 보세요.`, code: 'insufficient', need: price - bal });
+  try {
+    transaction(() => {
+      const r = repo.moveIn(me, building, unit);
+      if (!r.ok) throw new MoveError(r.reason === 'already' ? '이미 입주한 집이 있어요.' : '방금 다른 주민이 입주한 호실이에요. 다른 호실을 골라 주세요.', 409);
+      applyTx(me, -price, 'movein', 'first', Date.now(), `${PLANS[1].name} ${unit}호 입주`);
+      repo.saveHome(me, { layout: PLANS[1].defaultLayout.map((i) => ({ ...i })) });
+    });
+  } catch (e) {
+    if (e instanceof MoveError) return res.status(e.status).json({ error: e.message });
+    if (e instanceof CoinError) return res.status(e.code === 'duplicate' ? 409 : 400).json({ error: e.code === 'duplicate' ? '이미 입주 처리되었어요.' : e.message });
+    throw e;
+  }
   rt.profileChanged(me);
-  res.json({ profile: repo.getMyProfile(me) });
+  res.json({ profile: repo.getMyProfile(me), coins: coinStatus(me, Date.now()) });
 });
+
+class MoveError extends Error { constructor(message: string, public status: number, public code = '') { super(message); } }
+/** 이사 가능한 다음 등급 (1동 → 2동 → 3동 순서, 건너뛰기·되돌아가기 없음) */
+const nextTier = (cur: HomeTier): HomeTier | null => (cur < 3 ? ((cur + 1) as HomeTier) : null);
+
+/** 이사 선택 화면 정보: 등급별 가격·특징 · 지금 사는 곳 · 이사 가능 여부 · 남은 빈 호실 수 */
+app.get('/api/apartment/plans', requireAuth, (req, res) => {
+  const me = (req as AuthedRequest).userId;
+  const resi = repo.getResidence(me);
+  const cur = resi ? tierOfBuilding(resi.building) : null;
+  const bal = balanceOf(me);
+  const lived = new Set(all('SELECT building FROM residence_history WHERE user_id=?', me).map((r) => tierOfBuilding(r.building as string)));
+  res.json({
+    balance: bal, current: cur, residence: resi,
+    plans: ([1, 2, 3] as HomeTier[]).map((t) => {
+      const p = PLANS[t];
+      const b = APARTMENT_BUILDINGS.find((x) => x.id === p.building)!;
+      const free = unitsOf(b).length - repo.listResidents(b.id).length;
+      const status = cur === t ? 'current' : lived.has(t) || (cur !== null && t < cur) ? 'past'
+        : cur === null ? (t === 1 ? 'available' : 'locked') : nextTier(cur) === t ? (free <= 0 ? 'full' : bal >= p.price ? 'available' : 'insufficient') : 'locked';
+      return { tier: t, building: p.building, name: p.name, type: p.type, rooms: p.rooms, price: p.price, features: p.features, capacity: p.capacity, free, status, need: Math.max(0, p.price - bal) };
+    }),
+  });
+});
+
+/**
+ * 이사: 다음 등급 동으로만. 코인 차감 · 옛 호실 반환 · 새 호실 배정 · 새집 기본 배치를 한 트랜잭션으로 처리.
+ * requestId로 같은 요청이 두 번 와도 한 번만 결제된다 (중복 클릭 방지).
+ */
+app.post('/api/apartment/move', requireAuth, (req, res) => {
+  const me = (req as AuthedRequest).userId;
+  const building = String(req.body?.building ?? '');
+  const requestId = String(req.body?.requestId ?? '');
+  if (!/^[\w-]{8,64}$/.test(requestId)) return res.status(400).json({ error: '잘못된 요청이에요.' });
+  const target = APARTMENT_BUILDINGS.find((b) => b.id === building);
+  if (!target) return res.status(400).json({ error: '존재하지 않는 동이에요.' });
+  const tier = tierOfBuilding(building);
+  const plan = PLANS[tier];
+  const ts = nowOf(req);
+  let result: { unit: string; balance: number; prev: { building: string; unit: string } };
+  try {
+    result = transaction(() => {
+      // 같은 요청 번호로 이미 이사했다면 결제 없이 결과만 돌려줌
+      if (one("SELECT 1 FROM coin_tx WHERE user_id=? AND kind='move' AND ref=?", me, requestId)) throw new MoveError('이미 처리된 이사예요.', 409, 'duplicate');
+      const cur = repo.getResidence(me);
+      if (!cur) throw new MoveError('먼저 1동 원룸에 입주해 주세요.', 400, 'no_home');
+      const curTier = tierOfBuilding(cur.building);
+      if (curTier === tier) throw new MoveError('지금 살고 있는 동이에요.', 409, 'same');
+      if (tier < curTier) throw new MoveError('이미 거쳐 온 동으로는 돌아갈 수 없어요.', 400, 'order');
+      if (nextTier(curTier) !== tier) throw new MoveError(`${PLANS[nextTier(curTier)!].name}으로 먼저 이사해 주세요.`, 400, 'order');
+      const bal = balanceOf(me);
+      if (bal < plan.price) throw new MoveError(`이사까지 ${(plan.price - bal).toLocaleString('ko-KR')}코인 남았어요! 산책과 멍글런너를 즐기며 코인을 모아보세요.`, 400, 'insufficient');
+      // 새 호실: 비어 있는 가장 낮은 층·번호 (DB UNIQUE로 중복 배정 차단)
+      const taken = new Set(repo.listResidents(target.id).map((r) => r.unit as string));
+      const free = [...unitsOf(target)].sort((x, y) => x.floor - y.floor || x.n - y.n).find((u) => !taken.has(u.unit));
+      if (!free) throw new MoveError(`${plan.name}에 빈 집이 없어요. 잠시 후 다시 시도해 주세요.`, 409, 'full');
+      const prevRow = one('SELECT moved_in_at FROM residences WHERE user_id=?', me);
+      // 옛집 반환 → 이력 기록 → 새집 입주
+      run('INSERT INTO residence_history (user_id, building, unit, moved_in_at, moved_out_at) VALUES (?,?,?,?,?)', me, cur.building, cur.unit, Number(prevRow?.moved_in_at ?? ts), ts);
+      run('DELETE FROM residences WHERE user_id=?', me);
+      run('INSERT INTO residences (user_id, building, unit, moved_in_at) VALUES (?,?,?,?)', me, target.id, free.unit, ts);
+      const tx = applyTx(me, -plan.price, 'move', requestId, ts, `${plan.name} ${free.unit}호로 이사`);
+      if (testFault(req, 'move')) throw new Error('테스트: 이사 처리 중 오류');
+      // 이사 선물 가구 (2동 사람 침대 · 3동 놀이방 시설) — 이미 받은 것은 그대로
+      const gifts = FURNITURE.filter((f) => f.gift === tier).map((f) => f.id);
+      if (tier === 2) gifts.push('bed_cream');
+      if (tier === 3 && !gifts.includes('bed_cream')) gifts.push('bed_cream');
+      for (const g of gifts) run('INSERT OR IGNORE INTO shop_claims (user_id, item, claimed_at) VALUES (?,?,?)', me, g, ts);
+      // 새집 배치: 기본 가구 + 사진 액자 (옛 위치는 쓰지 않음, 나머지 가구는 보관함)
+      const h = repo.getHome(me);
+      repo.saveHome(me, { layout: movedLayout(rawLayout(me) ?? h.layout, tier) });
+      return { unit: free.unit, balance: tx.balance, prev: cur };
+    });
+  } catch (e) {
+    if (e instanceof MoveError) return res.status(e.status).json({ error: e.message, code: e.code, coins: coinStatus(me, ts) });
+    if (e instanceof CoinError) return res.status(400).json({ error: e.message, code: e.code });
+    console.error('[move]', (e as Error).message);
+    return res.status(500).json({ error: '이사 중 문제가 생겼어요. 코인과 집은 그대로예요. 잠시 후 다시 시도해 주세요.', code: 'failed' });
+  }
+  rt.homeMoved(me);
+  rt.homeUpdated(me);
+  rt.profileChanged(me);
+  res.json({ residence: { building: target.id, unit: result.unit }, prev: result.prev, profile: repo.getMyProfile(me), coins: coinStatus(me, ts), home: homeView(me, me) });
+});
+/** 저장된 배치 원본 (이사 직전 등급 기준으로 읽기 — 액자 사진을 놓치지 않게) */
+function rawLayout(userId: number) {
+  const r = one('SELECT layout FROM homes WHERE user_id=?', userId);
+  if (!r) return null;
+  try { const v = JSON.parse(r.layout as string); return Array.isArray(v) ? v : null; } catch { return null; }
+}
 
 // ---------- 개인 집 (꾸미기·방문·좋아요·방명록) ----------
 const guestbookLimiter = new RateLimiter(6, 60_000);
@@ -271,7 +381,7 @@ function homeView(viewer: number, owner: number): HomeView | null {
   return {
     ownerId: owner,
     owner: { nickname: p.nickname, dogName: p.dogName, dogPhoto: p.dogPhoto, human: p.human, dog: p.dog },
-    residence: res, visibility: h.visibility, layout: h.layout,
+    residence: res, visibility: h.visibility, layout: h.layout, tier: h.tier, style: h.style,
     likes: repo.countLikes(owner), likedByMe: repo.hasLiked(owner, viewer), isOwner: viewer === owner,
     owned: viewer === owner ? claimedItems(owner) : [],
     guestbook: repo.listGuestbook(owner).filter((g) => !repo.eitherBlocked(viewer, g.author_id)).map((g) => ({
@@ -294,12 +404,22 @@ app.get('/api/home/:userId', requireAuth, (req, res) => {
 app.put('/api/home/me/layout', requireAuth, (req, res) => {
   const me = (req as AuthedRequest).userId;
   if (!repo.getResidence(me)) return res.status(400).json({ error: '입주한 뒤 집을 꾸밀 수 있어요.' });
-  const layout = validateLayout(req.body?.layout, new Set(claimedItems(me)));
+  const layout = validateLayout(req.body?.layout, new Set(claimedItems(me)), repo.homeTier(me));
   if (!layout) return res.status(400).json({ error: '가구 배치 정보가 올바르지 않아요.' });
   // 액자 사진은 내가 올린 사진만 걸 수 있음 (다른 사람 사진 주소를 넣어도 거부)
   const mine = ownedPhotoUrls(me);
   if (layout.some((i) => i.photo && !mine.has(i.photo))) return res.status(403).json({ error: '내가 올린 사진만 액자에 걸 수 있어요.' });
   repo.saveHome(me, { layout });
+  rt.homeUpdated(me);
+  res.json({ home: homeView(me, me) });
+});
+/** 벽지·바닥재 (집주인만) */
+app.put('/api/home/me/style', requireAuth, (req, res) => {
+  const me = (req as AuthedRequest).userId;
+  if (!repo.getResidence(me)) return res.status(400).json({ error: '입주한 뒤 꾸밀 수 있어요.' });
+  const style = validateStyle(req.body?.style);
+  if (!style) return res.status(400).json({ error: '벽지·바닥재 정보가 올바르지 않아요.' });
+  repo.saveHome(me, { style });
   rt.homeUpdated(me);
   res.json({ home: homeView(me, me) });
 });
@@ -532,6 +652,8 @@ app.post('/api/admin/notices', requireAuth, requireAdmin, (req, res) => {
 });
 
 // ---------- 강아지 프로필 · 집 액자 사진 ----------
+registerCoins(app);
+setCoinNotifier((u, e) => rt.notify(u, 'coins:earned', e));
 registerPets(app, { saveImage, removeImage, profileChanged: (u) => rt.profileChanged(u) });
 registerRunner(app, { changed: () => { rt.runnerChanged(); rt.screenUpdated(); } });
 
