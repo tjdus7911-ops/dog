@@ -13,18 +13,15 @@ export function ChatPanel() {
   return <LiveChatPanel />;
 }
 
-/** 모바일 하단 배치 기준 (조이스틱 136px + 아래 여백 20px) */
-export const MOBILE_JOY_BOTTOM = 20;
-export const MOBILE_JOY_SIZE = 136;
-const ABOVE_JOY = `calc(var(--safe-b) + ${MOBILE_JOY_BOTTOM + MOBILE_JOY_SIZE + 12}px)`;
+import { MOBILE_TOP_ROWS } from './layout';
 
 function DemoNotice() {
   const touch = isTouchDevice();
   const [open, setOpen] = useState(false);
   if (touch) {
     return (
-      <button onClick={() => setOpen(!open)} style={{ bottom: ABOVE_JOY }}
-        className="absolute z-10 left-3 panel !rounded-2xl px-3 py-2 text-left text-[12px] leading-relaxed max-w-[calc(100vw-24px)] min-h-[44px]">
+      <button onClick={() => setOpen(!open)} style={{ top: `calc(var(--safe-t) + ${MOBILE_TOP_ROWS}px)` }}
+        className="absolute z-10 left-3 panel !rounded-2xl px-3 py-1.5 text-left text-[12px] leading-relaxed max-w-[calc(100vw-96px)] min-h-[36px]">
         <span className="font-display text-[13px]">👀 미리보기 · 혼자 산책</span>{open ? <span className="block mt-1">서버 없이 아바타와 산책만 체험하는 화면이에요. 공원 채팅·친구·1:1 대화는 게임 서버에서 동작해요.</span> : <span className="text-cocoa-soft"> · 자세히</span>}
       </button>
     );
@@ -75,7 +72,7 @@ function MobileChat() {
   // 처음 들어오면 닫힌 상태로 시작
   useEffect(() => { set({ chatOpen: false }); }, []);
   // 채팅이 열려 있는 동안 이동 입력 잠금
-  useEffect(() => { setMoveLocked(open); return () => setMoveLocked(false); }, [open]);
+  useEffect(() => { setMoveLocked(open); if (open) set({ chatUnread: 0 }); return () => setMoveLocked(false); }, [open]);
   useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [chat.length, open, vp.visibleHeight]);
 
   async function submit(e: FormEvent) {
@@ -90,16 +87,8 @@ function MobileChat() {
     set({ chatOpen: false });
   }
 
-  const last = chat[chat.length - 1];
-  if (!open) {
-    return (
-      <button onClick={() => set({ chatOpen: true })} style={{ bottom: ABOVE_JOY }}
-        className="absolute z-10 left-3 panel !rounded-full pl-3 pr-4 min-h-[44px] text-sm max-w-[min(64vw,300px)] truncate text-left flex items-center gap-1.5">
-        <span className="text-base">💬</span>
-        {last ? <span className="truncate"><b className="font-display">{last.nickname}</b> {last.text}</span> : <span className="font-display">공원 채팅 열기</span>}
-      </button>
-    );
-  }
+  // 닫혀 있을 때는 하단 내비게이션의 '채팅' 버튼으로 연다 (새 메시지 수 표시)
+  if (!open) return null;
 
   // 기본: 화면의 약 38%. 키보드가 열리면 보이는 영역 안에서 시트 높이를 줄이고(목록만 축소) 키보드 바로 위에 붙인다.
   const base = Math.round(vp.fullHeight * 0.38);

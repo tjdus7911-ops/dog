@@ -48,7 +48,7 @@ export function SettingsPanel() {
   }
 
   return (
-    <aside className="absolute z-30 right-2 md:right-3 top-[64px] md:top-[74px] bottom-3 w-[min(94vw,360px)] panel p-4 flex flex-col pop">
+    <aside className="above-nav-panel absolute z-30 right-2 md:right-3 top-[64px] md:top-[74px] bottom-3 w-[min(94vw,360px)] panel p-4 flex flex-col pop">
       <PanelHeader icon="🔒" title="개인정보·차단 설정" onClose={() => set({ panel: 'none' })} />
       <div className="overflow-y-auto scroll-soft space-y-2">
         {ITEMS.map((it) => (

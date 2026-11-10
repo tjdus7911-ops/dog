@@ -142,7 +142,10 @@ export function connect() {
 
   // ---------- 채팅 ----------
   s.on('chat', (m: ChatMessage) => {
-    set((st) => ({ chat: [...st.chat.slice(-99), m], bubbles: { ...st.bubbles, [m.from]: { text: m.text, ts: Date.now() } } }));
+    set((st) => ({
+      chat: [...st.chat.slice(-99), m], bubbles: { ...st.bubbles, [m.from]: { text: m.text, ts: Date.now() } },
+      chatUnread: !st.chatOpen && m.from !== st.me?.id ? st.chatUnread + 1 : st.chatUnread,
+    }));
   });
 
   // ---------- 친구 ----------
@@ -223,7 +226,7 @@ function enterSpace(park: ParkInfo, spawn: NetState) {
   cam.pendingReset = park.kind;
   setSpace(park.kind);
   const moved = get().park?.id !== park.id;
-  set({ park, players: {}, chat: [], bubbles: {}, seats: {}, seated: null, benchMenu: null, home: null, homeEdit: false, lobbyPanel: park.kind === 'lobby', shopOpen: false, ...(moved ? { community: null } : {}) });
+  set({ park, players: {}, chat: [], chatUnread: 0, bubbles: {}, seats: {}, seated: null, benchMenu: null, home: null, homeEdit: false, lobbyPanel: park.kind === 'lobby', shopOpen: false, ...(moved ? { community: null } : {}) });
   if (park.kind === 'home' && park.ownerId) void loadHome(park.ownerId);
 }
 

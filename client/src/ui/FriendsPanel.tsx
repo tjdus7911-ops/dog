@@ -20,7 +20,7 @@ export function FriendsPanel() {
   const sorted = [...friends].sort((a, b) => Number(!!b.online) - Number(!!a.online) || b.unread - a.unread);
 
   return (
-    <aside className="absolute z-30 right-2 md:right-3 top-[64px] md:top-[74px] bottom-3 w-[min(94vw,360px)] panel p-4 flex flex-col pop">
+    <aside className="above-nav-panel absolute z-30 right-2 md:right-3 top-[64px] md:top-[74px] bottom-3 w-[min(94vw,360px)] panel p-4 flex flex-col pop">
       <PanelHeader icon="👥" title="친구" onClose={() => set({ panel: 'none' })} />
       <div className="grid grid-cols-3 gap-1 bg-cream-2 rounded-full p-1 mb-3 text-sm">
         {([['list', `친구 ${friends.length}`], ['incoming', `받은 신청 ${incoming.length}`], ['outgoing', `보낸 신청 ${outgoing.length}`]] as const).map(([k, l]) => (

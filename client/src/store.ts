@@ -74,6 +74,12 @@ interface State {
   meetupAlert: { meetupId: number; title: string; kind: string; park: string | null; place: string } | null;
   /** 애견샵 카운터 패널 */
   shopOpen: boolean;
+  /** 모바일 하단 '더보기' 메뉴 / 마을 지도 / 이벤트(동네 일정) 창 */
+  moreOpen: boolean;
+  mapOpen: boolean;
+  eventsOpen: boolean;
+  /** 채팅을 닫아 둔 동안 새로 온 공원 채팅 수 */
+  chatUnread: number;
 }
 
 export const useStore = create<State>()(() => ({
@@ -117,6 +123,10 @@ export const useStore = create<State>()(() => ({
   meetupLive: [],
   meetupAlert: null,
   shopOpen: false,
+  moreOpen: false,
+  mapOpen: false,
+  eventsOpen: false,
+  chatUnread: 0,
 }));
 
 export const set = useStore.setState;

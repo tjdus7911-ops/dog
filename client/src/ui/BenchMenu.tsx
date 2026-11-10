@@ -1,4 +1,5 @@
 // 광장 벤치 — 벤치를 누르면 빈 자리를 골라 앉을 수 있다. (좌석 점유는 서버가 관리)
+import { ABOVE_CTRL } from './layout';
 import { SEATS } from '@shared/world';
 import { set, useStore } from '../store';
 import { local } from '../game/local';
@@ -23,7 +24,7 @@ export function BenchMenu() {
   }
 
   return (
-    <div style={{ bottom: isTouchDevice() ? 'calc(var(--safe-b) + 176px)' : undefined }} className="absolute z-30 left-1/2 -translate-x-1/2 bottom-24 panel p-4 w-[min(92vw,340px)] pop">
+    <div style={{ bottom: isTouchDevice() ? ABOVE_CTRL : undefined }} className="absolute z-30 left-1/2 -translate-x-1/2 bottom-24 panel p-4 w-[min(92vw,340px)] pop">
       <div className="flex items-center gap-2">
         <span className="text-2xl">🪑</span>
         <div className="flex-1">

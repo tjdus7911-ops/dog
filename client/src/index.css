@@ -89,3 +89,9 @@ canvas { touch-action: none; }
 .btn-coral:hover:not(:disabled) { background: #f6887c; }
 .no-scrollbar { scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* 모바일: 하단 시트·패널이 하단 내비게이션(62px)을 가리지 않도록 그 위에 띄움 */
+@media (pointer: coarse) and (max-width: 767px) {
+  .above-nav { bottom: calc(var(--safe-b) + 62px) !important; padding-bottom: 16px !important; }
+  .above-nav-panel { bottom: calc(var(--safe-b) + 70px) !important; }
+}

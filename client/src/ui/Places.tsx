@@ -1,4 +1,5 @@
 // 공원 건물 입구(아파트·애견카페·애견샵) · 광장 모임 게시판 안내 · 카페/샵 실내 UI
+import { ABOVE_CTRL } from './layout';
 import { useEffect, useState } from 'react';
 import { get, set, toast, useStore } from '../store';
 import { local } from '../game/local';
@@ -29,7 +30,7 @@ export function EntrancePrompt() {
   const isPark = useStore((s) => s.park?.kind === 'park');
   if (!near || !isPark || mobileChat) return null;
   return (
-    <div className="absolute z-20 left-1/2 -translate-x-1/2 bottom-24 pop" style={{ bottom: isTouchDevice() ? 'calc(var(--safe-b) + 176px)' : undefined }}>
+    <div className="absolute z-20 left-1/2 -translate-x-1/2 bottom-24 pop" style={{ bottom: isTouchDevice() ? ABOVE_CTRL : undefined }}>
       <button className="btn btn-coral px-6 py-3 text-lg shadow-lg whitespace-nowrap" onClick={() => (near.id === 'board' ? openCommunity('meetups') : void joinPark(near.id))}>{near.label}</button>
     </div>
   );
@@ -38,7 +39,7 @@ export function EntrancePrompt() {
 /** 애견카페 실내: 나가기 + 동네 모임 바로가기 */
 export function CafeBar() {
   return (
-    <div className="absolute z-20 left-2 md:left-3 top-[62px] md:top-[78px] flex gap-2 flex-wrap max-w-[calc(100vw-16px)]">
+    <div className="absolute z-20 left-2 md:left-3 top-[108px] md:top-[78px] flex gap-2 flex-wrap max-w-[calc(100vw-16px)]">
       <button className="btn btn-ghost px-4 min-h-[44px] text-sm" onClick={() => void joinPark('central-1', 'cafe')}>🌳 공원으로 나가기</button>
       <button className="btn btn-coral px-4 min-h-[44px] text-sm" onClick={() => openCommunity('meetups')}>🐾 산책 모임 찾기</button>
     </div>
@@ -68,12 +69,12 @@ export function ShopBar() {
   }
   return (
     <>
-      <div className="absolute z-20 left-2 md:left-3 top-[62px] md:top-[78px] flex gap-2">
+      <div className="absolute z-20 left-2 md:left-3 top-[108px] md:top-[78px] flex gap-2">
         <button className="btn btn-ghost px-4 min-h-[44px] text-sm" onClick={() => void joinPark('central-1', 'shop')}>🌳 공원으로 나가기</button>
         {!open && <button className="btn btn-coral px-4 min-h-[44px] text-sm" onClick={() => set({ shopOpen: true })}>🎁 카운터</button>}
       </div>
       {open && (
-        <aside className="absolute z-30 inset-x-0 bottom-0 max-h-[72%] md:inset-x-auto md:right-3 md:top-[74px] md:bottom-auto md:w-[400px] panel !rounded-b-none md:!rounded-[22px] p-4 overflow-y-auto scroll-soft pop"
+        <aside className="above-nav absolute z-30 inset-x-0 bottom-0 max-h-[72%] md:inset-x-auto md:right-3 md:top-[74px] md:bottom-auto md:w-[400px] panel !rounded-b-none md:!rounded-[22px] p-4 overflow-y-auto scroll-soft pop"
           style={{ paddingBottom: 'calc(var(--safe-b) + 16px)' }}>
           <div className="flex items-center gap-2">
             <h2 className="font-display text-xl flex-1">🛍️ 멍글 애견샵</h2>

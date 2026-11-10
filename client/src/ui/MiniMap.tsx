@@ -50,7 +50,7 @@ export function MiniMap() {
   }, []);
 
   return (
-    <div className="absolute top-[62px] md:top-[78px] left-2 md:left-3 z-10 flex items-start gap-2 pointer-events-none">
+    <div className="absolute top-[108px] md:top-[78px] left-2 md:left-3 z-10 flex items-start gap-2 pointer-events-none">
       <canvas ref={ref} style={{ width: SIZE, height: SIZE }} className="rounded-full border-4 border-white shadow-lg hidden sm:block" />
       {/* 작은 화면: 한 줄로 간결하게 */}
       <span className="name-tag !text-xs !px-2.5 !py-1 sm:hidden">📍 {park ? park.name.replace('중앙 공원 ', '공원') : '입장 중'} · 🐾 {count}명</span>

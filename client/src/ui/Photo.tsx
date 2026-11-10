@@ -1,4 +1,5 @@
 // 사진 촬영 모드(포토존·벤치) · 광장 스크린 상세 보기 · 광장 스크린에 올리기 신청
+import { ABOVE_CTRL } from './layout';
 import { useEffect, useRef, useState } from 'react';
 import { PHOTO_ZONE } from '@shared/world';
 import type { ScreenSlide } from '@shared/screen';
@@ -90,7 +91,7 @@ export function PhotoZonePrompt() {
   }, []);
   if (!near || mobileChat) return null;
   return (
-    <div className="absolute z-20 left-1/2 -translate-x-1/2 bottom-24 pop" style={{ bottom: isTouchDevice() ? 'calc(var(--safe-b) + 176px)' : undefined }}>
+    <div className="absolute z-20 left-1/2 -translate-x-1/2 bottom-24 pop" style={{ bottom: isTouchDevice() ? ABOVE_CTRL : undefined }}>
       <button className="btn btn-coral px-6 py-3 text-lg shadow-lg" onClick={() => {
         // 배경판을 등지고 광장 쪽을 보게 선다
         local.rot = PHOTO_ZONE.rot;

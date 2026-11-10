@@ -174,7 +174,7 @@ export function HomePanel() {
 
   return (
     <>
-      <div className="absolute z-20 left-2 md:left-3 top-[62px] md:top-[78px] flex gap-2 flex-wrap max-w-[calc(100vw-16px)]">
+      <div className="absolute z-20 left-2 md:left-3 top-[108px] md:top-[78px] flex gap-2 flex-wrap max-w-[calc(100vw-16px)]">
         <button className="btn btn-ghost px-4 min-h-[44px] text-sm" onClick={() => void joinPark('lobby-1')}>🚪 로비로 나가기</button>
         {!open && <button className="btn btn-coral px-4 min-h-[44px] text-sm relative" onClick={() => set({ homePanel: true })}>
           🏠 집 정보{requests.length > 0 && <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-[#e2604f] text-white text-[11px] grid place-items-center">{requests.length}</span>}
@@ -182,7 +182,7 @@ export function HomePanel() {
         {home.isOwner && <button className="btn btn-ghost px-4 min-h-[44px] text-sm" onClick={() => set({ homeEdit: true, homePanel: false })}>🛠️ 꾸미기</button>}
       </div>
       {open && (
-        <aside className="absolute z-30 inset-x-0 bottom-0 max-h-[70%] md:inset-x-auto md:right-3 md:top-[74px] md:bottom-3 md:w-[400px] md:max-h-none panel !rounded-b-none md:!rounded-[22px] p-4 overflow-y-auto scroll-soft pop"
+        <aside className="above-nav absolute z-30 inset-x-0 bottom-0 max-h-[70%] md:inset-x-auto md:right-3 md:top-[74px] md:bottom-3 md:w-[400px] md:max-h-none panel !rounded-b-none md:!rounded-[22px] p-4 overflow-y-auto scroll-soft pop"
           style={{ paddingBottom: 'calc(var(--safe-b) + 16px)' }}>
           <div className="flex items-center gap-3">
             {home.owner.dogPhoto

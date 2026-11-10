@@ -7,6 +7,7 @@ import { logout } from './App';
 import { DEMO, resetDemo } from '../demo';
 import { residenceLabel } from '@shared/apartment';
 import { openCommunity } from './Community';
+import { isTouchDevice } from '../game/input';
 
 export function TopBar() {
   const me = useStore((s) => s.me)!;
@@ -14,13 +15,14 @@ export function TopBar() {
   const notifUnread = useStore((s) => s.notifications.filter((n) => !n.read).length);
   const friendBadge = useStore((s) => s.incoming.length + s.friends.reduce((a, f) => a + f.unread, 0));
   const [menuOpen, setMenuOpen] = useState(false);
+  const touch = isTouchDevice();
   const toggle = (p: typeof panel) => set({ panel: panel === p ? 'none' : p });
 
   return (
     <div className="absolute top-0 inset-x-0 z-20 p-2 md:p-3 flex items-center gap-1.5 md:gap-2 pointer-events-none">
-      <div className="panel !rounded-full pl-2.5 pr-3 max-[399px]:px-0 max-[399px]:w-11 max-[399px]:h-11 max-[399px]:justify-center md:pl-3 md:pr-4 py-1.5 flex items-center gap-1.5 md:gap-2 pointer-events-auto whitespace-nowrap shrink-0" title="멍글마을">
+      <div className="panel !rounded-full pl-2.5 pr-3 max-[339px]:px-0 max-[339px]:w-11 max-[339px]:h-11 max-[339px]:justify-center md:pl-3 md:pr-4 py-1.5 flex items-center gap-1.5 md:gap-2 pointer-events-auto whitespace-nowrap shrink-0" title="멍글마을">
         <span className="text-xl md:text-2xl" aria-hidden>🐾</span>
-        <div className="leading-none max-[399px]:hidden">
+        <div className="leading-none max-[339px]:hidden">
           <div className="font-display text-lg md:text-2xl">멍글마을</div>
           <div className="text-[10px] text-cocoa-soft tracking-wide hidden sm:block">Mungle Village</div>
         </div>
@@ -30,9 +32,9 @@ export function TopBar() {
       <div className="flex-1" />
 
       {DEMO && <span className="name-tag !text-xs !px-3 !py-1.5 pointer-events-auto hidden sm:inline">👀 미리보기 · 혼자 산책 모드</span>}
-      {/* 장소 선택: 공원 · 멍글 아파트 (장소가 늘면 서버 장소 목록에 추가) */}
-      <PlacePicker />
-      <CommunityButton />
+      {/* 장소 선택: 공원 · 멍글 아파트 (모바일은 두 번째 줄로 이동) */}
+      {!touch && <PlacePicker />}
+      {!touch && <CommunityButton />}
       {!DEMO && <button className="btn btn-ghost w-11 h-11 shrink-0 relative pointer-events-auto" onClick={() => { toggle('notifications'); }} aria-label="알림">
         🔔{notifUnread > 0 && <Badge n={notifUnread} />}
       </button>}
@@ -83,7 +85,7 @@ export const Badge = ({ n }: { n: number }) => (
 );
 
 /** 상단 장소 선택 드롭다운 — 현재 장소 표시, 체크 표시, 이동(공원 / 아파트 로비) */
-function PlacePicker() {
+export function PlacePicker() {
   const park = useStore((s) => s.park);
   const parks = useStore((s) => s.parks);
   const [open, setOpen] = useState(false);

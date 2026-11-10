@@ -277,12 +277,12 @@ export function LobbyPanel() {
   return (
     <>
       {/* 로비 상단 버튼 */}
-      <div className="absolute z-20 left-2 md:left-3 top-[62px] md:top-[78px] flex gap-2">
+      <div className="absolute z-20 left-2 md:left-3 top-[108px] md:top-[78px] flex gap-2">
         <button className="btn btn-ghost px-4 min-h-[44px] text-sm" onClick={() => void joinPark('central-1', 'lobby')}>🌳 공원으로 나가기</button>
         {!open && <button className="btn btn-coral px-4 min-h-[44px] text-sm" onClick={() => set({ lobbyPanel: true })}>📋 호실 안내판</button>}
       </div>
       {open && (
-        <aside className="absolute z-30 inset-x-0 bottom-0 max-h-[72%] md:inset-x-auto md:right-3 md:top-[74px] md:bottom-3 md:w-[420px] md:max-h-none panel !rounded-b-none md:!rounded-[22px] p-4 overflow-y-auto scroll-soft pop"
+        <aside className="above-nav absolute z-30 inset-x-0 bottom-0 max-h-[72%] md:inset-x-auto md:right-3 md:top-[74px] md:bottom-3 md:w-[420px] md:max-h-none panel !rounded-b-none md:!rounded-[22px] p-4 overflow-y-auto scroll-soft pop"
           style={{ paddingBottom: 'calc(var(--safe-b) + 16px)' }}>
           <div className="flex items-center gap-2">
             <h2 className="font-display text-xl flex-1">📋 {b?.name ?? '멍글 아파트'} 호실 안내판</h2>
