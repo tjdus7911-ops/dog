@@ -4,6 +4,7 @@ import { joinPark } from '../net/socket';
 import { PLACES } from '@shared/spaces';
 import { DogBadge } from './common';
 import { logout } from './App';
+import { goSignup } from './Interact';
 import { DEMO, resetDemo } from '../demo';
 import { residenceLabel } from '@shared/apartment';
 import { openCommunity } from './Community';
@@ -15,6 +16,7 @@ export function TopBar() {
   const notifUnread = useStore((s) => s.notifications.filter((n) => !n.read).length);
   const friendBadge = useStore((s) => s.incoming.length + s.friends.reduce((a, f) => a + f.unread, 0));
   const [menuOpen, setMenuOpen] = useState(false);
+  const guest = me.role === 'guest';
   const touch = isTouchDevice();
   const toggle = (p: typeof panel) => set({ panel: panel === p ? 'none' : p });
 
@@ -35,13 +37,15 @@ export function TopBar() {
       {/* 장소 선택: 공원 · 멍글 아파트 (모바일은 두 번째 줄로 이동) */}
       {!touch && <PlacePicker />}
       {!touch && <CommunityButton />}
-      {!DEMO && <button className="btn btn-ghost w-11 h-11 shrink-0 relative pointer-events-auto" onClick={() => { toggle('notifications'); }} aria-label="알림">
+      {!DEMO && !guest && <button className="btn btn-ghost w-11 h-11 shrink-0 relative pointer-events-auto" onClick={() => { toggle('notifications'); }} aria-label="알림">
         🔔{notifUnread > 0 && <Badge n={notifUnread} />}
       </button>}
-      {!DEMO && <button className={`btn ${panel === 'friends' ? 'btn-peach' : 'btn-ghost'} h-11 px-3 md:px-4 relative pointer-events-auto`} onClick={() => toggle('friends')} aria-label="친구">
+      {!DEMO && !guest && <button className={`btn ${panel === 'friends' ? 'btn-peach' : 'btn-ghost'} h-11 px-3 md:px-4 relative pointer-events-auto`} onClick={() => toggle('friends')} aria-label="친구">
         👥 <span className="hidden md:inline">친구</span>{friendBadge > 0 && <Badge n={friendBadge} />}
       </button>}
 
+      {/* 둘러보기 중 표시 + 가입 버튼 */}
+      {guest && <button className="btn btn-coral h-11 px-3 text-sm whitespace-nowrap pointer-events-auto" onClick={() => set({ joinPrompt: true })}>👀 둘러보기 중 · 가입</button>}
       <div className="relative pointer-events-auto">
         <button className="rounded-full" onClick={() => setMenuOpen(!menuOpen)} aria-label="내 메뉴"><DogBadge profile={me} size={44} /></button>
         {menuOpen && (
@@ -50,13 +54,19 @@ export function TopBar() {
               <div className="text-xs text-cocoa-soft mt-0.5">🏠 {me.residence ? residenceLabel(me.residence) : '아직 입주 전'}</div>
             </div>
             <MenuItem onClick={() => openCommunity('meetups')}>🏘️ 멍글 동네 (모임·자랑)</MenuItem>
+            {guest ? <>
+              <MenuItem onClick={() => set({ joinPrompt: true })}>🐶 회원가입하고 입주하기</MenuItem>
+              <MenuItem onClick={() => void goSignup()}>🚪 둘러보기 끝내기</MenuItem>
+            </> : <>
             <MenuItem onClick={() => { set({ panel: 'none', benchMenu: null }); void joinPark('lobby-1'); }}>🏢 아파트 로비</MenuItem>
             {!DEMO && <MenuItem onClick={() => set({ screenSubmit: {} })}>📺 광장 스크린에 올리기</MenuItem>}
             <MenuItem onClick={() => set({ panel: 'avatar' })}>✨ 아바타·강아지 꾸미기</MenuItem>
+            <MenuItem onClick={() => set({ dogSheet: me.id })}>🐶 우리 강아지 프로필·사진첩</MenuItem>
             {DEMO ? <MenuItem onClick={resetDemo}>🔄 처음부터 다시 만들기</MenuItem> : <>
               <MenuItem onClick={() => set({ panel: 'settings' })}>🔒 개인정보·차단 설정</MenuItem>
               {me.role === 'admin' && <MenuItem onClick={() => set({ panel: 'admin' })}>🛡️ 운영 관리 (신고·스크린)</MenuItem>}
               <MenuItem onClick={logout}>🚪 로그아웃</MenuItem>
+            </>}
             </>}
           </div>
         )}

@@ -9,7 +9,7 @@ import { api } from '../lib/api';
 import { APARTMENT_ENTRANCE, CAFE_ENTRANCE, MEETING_BOARD, SHOP_ENTRANCE } from '@shared/world';
 import { openCommunity } from './Community';
 
-const DOORS = [
+export const DOORS = [
   { e: APARTMENT_ENTRANCE, id: 'lobby-1', label: '🏢 아파트 로비 들어가기' },
   { e: CAFE_ENTRANCE, id: 'cafe-1', label: '☕ 애견카페 들어가기' },
   { e: SHOP_ENTRANCE, id: 'shop-1', label: '🛍️ 애견샵 들어가기' },

@@ -1,5 +1,5 @@
 // 내 아바타 조작 + 강아지 산책 / 다른 사용자 아바타 보간 렌더링
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { BUBBLE_RANGE, DogAnim, GRAVITY, HumanAnim, JUMP_VELOCITY, RUN_SPEED, WALK_SPEED, type NetState, type PublicProfile } from '@shared/protocol';
@@ -16,6 +16,7 @@ import { rendered, sample } from '../net/remote';
 import { leaveSeat, sendState, sitOnSeat } from '../net/socket';
 import { openProfile } from '../net/socket';
 import { useStore } from '../store';
+import { petLow } from './fx';
 
 const TAG_RANGE = 24;
 
@@ -71,8 +72,15 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
       m.speed = 0;
     }
 
+    // 서버가 시작한 배변 / 쓰다듬기를 받음 → 강아지 행동
+    if (local.poopStart) { brain.startPoop(Math.max(500, 2600 - (performance.now() - local.poopStart))); local.poopStart = 0; }
+    if (local.petHold) { brain.hold(1900, local.petHold.x, local.petHold.z); local.petHold = null; }
+    // 쓰다듬기·줍기·버리기 동작 중에는 제자리에서 대상 쪽을 바라봄 (이동 입력 무시)
+    const act = local.action && performance.now() < local.action.until ? local.action : null;
+    if (!act) local.action = null;
+
     // 카메라 기준 이동 방향
-    const mv = readMove();
+    const mv = act ? { x: 0, y: 0, run: false } : readMove();
     const fx = -Math.sin(cam.yaw), fz = -Math.cos(cam.yaw);
     const rx = -fz, rz = fx;
     let dx = fx * mv.y + rx * mv.x, dz = fz * mv.y + rz * mv.x;
@@ -147,6 +155,10 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
       dx /= mag; dz /= mag;
       local.rot = turnToward(local.rot, Math.atan2(dx, dz), dt * 12);
     }
+    if (act) {
+      m.speed = 0;
+      local.rot = turnToward(local.rot, Math.atan2(act.faceX - local.x, act.faceZ - local.z), dt * 10);
+    }
     if (m.speed > 0.01) {
       // 바라보는 방향으로 이동 (급회전 시 미끄러지지 않도록)
       local.x += Math.sin(local.rot) * m.speed * dt;
@@ -166,7 +178,9 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
     const now = performance.now();
     const waving = now < local.waveUntil;
     hd.jumpY = local.jumpY;
-    hd.anim = seat ? HumanAnim.Sit : local.jumpY > 0 ? HumanAnim.Jump : realSpeed > WALK_SPEED * 1.3 ? HumanAnim.Run : realSpeed > 0.15 ? HumanAnim.Walk : waving ? HumanAnim.Wave : HumanAnim.Idle;
+    hd.petLow = act?.petLow ?? hd.petLow;
+    hd.bag = local.bag;
+    hd.anim = act ? act.anim : seat ? HumanAnim.Sit : local.jumpY > 0 ? HumanAnim.Jump : realSpeed > WALK_SPEED * 1.3 ? HumanAnim.Run : realSpeed > 0.15 ? HumanAnim.Walk : waving ? HumanAnim.Wave : HumanAnim.Idle;
     hd.wave = waving ? 1 : 0;
     local.humanAnim = hd.anim;
 
@@ -203,7 +217,7 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
     }
   });
 
-  return <AvatarPair profile={profile} refs={refs} isMe />;
+  return <AvatarPair profile={profile} refs={refs} isMe onSelectDog={() => useStore.setState({ dogMenu: profile.id })} />;
 }
 
 export function RemotePlayer({ profile }: { profile: PublicProfile }) {
@@ -211,6 +225,8 @@ export function RemotePlayer({ profile }: { profile: PublicProfile }) {
   const prev = useRef<{ x: number; z: number; dx: number; dz: number } | null>(null);
   const jump = useRef({ y: 0, v: 0, lastAnim: 0 });
   const blocked = useStore((s) => s.blocked.some((b) => b.id === profile.id));
+  const bag = useStore((s) => !!s.bags[profile.id]);
+  useEffect(() => { refs.humanDriver.current.bag = bag; }, [bag, refs.humanDriver]);
 
   useFrame((_, rawDt) => {
     const dt = Math.max(Math.min(rawDt, 0.05), 1e-3);
@@ -236,6 +252,7 @@ export function RemotePlayer({ profile }: { profile: PublicProfile }) {
     hd.jumpY = j.y;
     hd.anim = ha === HumanAnim.Jump ? (moved / dt > WALK_SPEED * 1.3 ? HumanAnim.Run : moved / dt > 0.15 ? HumanAnim.Walk : HumanAnim.Idle) : ha;
     hd.wave = ha === HumanAnim.Wave ? 1 : 0;
+    hd.petLow = petLow.get(profile.id) ?? 0.6;
     const dd = refs.dogDriver.current;
     dd.phase = advancePhase(dd.phase, dmoved, dmoved / dt, DOG_STEP.walk * scale, DOG_STEP.run * scale);
     dd.anim = da;
@@ -256,5 +273,5 @@ export function RemotePlayer({ profile }: { profile: PublicProfile }) {
   });
 
   if (blocked) return null;
-  return <AvatarPair profile={profile} refs={refs} onSelect={() => openProfile(profile.id)} />;
+  return <AvatarPair profile={profile} refs={refs} onSelect={() => openProfile(profile.id)} onSelectDog={() => useStore.setState({ dogMenu: profile.id })} />;
 }

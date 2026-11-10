@@ -11,6 +11,9 @@ export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
+/** 가입 안내 창 열기 (store 쪽에서 연결) */
+export const membersOnly = { open: () => {} };
+
 export async function api<T = any>(path: string, opts: { method?: string; body?: unknown; token?: string | null } = {}): Promise<T> {
   if (DEMO) return demoApi(path, opts) as Promise<T>;
   const token = opts.token === undefined ? tokenStore.get() : opts.token;
@@ -21,6 +24,8 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
   });
   let data: any = null;
   try { data = await res.json(); } catch { /* 빈 응답 */ }
+  // 둘러보기 방문자가 주민 전용 기능을 쓰려 하면 가입 안내 창
+  if (data?.code === 'members_only') membersOnly.open();
   if (!res.ok) throw new ApiError(res.status, data?.error ?? '서버와 통신하지 못했어요.');
   return data as T;
 }

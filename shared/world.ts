@@ -106,6 +106,14 @@ export const SHOP_ENTRANCE = entranceOf('shop');
 const MB_ANGLE = Math.PI / 2 + 0.45;
 export const MEETING_BOARD = { x: Math.sin(MB_ANGLE) * 6.3, z: Math.cos(MB_ANGLE) * 6.3, rot: MB_ANGLE + Math.PI, r: 2.2 };
 
+/** 강아지 배변봉투 전용 휴지통 — 광장 가장자리 4곳 + 순환 산책로 4곳 (산책 동선 위) */
+export interface BinDef { id: string; x: number; z: number; rot: number }
+export const BINS: BinDef[] = [
+  ...[0, 1, 2, 3].map((k) => { const a = Math.PI / 4 + k * (Math.PI / 2) + 0.34; const r = PLAZA_RADIUS + 0.85; return { id: `p${k}`, x: Math.sin(a) * r, z: Math.cos(a) * r, rot: a + Math.PI }; }),
+  ...[0, 1, 2, 3].map((k) => { const a = 0.2 + k * (Math.PI / 2); const r = RING_RADIUS + PATH_WIDTH / 2 + 0.6; return { id: `r${k}`, x: Math.sin(a) * r, z: Math.cos(a) * r, rot: a + Math.PI }; }),
+];
+export const BIN_BY_ID = new Map(BINS.map((b) => [b.id, b]));
+
 export const LAMPS: LampDef[] = [];
 for (const a of RADIAL_ANGLES) {
   for (const d of [9.5, 21]) {
@@ -154,6 +162,7 @@ export const COLLIDERS_CIRCLE: Circle[] = [
   { x: BIG_SCREEN.x + BIG_SCREEN.postX, z: BIG_SCREEN.z, r: 0.3 },
   { x: PHOTO_ZONE.x, z: PHOTO_ZONE.z, r: 0.55 },
   { x: MEETING_BOARD.x, z: MEETING_BOARD.z, r: 0.6 },
+  ...BINS.map((b) => ({ x: b.x, z: b.z, r: 0.32 })),
 ];
 
 export const COLLIDERS_BOX: Box[] = BUILDINGS.map((b) => ({ x: b.x, z: b.z, hw: b.w / 2 + 0.1, hd: b.d / 2 + 0.1 }));

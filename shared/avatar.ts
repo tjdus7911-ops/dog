@@ -184,3 +184,7 @@ export function validateDog(input: any): DogAvatar | null {
     marking: v.marking, earSize: v.earSize, build: v.build, bodyLen: v.bodyLen, legLen: v.legLen,
   };
 }
+
+/** 비회원 둘러보기 방문자 캐릭터 (회원 아바타와 구분되는 고정 모습: 세이지색 버킷햇 + 줄무늬 티) */
+export const GUEST_HUMAN: HumanAvatar = { ...DEFAULT_HUMAN, hairStyle: 'short', top: 'stripe', topColor: CLOTH_COLORS[3], hat: 'bucket', hatColor: CLOTH_COLORS[3] };
+export const GUEST_DOG: DogAvatar = { ...BREED_PRESETS.maltese.dog, harness: HARNESS_COLORS[3] };

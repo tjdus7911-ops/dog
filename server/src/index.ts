@@ -9,13 +9,14 @@ import * as persist from './persist';
 import { canVisit } from './access';
 import { APARTMENT_BUILDINGS, isValidUnit, unitsOf, type UnitInfo } from '../../shared/apartment';
 import { GUESTBOOK_MAX_LEN, HOME_VISIBILITY, validateLayout, type HomeView, type HomeVisibility } from '../../shared/home';
-import { hashPassword, issueToken, requireAdmin, requireAuth, revokeToken, verifyPassword, type AuthedRequest } from './auth';
+import { hashPassword, issueToken, requireAdmin, requireAuth, revokeToken, userFromToken, verifyPassword, type AuthedRequest } from './auth';
 import { setupRealtime } from './realtime';
 import { filterProfanity, RateLimiter, sanitize } from './moderation';
 import { AnalysisError, dogAnalyzer, type DogPhoto } from './dogAnalyzer';
 import { validateDog, validateHuman } from '../../shared/avatar';
 import { DEFAULT_PRIVACY } from '../../shared/protocol';
 import { claimedItems, registerCommunity, screenExtras } from './community';
+import { ownedPhotoUrls, registerPets, retireDogPhoto } from './pets';
 
 const PORT = Number(process.env.PORT ?? 3001);
 const app = express();
@@ -24,6 +25,16 @@ app.disable('x-powered-by');
 if (process.env.RENDER || process.env.MUNGLE_TRUST_PROXY) app.set('trust proxy', 1);
 app.use(express.json({ limit: '6mb' }));
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
+
+// ---------- 비회원 둘러보기: 읽기(GET)만 허용하고 쓰기는 회원 전용 ----------
+const MEMBER_ERROR = { error: '이 기능은 멍글마을 주민만 이용할 수 있어요.', code: 'members_only' };
+app.use('/api', (req, res, next) => {
+  if (req.method === 'GET' || req.path.startsWith('/auth/')) return next();
+  const h = req.headers.authorization ?? '';
+  const u = h.startsWith('Bearer ') ? userFromToken(h.slice(7)) : null;
+  if (u && !('banned' in u) && u.role === 'guest') return res.status(403).json(MEMBER_ERROR);
+  next();
+});
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: process.env.MUNGLE_CORS?.split(',') ?? false }, maxHttpBufferSize: 64 * 1024 });
@@ -67,6 +78,16 @@ app.post('/api/auth/login', (req, res) => {
   if (u.banned_until > Date.now()) return res.status(403).json({ error: `이용이 정지된 계정입니다. (${new Date(u.banned_until).toLocaleString('ko-KR')}까지)` });
   res.json({ token: issueToken(u.id), profile: repo.getMyProfile(u.id) });
 });
+
+// 둘러보기: 임시 방문자 계정 (하루 뒤 자동 정리)
+const guestLimiter = new RateLimiter(10, 3600_000);
+app.post('/api/auth/guest', (req, res) => {
+  if (!guestLimiter.allow(ip(req))) return res.status(429).json({ error: '잠시 후 다시 시도해 주세요.' });
+  const { hash, salt } = hashPassword(crypto.randomBytes(24).toString('hex'));
+  const id = repo.createGuest(hash, salt);
+  res.json({ token: issueToken(id), profile: repo.getMyProfile(id) });
+});
+setInterval(() => { try { repo.purgeGuests(Date.now() - 24 * 3600_000); } catch { /* 무시 */ } }, 3600_000).unref();
 
 app.post('/api/auth/logout', requireAuth, (req, res) => {
   revokeToken((req as AuthedRequest).token);
@@ -156,7 +177,7 @@ app.post('/api/me/dog-photo', requireAuth, (req, res) => {
   persist.saveUpload(file, buf);
   const old = repo.getDogPhoto(id);
   repo.setDogPhoto(id, `/uploads/${file}`);
-  if (old) { fs.rm(path.join(repo.UPLOAD_DIR, path.basename(old)), { force: true }, () => {}); persist.removeUpload(path.basename(old)); }
+  if (old && retireDogPhoto(id, old)) removeImage(old);
   rt.profileChanged(id);
   res.json({ profile: repo.getMyProfile(id) });
 });
@@ -165,7 +186,7 @@ app.delete('/api/me/dog-photo', requireAuth, (req, res) => {
   const id = (req as AuthedRequest).userId;
   const old = repo.getDogPhoto(id);
   repo.setDogPhoto(id, null);
-  if (old) { fs.rm(path.join(repo.UPLOAD_DIR, path.basename(old)), { force: true }, () => {}); persist.removeUpload(path.basename(old)); }
+  if (old && retireDogPhoto(id, old)) removeImage(old);
   rt.profileChanged(id);
   res.json({ profile: repo.getMyProfile(id) });
 });
@@ -273,6 +294,9 @@ app.put('/api/home/me/layout', requireAuth, (req, res) => {
   if (!repo.getResidence(me)) return res.status(400).json({ error: '입주한 뒤 집을 꾸밀 수 있어요.' });
   const layout = validateLayout(req.body?.layout, new Set(claimedItems(me)));
   if (!layout) return res.status(400).json({ error: '가구 배치 정보가 올바르지 않아요.' });
+  // 액자 사진은 내가 올린 사진만 걸 수 있음 (다른 사람 사진 주소를 넣어도 거부)
+  const mine = ownedPhotoUrls(me);
+  if (layout.some((i) => i.photo && !mine.has(i.photo))) return res.status(403).json({ error: '내가 올린 사진만 액자에 걸 수 있어요.' });
   repo.saveHome(me, { layout });
   rt.homeUpdated(me);
   res.json({ home: homeView(me, me) });
@@ -498,6 +522,9 @@ app.post('/api/admin/notices', requireAuth, requireAdmin, (req, res) => {
   rt.screenUpdated();
   res.json({ ok: true });
 });
+
+// ---------- 강아지 프로필 · 집 액자 사진 ----------
+registerPets(app, { saveImage, removeImage, profileChanged: (u) => rt.profileChanged(u) });
 
 // ---------- 멍글 동네 (강아지 자랑·산책 모임·강아지 모임·애견샵) ----------
 registerCommunity(app, { saveImage, removeImage, notify: (u, e, p) => rt.notify(u, e, p), screenUpdated: () => rt.screenUpdated() });

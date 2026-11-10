@@ -3,8 +3,18 @@ import type { HomeView } from '@shared/home';
 import type { ScreenSlide } from '@shared/screen';
 import type { MeetupMessage } from '@shared/community';
 import type {
-  ChatMessage, DirectMessage, FriendEntry, FriendStatus, MyProfile, NotificationItem, ParkInfo, PublicProfile, SeatMap,
+  ChatMessage, DirectMessage, FriendEntry, FriendStatus, MyProfile, NotificationItem, ParkInfo, PoopInfo, PublicProfile, SeatMap,
 } from '@shared/protocol';
+
+/** 사진 크게 보기 (광장 스크린·액자·강아지 프로필 공통) */
+export interface ViewerState {
+  photos: string[];
+  index: number;
+  title?: string;
+  caption?: string;
+  /** '강아지 프로필 보기' 버튼 대상 */
+  dogOwnerId?: number;
+}
 
 export type CommunityTab = 'meetups' | 'clubs' | 'posts';
 /** 멍글 동네 화면 상태: 탭 + 열어 본 모임/강아지 모임 */
@@ -80,6 +90,20 @@ interface State {
   eventsOpen: boolean;
   /** 채팅을 닫아 둔 동안 새로 온 공원 채팅 수 */
   chatUnread: number;
+  /** 지금 공간의 배변 (서버) / 배변봉투를 든 사용자 */
+  poops: Record<string, PoopInfo>;
+  bags: Record<number, true>;
+  /** 다른 강아지를 눌렀을 때 메뉴 (그 강아지 보호자 id) */
+  dogMenu: number | null;
+  /** 강아지 프로필 시트 (보호자 id) / 내 강아지 프로필 편집 */
+  dogSheet: number | null;
+  dogEdit: boolean;
+  /** 사진 크게 보기 */
+  viewer: ViewerState | null;
+  /** 둘러보기 방문자가 주민 전용 기능을 눌렀을 때 가입 안내 */
+  joinPrompt: boolean;
+  /** 친구 집 놀러 가기: 로비에 도착하면 이 집 문 앞 안내를 바로 띄움 */
+  lobbyFocus: number | null;
 }
 
 export const useStore = create<State>()(() => ({
@@ -127,6 +151,14 @@ export const useStore = create<State>()(() => ({
   mapOpen: false,
   eventsOpen: false,
   chatUnread: 0,
+  poops: {},
+  bags: {},
+  dogMenu: null,
+  dogSheet: null,
+  dogEdit: false,
+  viewer: null,
+  joinPrompt: false,
+  lobbyFocus: null,
 }));
 
 export const set = useStore.setState;

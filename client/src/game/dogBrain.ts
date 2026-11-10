@@ -22,6 +22,27 @@ export class DogBrain {
   /** 보호자가 벤치에 앉아 있는 동안 대기 자리에서 보낸 시간 */
   private restTime = 0;
 
+  /** 서버가 시작한 배변: 이 시각까지 제자리에서 볼일 자세 */
+  poopUntil = 0;
+  /** 이 시각까지 제자리에 서서 지정한 곳(쓰다듬는 사람·보호자)을 바라봄 */
+  holdUntil = 0;
+  holdLook: { x: number; z: number } | null = null;
+  /** 배변 후 보호자를 바라보기 */
+  lookOwnerUntil = 0;
+
+  /** 배변 시작 (서버 이벤트) */
+  startPoop(ms: number) {
+    const now = performance.now();
+    this.poopUntil = now + ms;
+    this.lookOwnerUntil = now + ms + 2200;
+  }
+  /** 쓰다듬기를 받는 동안 멈춰서 상대를 바라봄 */
+  hold(ms: number, lookX: number, lookZ: number) {
+    if (performance.now() < this.poopUntil) return;
+    this.holdUntil = performance.now() + ms;
+    this.holdLook = { x: lookX, z: lookZ };
+  }
+
   place(x: number, z: number, rot: number) {
     this.x = x; this.z = z; this.rot = rot; this.speed = 0; this.idleTime = 0; this.wanderTarget = null;
   }
@@ -69,6 +90,28 @@ export class DogBrain {
       return;
     }
     this.restTime = 0;
+
+    // 배변 중 / 쓰다듬기를 받는 중 / 배변 후 보호자 바라보기: 제자리에 멈춘다
+    const nowMs = performance.now();
+    const pooping = nowMs < this.poopUntil;
+    const holding = nowMs < this.holdUntil;
+    const lookingOwner = !pooping && nowMs < this.lookOwnerUntil && !ownerMoving;
+    if (pooping || holding || lookingOwner) {
+      this.speed = 0;
+      this.wanderTarget = null;
+      const lt = holding && this.holdLook ? this.holdLook : !pooping ? { x: ox, z: oz } : null;
+      if (lt) this.rot = turnToward(this.rot, Math.atan2(lt.x - this.x, lt.z - this.z), dt * 6);
+      // 보호자가 멀리 가면 목줄에 끌려간다
+      const od = Math.hypot(this.x - ox, this.z - oz);
+      if (od > MAX_DIST) {
+        this.x = ox + ((this.x - ox) / od) * MAX_DIST;
+        this.z = oz + ((this.z - oz) / od) * MAX_DIST;
+        [this.x, this.z] = space.collide(this.x, this.z, 0.22 * scale);
+      }
+      this.anim = pooping ? DogAnim.Poop : DogAnim.Stand;
+      this.look += (0 - this.look) * Math.min(1, dt * 4);
+      return;
+    }
 
     // 인사: 가까운 다른 강아지 발견
     if (this.greetTimer > 0) this.greetTimer -= dt;

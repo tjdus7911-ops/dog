@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { set, useStore } from '../store';
-import { friendAction, goToFriend, openDm, openProfile, refreshFriends } from '../net/socket';
+import { friendAction, goToFriend, joinPark, openDm, openProfile, refreshFriends } from '../net/socket';
+import { get, toast } from '../store';
+import { residenceLabel } from '@shared/apartment';
+import type { PublicProfile } from '@shared/protocol';
 import { DogBadge, PanelHeader } from './common';
 import type { FriendEntry } from '@shared/protocol';
 
@@ -67,13 +70,15 @@ function FriendRow({ f }: { f: FriendEntry }) {
           <div className="font-display truncate">{p.nickname} <span className="text-xs text-cocoa-soft font-body">· 🐶 {p.dogName}</span></div>
           <div className="text-xs text-cocoa-soft truncate">{here ? '🌸 같은 공원에 있어요' : status}</div>
         </div>
-        <button className="text-cocoa-soft w-8 h-8 rounded-full hover:bg-cream-2" onClick={() => setMenu(!menu)} aria-label="더보기">⋯</button>
       </div>
-      <div className="flex gap-1.5 mt-2">
-        <button className="btn btn-ghost flex-1 py-1.5 text-sm relative border border-[#f1e2d2] !shadow-none" onClick={() => openDm(p)}>
-          💬 메시지{f.unread > 0 && <span className="ml-1 bg-[#ef6b5b] text-white rounded-full px-1.5 text-[11px]">{f.unread}</span>}
+      <div className="grid grid-cols-2 gap-1.5 mt-2">
+        <button className="btn btn-ghost py-2 text-sm relative border border-[#f1e2d2] !shadow-none" onClick={() => openDm(p)}>
+          💬 채팅하기{f.unread > 0 && <span className="ml-1 bg-[#ef6b5b] text-white rounded-full px-1.5 text-[11px]">{f.unread}</span>}
         </button>
-        {f.parkId && !here && <button className="btn btn-sage flex-1 py-1.5 text-sm !shadow-none" onClick={() => goToFriend(p.id)}>📍 함께 산책하기</button>}
+        <button className="btn btn-ghost py-2 text-sm border border-[#f1e2d2] !shadow-none" onClick={() => visitFriendHome(p)}>🏠 집 놀러 가기</button>
+        <button className="btn btn-ghost py-2 text-sm border border-[#f1e2d2] !shadow-none" onClick={() => set({ dogSheet: p.id, panel: 'none' })}>🐶 강아지 보기</button>
+        <button className={`btn py-2 text-sm !shadow-none border border-[#f1e2d2] ${menu ? 'btn-peach' : 'btn-ghost'}`} onClick={() => setMenu(!menu)}>🤝 친구 관계 관리</button>
+        {f.parkId && !here && <button className="btn btn-sage col-span-2 py-2 text-sm !shadow-none" onClick={() => goToFriend(p.id)}>📍 {f.parkName}에서 함께 산책하기</button>}
       </div>
       {menu && (
         <div className="flex gap-1.5 mt-2">
@@ -86,3 +91,12 @@ function FriendRow({ f }: { f: FriendEntry }) {
 }
 
 const Empty = ({ text }: { text: string }) => <p className="text-sm text-cocoa-soft text-center py-10 px-4 leading-relaxed">{text}</p>;
+
+/** 친구 집 놀러 가기: 동·호실 확인 → 아파트 로비(복도)로 이동 → 그 집 문 앞 안내에서 방문하기 */
+async function visitFriendHome(p: PublicProfile) {
+  if (!p.residence) { toast(`${p.nickname}님은 아직 아파트에 입주하지 않았어요.`); return; }
+  set({ panel: 'none' });
+  if (get().park?.kind !== 'lobby' && !(await joinPark('lobby-1'))) return;
+  toast(`🏢 ${residenceLabel(p.residence)} ${p.nickname}님 집으로 가요`);
+  set({ lobbyFocus: p.id });
+}

@@ -1,29 +1,36 @@
 // 서버 실시간 연결 & 이벤트 → 스토어 반영
 import { io, type Socket } from 'socket.io-client';
 import { get, notify, set, toast } from '../store';
-import { tokenStore } from '../lib/api';
-import { clearRemotes, pushSnapshot, removeRemote } from './remote';
+import { membersOnly, tokenStore } from '../lib/api';
+import { clearRemotes, pushSnapshot, removeRemote, rendered } from './remote';
 import { local } from '../game/local';
 import { DEMO } from '../demo';
 import { api } from '../lib/api';
 import { setSpace } from '../game/space';
 import { cam } from '../game/CameraRig';
 import { PLACES, SPAWNS, homeSpaceId } from '@shared/spaces';
-import { APARTMENT_ENTRANCE, CAFE_ENTRANCE, SHOP_ENTRANCE } from '@shared/world';
+import { APARTMENT_ENTRANCE, BIN_BY_ID, CAFE_ENTRANCE, SHOP_ENTRANCE } from '@shared/world';
+import { ACTION_MS, PET_LOW, binOpenAt, petLow, playPet } from '../game/fx';
+import { DOG_SCALE } from '../game/models/Dog';
 import type { MeetupMessage } from '@shared/community';
 import type { HomeView } from '@shared/home';
 import type {
-  ChatMessage, DirectMessage, FriendEntry, FriendStatus, NetState, ParkInfo, PlayerSnapshot, PublicProfile, SeatMap,
+  ChatMessage, DirectMessage, FriendEntry, FriendStatus, NetState, ParkInfo, PetEvent, PlayerSnapshot, PoopInfo, PublicProfile, SeatMap,
 } from '@shared/protocol';
+import { HumanAnim } from '@shared/protocol';
+
+membersOnly.open = () => set({ joinPrompt: true });
 
 let socket: Socket | null = null;
 
-type AckRes<T> = ({ ok: true } & T) | { ok: false; error: string };
+type AckRes<T> = ({ ok: true } & T) | { ok: false; error: string; code?: string };
 
 export function request<T = {}>(ev: string, data?: unknown): Promise<AckRes<T>> {
   return new Promise((resolve) => {
     if (!socket?.connected) return resolve({ ok: false, error: '서버와 연결되어 있지 않아요.' });
     socket.timeout(8000).emit(ev, data, (err: unknown, res: AckRes<T>) => {
+      // 둘러보기 방문자가 주민 전용 기능을 누르면 가입 안내
+      if (!err && !res.ok && res.code === 'members_only') membersOnly.open();
       resolve(err ? { ok: false, error: '서버 응답이 없어요. 잠시 후 다시 시도해 주세요.' } : res);
     });
   });
@@ -38,6 +45,7 @@ export function connect() {
     // 미리보기: 서버 연결 없이 혼자 산책
     set({ connection: 'online', parks: PLACES.map((p) => ({ ...p, count: p.kind === 'park' && p.id === 'central-1' ? 1 : 0, capacity: 1 })), players: {} });
     void joinPark('central-1');
+    startDemoPoop();
     return;
   }
   disconnect();
@@ -97,6 +105,20 @@ export function connect() {
     notify({ id: `ms-${v.meetupId}`, kind: 'system', fromId: 0, fromNickname: '멍글 동네', text: `'${v.title}' 모임이 곧 시작해요! (${v.place})`, ts: Date.now() });
     set({ meetupAlert: v });
   });
+  // ---------- 쓰다듬기 · 배변 · 배변봉투 · 휴지통 ----------
+  s.on('pet', (e: PetEvent) => { if (e.fromId !== get().me?.id) onPet(e); });
+  s.on('poop:begin', (v: PoopInfo) => {
+    if (v.ownerId !== get().me?.id) return;
+    local.poopStart = performance.now();
+    toast(`💩 ${get().me?.dogName ?? '강아지'}가 볼일을 보고 있어요. 다 보면 치워 주세요!`);
+  });
+  s.on('poop:add', (v: PoopInfo) => set((st) => ({ poops: { ...st.poops, [v.id]: v } })));
+  s.on('poop:remove', ({ id }: { id: string }) => set((st) => { const poops = { ...st.poops }; delete poops[id]; return { poops }; }));
+  s.on('bag', ({ userId, holding }: { userId: number; holding: boolean }) => {
+    if (userId === get().me?.id) local.bag = holding;
+    set((st) => { const bags = { ...st.bags }; if (holding) bags[userId] = true; else delete bags[userId]; return { bags }; });
+  });
+  s.on('bin', ({ binId }: { binId: string }) => binOpenAt.set(binId, performance.now()));
   s.on('seats', (seats: SeatMap) => {
     set({ seats });
     // 서버에서 내 자리가 해제됐다면(멀리 이동 등) 로컬 상태도 정리
@@ -201,9 +223,9 @@ export async function joinPark(parkId?: string, from?: DoorFrom, quiet = false):
 }
 async function doJoin(parkId: string | undefined, from: DoorFrom | undefined, quiet: boolean) {
   if (DEMO) return demoJoin(parkId ?? 'central-1', from);
-  const res = await request<{ park: ParkInfo; spawn: NetState; players: PlayerSnapshot[]; seats?: SeatMap }>('park:join', parkId ? { parkId, from } : undefined);
+  const res = await request<{ park: ParkInfo; spawn: NetState; players: PlayerSnapshot[]; seats?: SeatMap; poops?: PoopInfo[]; bags?: number[] }>('park:join', parkId ? { parkId, from } : undefined);
   if (!res.ok) {
-    if (!quiet) toast(res.error, 'error');
+    if (!quiet && res.code !== 'members_only') toast(res.error, 'error');
     if (!get().park && parkId && !quiet) return doJoin(undefined, undefined, true); // 지정 장소 입장 실패 시 빈 공원으로
     return false;
   }
@@ -211,7 +233,9 @@ async function doJoin(parkId: string | undefined, from: DoorFrom | undefined, qu
   enterSpace(res.park, res.spawn);
   const players: Record<number, PublicProfile> = {};
   for (const p of res.players) { players[p.profile.id] = p.profile; pushSnapshot(p.profile.id, p.state); }
-  set({ players, seats: res.seats ?? {} });
+  const me = get().me?.id;
+  local.bag = !!me && (res.bags ?? []).includes(me);
+  set({ players, seats: res.seats ?? {}, poops: Object.fromEntries((res.poops ?? []).map((p) => [p.id, p])), bags: Object.fromEntries((res.bags ?? []).map((id) => [id, true as const])) });
   const list = await request<{ parks: ParkInfo[] }>('park:list');
   if (list.ok) set({ parks: list.parks });
   return true;
@@ -226,7 +250,8 @@ function enterSpace(park: ParkInfo, spawn: NetState) {
   cam.pendingReset = park.kind;
   setSpace(park.kind);
   const moved = get().park?.id !== park.id;
-  set({ park, players: {}, chat: [], chatUnread: 0, bubbles: {}, seats: {}, seated: null, benchMenu: null, home: null, homeEdit: false, lobbyPanel: park.kind === 'lobby', shopOpen: false, ...(moved ? { community: null } : {}) });
+  local.action = null; local.poopStart = 0; local.petHold = null;
+  set({ park, players: {}, poops: {}, dogMenu: null, chat: [], chatUnread: 0, bubbles: {}, seats: {}, seated: null, benchMenu: null, home: null, homeEdit: false, lobbyPanel: park.kind === 'lobby', shopOpen: false, ...(moved ? { community: null } : {}) });
   if (park.kind === 'home' && park.ownerId) void loadHome(park.ownerId);
 }
 
@@ -341,4 +366,113 @@ export async function report(userId: number, reason: string, detail: string) {
   if (res.ok) toast('신고가 접수되었어요. 운영팀이 확인할게요.');
   else toast(res.error, 'error');
   return res.ok;
+}
+
+// ---------- 쓰다듬기 · 배변 줍기 · 봉투 버리기 ----------
+/** 강아지 위치 (내 강아지는 로컬, 다른 강아지는 화면에 그려진 위치) */
+export function dogPos(userId: number): { x: number; z: number } | undefined {
+  if (userId === get().me?.id) return { x: local.dogX, z: local.dogZ };
+  const r = rendered.get(userId);
+  return r ? { x: r.dx, z: r.dz } : undefined;
+}
+function dogSize(userId: number) {
+  const me = get().me;
+  return userId === me?.id ? me.dog.size : get().players[userId]?.dog.size ?? 'medium';
+}
+/** 쓰다듬기 이벤트 반영: 하트·강아지 반응, 내 강아지면 멈춰서 상대를 바라봄 */
+function onPet(e: PetEvent) {
+  const at = dogPos(e.targetId);
+  petLow.set(e.fromId, PET_LOW[e.size]);
+  playPet(e.targetId, at, DOG_SCALE[dogSize(e.targetId)]);
+  if (e.targetId === get().me?.id) {
+    const from = e.fromId === e.targetId ? { x: local.x, z: local.z } : rendered.get(e.fromId);
+    if (from) local.petHold = { x: from.x, z: from.z };
+  }
+}
+function startAction(anim: number, ms: number, face: { x: number; z: number } | undefined, low = 0.6) {
+  local.moveTarget = null;
+  local.action = { anim, until: performance.now() + ms, petLow: low, faceX: face?.x ?? local.x + Math.sin(local.rot), faceZ: face?.z ?? local.z + Math.cos(local.rot) };
+}
+let busy = false;
+/** 강아지 쓰다듬기 (내 강아지·다른 강아지) — 서버가 거리·허용 여부를 확인 */
+export async function petDog(targetId: number) {
+  if (busy || local.action) return false;
+  const size = dogSize(targetId);
+  if (DEMO) {
+    const e: PetEvent = { fromId: get().me!.id, targetId, size, ts: Date.now() };
+    startAction(HumanAnim.Pet, ACTION_MS.pet, dogPos(targetId), PET_LOW[size]);
+    onPet(e);
+    return true;
+  }
+  busy = true;
+  try {
+    const res = await request<{ event: PetEvent }>('pet', { targetId });
+    if (!res.ok) { if (res.code !== 'members_only') toast(res.error, 'error'); return false; }
+    startAction(HumanAnim.Pet, ACTION_MS.pet, dogPos(targetId), PET_LOW[size]);
+    onPet(res.event);
+    return true;
+  } finally { busy = false; }
+}
+/** 내 강아지 배변 줍기 */
+export async function pickupPoop(id: string) {
+  if (busy || local.action) return false;
+  const p = get().poops[id];
+  if (DEMO) {
+    if (!p) return false;
+    startAction(HumanAnim.Scoop, ACTION_MS.scoop, p);
+    set((st) => { const poops = { ...st.poops }; delete poops[id]; return { poops, bags: { ...st.bags, [st.me!.id]: true } }; });
+    local.bag = true;
+    toast('🛍️ 배변봉투에 담았어요. 근처 휴지통에 버려 주세요!');
+    return true;
+  }
+  busy = true;
+  try {
+    const res = await request('poop:pickup', { id });
+    if (!res.ok) { toast(res.error, 'error'); return false; }
+    startAction(HumanAnim.Scoop, ACTION_MS.scoop, p);
+    toast('🛍️ 배변봉투에 담았어요. 근처 휴지통에 버려 주세요!');
+    return true;
+  } finally { busy = false; }
+}
+/** 휴지통에 봉투 버리기 */
+export async function disposeBag(binId: string) {
+  if (busy || local.action) return false;
+  const bin = BIN_BY_ID.get(binId);
+  if (DEMO) {
+    startAction(HumanAnim.Toss, ACTION_MS.toss, bin);
+    binOpenAt.set(binId, performance.now());
+    local.bag = false;
+    set((st) => { const bags = { ...st.bags }; delete bags[st.me!.id]; return { bags }; });
+    toast('깨끗한 산책 완료! 🐾');
+    return true;
+  }
+  busy = true;
+  try {
+    const res = await request('bag:dispose', { binId });
+    if (!res.ok) { toast(res.error, 'error'); return false; }
+    startAction(HumanAnim.Toss, ACTION_MS.toss, bin);
+    toast('깨끗한 산책 완료! 🐾');
+    return true;
+  } finally { busy = false; }
+}
+
+/** 미리보기(서버 없음): 서버의 배변 규칙을 흉내 내 혼자 산책할 때도 배변 → 줍기 → 버리기를 해 볼 수 있게 */
+let demoPoopTimer = 0;
+function startDemoPoop() {
+  if (demoPoopTimer) return;
+  let walked = 0, n = 0;
+  demoPoopTimer = window.setInterval(() => {
+    const st = get();
+    if (st.park?.kind !== 'park' || !st.me) return;
+    if (local.humanAnim === HumanAnim.Walk || local.humanAnim === HumanAnim.Run) walked += 1;
+    if (walked < 40 || Object.values(st.poops).some((p) => p.ownerId === st.me!.id)) return;
+    walked = 0;
+    const x = Math.round(local.dogX * 100) / 100, z = Math.round(local.dogZ * 100) / 100;
+    local.poopStart = performance.now();
+    toast(`💩 ${st.me.dogName}가 볼일을 보고 있어요. 다 보면 치워 주세요!`);
+    window.setTimeout(() => {
+      const id = `demo-${++n}`;
+      set((s2) => ({ poops: { ...s2.poops, [id]: { id, ownerId: st.me!.id, x, z } } }));
+    }, 2600);
+  }, 1000);
 }

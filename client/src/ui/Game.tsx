@@ -12,9 +12,10 @@ import { NotificationsPanel } from './NotificationsPanel';
 import { SettingsPanel } from './SettingsPanel';
 import { ConnectionOverlay } from './ConnectionOverlay';
 import { BenchMenu } from './BenchMenu';
-import { PhotoModeBar, PhotoZonePrompt, ScreenDetail, ScreenSubmit } from './Photo';
+import { PhotoModeBar, ScreenDetail, ScreenSubmit } from './Photo';
 import { LobbyPanel } from './Apartment';
-import { CafeBar, EntrancePrompt, ShopBar } from './Places';
+import { CafeBar, ShopBar } from './Places';
+import { InteractBar, InteractionOverlays, useOverlayOpen } from './Interact';
 import { Community, MeetupAlert } from './Community';
 import { isTouchDevice } from '../game/input';
 import { BottomNav, EventsPanel, MoreSheet, PlaceBar, QuickMenu, VillageMap } from './MobileHud';
@@ -36,16 +37,20 @@ export default function Game() {
   const touch = isTouchDevice();
   const chatOpen = useStore((s) => s.chatOpen);
   const moreOpen = useStore((s) => s.moreOpen);
+  // 강아지 메뉴·프로필·사진 보기·가입 안내가 열리면 이동 UI(조이스틱·액션 버튼)를 숨김
+  const overlay = useOverlayOpen();
+  const mobileChat = touch && chatOpen;
   return (
     <div className="relative h-full w-full overflow-hidden">
       <div className="absolute inset-0"><Scene /></div>
       {!photo && <>
         <TopBar />
         {touch ? <PlaceBar /> : kind === 'park' && !community && <MiniMap />}
-        {!community && !(touch && (chatOpen || moreOpen)) && <QuickMenu />}
+        {!community && !overlay && !(touch && (chatOpen || moreOpen)) && <QuickMenu />}
         {!(community && touch) && <ChatPanel />}
-        {!community && <><ActionBar /><Joystick /></>}
-        {kind === 'park' && !community && <><BenchMenu /><EntrancePrompt /><PhotoZonePrompt /></>}
+        {!community && !overlay && <><ActionBar /><Joystick /></>}
+        {!community && !overlay && !mobileChat && !(touch && moreOpen) && <InteractBar />}
+        {kind === 'park' && !community && <BenchMenu />}
         {kind === 'lobby' && <LobbyPanel />}
         {kind === 'home' && <HomePanel />}
         {kind === 'cafe' && <CafeBar />}
@@ -59,6 +64,7 @@ export default function Game() {
       <VillageMap />
       <EventsPanel />
       <ScreenDetail />
+      <InteractionOverlays />
       <ScreenSubmit />
       {panel === 'friends' && <FriendsPanel />}
       {panel === 'notifications' && <NotificationsPanel />}

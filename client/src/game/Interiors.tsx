@@ -6,7 +6,7 @@ import { ROOM_HALF_D, ROOM_HALF_W } from '@shared/home';
 import { geo, mat } from './lowpoly';
 import { FurnitureModel } from './Furniture';
 import { itemKey } from '@shared/home';
-import { useStore } from '../store';
+import { set, useStore } from '../store';
 import { api } from '../lib/api';
 
 const W = ROOM_HALF_W, D = ROOM_HALF_D;
@@ -108,7 +108,9 @@ export function HomeFurniture() {
     <group>
       {home.layout.map((i) => (
         <group key={itemKey(i)} position={[i.x, 0, i.z]} rotation={[0, i.rot * (Math.PI / 2), 0]}>
-          <FurnitureModel type={i.type} n={i.n} photo={home.owner.dogPhoto} />
+          {/* 액자를 누르면 사진 크게 보기 (방문자도 볼 수 있음, 수정은 집주인 꾸미기 화면에서만) */}
+          <FurnitureModel type={i.type} n={i.n} photo={home.owner.dogPhoto} item={i}
+            onOpen={(url) => set({ viewer: { photos: [url], index: 0, title: `🖼️ ${home.owner.dogName}`, caption: `${home.owner.nickname}님 집 액자` } })} />
         </group>
       ))}
     </group>

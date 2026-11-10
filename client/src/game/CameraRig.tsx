@@ -10,7 +10,11 @@ import { space } from './space';
 import { isTouchDevice } from './input';
 import { BUILDINGS, TREES } from '@shared/world';
 
-export const cam = { yaw: 0, pitch: 0.36, dist: 10, lastUserInput: 0, pendingReset: null as null | SpaceKind };
+export const cam = {
+  yaw: 0, pitch: 0.36, dist: 10, lastUserInput: 0, pendingReset: null as null | SpaceKind,
+  /** 월드 좌표 → 화면 좌표(px) (자동 화면 테스트에서 3D 오브젝트를 실제로 누르기 위해 사용) */
+  project: (_x: number, _y: number, _z: number): [number, number] => [0, 0],
+};
 const MIN_DIST = 3.2, MAX_DIST = 20, MIN_PITCH = 0.08, MAX_PITCH = 1.25;
 
 /**
@@ -46,6 +50,11 @@ function clearDistance(t: THREE.Vector3, dir: THREE.Vector3, want: number) {
 
 export function CameraRig() {
   const { camera, gl } = useThree();
+  cam.project = (x, y, z) => {
+    const v = new THREE.Vector3(x, y, z).project(camera);
+    const r = gl.domElement.getBoundingClientRect();
+    return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height];
+  };
   const target = useRef(new THREE.Vector3(local.x, 1, local.z));
   const initialized = useRef(false);
   /** 충돌로 줄어든 실제 거리 (부드럽게 따라감) */

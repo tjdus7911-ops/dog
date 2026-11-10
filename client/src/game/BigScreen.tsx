@@ -7,9 +7,11 @@ import type { MeetupView } from '@shared/community';
 import { openCommunity } from '../ui/Community';
 import type { ScreenSlide } from '@shared/screen';
 import { api } from '../lib/api';
-import { set, useStore } from '../store';
+import { useStore } from '../store';
 import { geo, mat } from './lowpoly';
 import { DEMO } from '../demo';
+import { openScreenSlide } from '../ui/Interact';
+import { screenNow } from './fx';
 
 const TW = 1024, TH = 568;
 const SLIDE_MS = 6000;
@@ -110,6 +112,9 @@ export function BigScreen() {
     if (slides.length > 1 && t - last.current > SLIDE_MS) { last.current = t; idx.current = (idx.current + 1) % slides.length; repaint(); }
   });
 
+  // 지금 스크린에 보이는 슬라이드 ('자세히 보기'를 누른 시점의 내용을 고정해서 보여 줌)
+  screenNow.get = () => slides[idx.current % Math.max(1, slides.length)] ?? 'empty';
+
   const S = BIG_SCREEN;
   return (
     <group position={[S.x, 0, S.z]}>
@@ -120,7 +125,7 @@ export function BigScreen() {
         </group>
       ))}
       <group position={[0, S.y + S.h / 2 - 0.2, 0]}
-        onClick={(e) => { if (e.delta > 8) return; e.stopPropagation(); set({ screenDetail: slides[idx.current % Math.max(1, slides.length)] ?? 'empty' }); }}
+        onClick={(e) => { if (e.delta > 8) return; e.stopPropagation(); openScreenSlide(slides[idx.current % Math.max(1, slides.length)] ?? 'empty'); }}
         onPointerOver={(e) => { e.stopPropagation(); document.body.style.cursor = 'pointer'; }} onPointerOut={() => { document.body.style.cursor = ''; }}>
         <mesh geometry={geo.box(S.w + 0.4, S.h + 0.4, 0.3)} material={mat('#f39a7b')} />
         <mesh geometry={geo.box(S.w + 0.12, S.h + 0.12, 0.32)} material={mat('#fff8ef')} />

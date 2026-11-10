@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { geo, mat } from './lowpoly';
+import type { PlacedItem } from '@shared/home';
 
 const C = {
   wood: '#c99a6b', woodDark: '#a8794f', cream: '#fff6e8', coral: '#f39a7b', coralSoft: '#f7c9b4',
@@ -10,33 +11,126 @@ const C = {
 
 const LAMP_GLOW = new THREE.MeshLambertMaterial({ color: '#fff1b8', emissive: '#ffd77a', emissiveIntensity: 0.8 });
 
-/** 강아지 사진 텍스처 (없으면 null) */
+/**
+ * 액자용 사진 텍스처 (없으면 null)
+ * 3D 텍스처는 512px 이하로 줄여 GPU 메모리를 아끼고(크게 보기는 원본 사용), 같은 사진은 한 번만 읽는다.
+ */
+const imgCache = new Map<string, Promise<HTMLCanvasElement>>();
+function loadSmall(url: string) {
+  let p = imgCache.get(url);
+  if (!p) {
+    p = new Promise((res, rej) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const k = Math.min(1, 512 / Math.max(img.width, img.height));
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
+        c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
+        res(c);
+      };
+      img.onerror = () => { imgCache.delete(url); rej(new Error('load')); };
+      img.src = url;
+    });
+    imgCache.set(url, p);
+  }
+  return p;
+}
 function usePhoto(url: string | null) {
   const [tex, setTex] = useState<THREE.Texture | null>(null);
   useEffect(() => {
     if (!url) { setTex(null); return; }
     let alive = true;
-    new THREE.TextureLoader().load(url, (t) => { if (!alive) return; t.colorSpace = THREE.SRGBColorSpace; setTex(t); }, undefined, () => setTex(null));
+    loadSmall(url).then((c) => {
+      if (!alive) return;
+      const t = new THREE.CanvasTexture(c);
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.anisotropy = 4;
+      setTex(t);
+    }).catch(() => alive && setTex(null));
     return () => { alive = false; };
   }, [url]);
+  useEffect(() => () => tex?.dispose(), [tex]);
   return tex;
 }
 
-function PhotoFrame({ photo, alt }: { photo: string | null; alt: boolean }) {
-  const tex = usePhoto(photo);
-  const photoMat = useMemo(() => (tex ? new THREE.MeshBasicMaterial({ map: tex }) : null), [tex]);
+/**
+ * 사진을 액자 칸(가로/세로 비율 frameAspect)에 꽉 차게(cover) 맞추고, 확대(z)·위치(x,y)를 적용.
+ * 보이는 영역이 항상 사진 안쪽이 되도록 잘라서 액자 테두리 밖으로 튀어나오지 않는다.
+ */
+function applyFit(t: THREE.Texture, frameAspect: number, fit: { z: number; x: number; y: number } = { z: 1, x: 0, y: 0 }) {
+  const img = t.image as { width: number; height: number };
+  const ia = img.width / img.height;
+  let rx = 1, ry = 1;
+  if (ia > frameAspect) rx = frameAspect / ia; else ry = ia / frameAspect;
+  const z = Math.max(1, fit.z);
+  rx /= z; ry /= z;
+  t.repeat.set(rx, ry);
+  t.offset.set(((1 - rx) / 2) * (1 + THREE.MathUtils.clamp(fit.x, -1, 1)), ((1 - ry) / 2) * (1 - THREE.MathUtils.clamp(fit.y, -1, 1)));
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  t.needsUpdate = true;
+}
+
+/** 액자 디자인별 치수: 테두리(바깥) · 사진 칸 · 색 */
+const FRAME_LOOK = {
+  wood: { w: 0.78, h: 0.66, pw: 0.64, ph: 0.52, color: C.wood, inner: '#fde3d6' },
+  white: { w: 0.78, h: 0.66, pw: 0.54, ph: 0.42, color: '#fbfaf7', inner: '#fffaf3' },
+  pink: { w: 0.8, h: 0.68, pw: 0.6, ph: 0.48, color: '#f6b9c8', inner: '#fde7ee' },
+  round: { w: 0.72, h: 0.72, pw: 0.56, ph: 0.56, color: '#e9c48f', inner: '#fdf1df' },
+  polaroid: { w: 0.62, h: 0.74, pw: 0.52, ph: 0.52, color: '#ffffff', inner: '#f3efe8' },
+} as const;
+export type FrameLook = keyof typeof FRAME_LOOK;
+
+export function PhotoFrame({ photo, style = 'wood', fit, scale = 1, onOpen }: {
+  photo: string | null; style?: FrameLook; fit?: { z: number; x: number; y: number }; scale?: number; onOpen?: () => void;
+}) {
+  const base = usePhoto(photo);
+  const L = FRAME_LOOK[style] ?? FRAME_LOOK.wood;
+  // 액자마다 확대·위치가 다르므로 텍스처를 복제해 각자 맞춤 (이미지 데이터는 공유)
+  const tex = useMemo(() => (base ? base.clone() : null), [base]);
+  useEffect(() => { if (tex) applyFit(tex, L.pw / L.ph, fit); }, [tex, L.pw, L.ph, fit?.z, fit?.x, fit?.y]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => tex?.dispose(), [tex]);
+  const photoMat = useMemo(() => (tex ? new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }) : null), [tex]);
+  const handlers = onOpen ? {
+    onClick: (e: any) => { if (e.delta > 8) return; e.stopPropagation(); onOpen(); },
+    onPointerOver: (e: any) => { e.stopPropagation(); document.body.style.cursor = 'zoom-in'; },
+    onPointerOut: () => { document.body.style.cursor = ''; },
+  } : {};
+  const round = style === 'round';
+  const polaroid = style === 'polaroid';
+  const photoY = polaroid ? 0.06 : 0;
   return (
-    <group>
-      {/* 이젤형 액자: 어디에 둬도 세워지도록 */}
+    <group scale={scale}>
+      {/* 이젤형 받침: 어디에 둬도 세워지도록 */}
       <mesh geometry={geo.box(0.06, 1.1, 0.06)} material={mat(C.woodDark)} position={[-0.25, 0.55, -0.08]} rotation={[0.18, 0, 0]} />
       <mesh geometry={geo.box(0.06, 1.1, 0.06)} material={mat(C.woodDark)} position={[0.25, 0.55, -0.08]} rotation={[0.18, 0, 0]} />
       <mesh geometry={geo.box(0.05, 1.0, 0.05)} material={mat(C.woodDark)} position={[0, 0.5, -0.32]} rotation={[-0.35, 0, 0]} />
-      <group position={[0, 1.0, 0]} rotation={[-0.12, 0, 0]}>
-        <mesh geometry={geo.box(0.78, 0.66, 0.06)} material={mat(alt ? C.coral : C.wood)} />
-        <mesh geometry={geo.box(0.64, 0.52, 0.02)} position={[0, 0, 0.035]} material={photoMat ?? mat('#fde3d6')} />
+      <group position={[0, 1.0, 0]} rotation={[-0.12, 0, 0]} {...handlers}>
+        {round ? (
+          <>
+            <mesh geometry={geo.cyl(L.w / 2, L.w / 2, 0.06, 28)} material={mat(L.color)} rotation={[Math.PI / 2, 0, 0]} />
+            <mesh geometry={geo.torus(L.w / 2 - 0.02, 0.03, Math.PI * 2, 6, 28)} material={mat('#d9ad6f')} position={[0, 0, 0.03]} />
+            <mesh geometry={geo.circle(L.pw / 2, 40)} position={[0, 0, 0.034]} material={photoMat ?? mat(L.inner)} />
+          </>
+        ) : (
+          <>
+            <mesh geometry={geo.box(L.w, L.h, polaroid ? 0.025 : 0.06)} material={mat(L.color)} />
+            {style === 'white' && <mesh geometry={geo.box(L.w - 0.1, L.h - 0.1, 0.01)} position={[0, 0, 0.032]} material={mat('#fffaf3')} />}
+            {style === 'pink' && (
+              // 파스텔 핑크: 위쪽 리본 하트
+              <group position={[0, L.h / 2 + 0.02, 0.02]}>
+                <mesh geometry={geo.sphere(0.05, 10, 8)} material={mat('#f28ca6')} position={[-0.035, 0, 0]} />
+                <mesh geometry={geo.sphere(0.05, 10, 8)} material={mat('#f28ca6')} position={[0.035, 0, 0]} />
+                <mesh geometry={geo.cone(0.07, 0.08, 10)} material={mat('#f28ca6')} position={[0, -0.05, 0]} rotation={[Math.PI, 0, 0]} />
+              </group>
+            )}
+            <mesh geometry={geo.box(L.pw, L.ph, 0.012)} position={[0, photoY, polaroid ? 0.02 : 0.038]} material={photoMat ?? mat(L.inner)} />
+            {polaroid && <mesh geometry={geo.box(0.22, 0.03, 0.005)} position={[0.12, -0.29, 0.016]} material={mat('#e7ded2')} />}
+          </>
+        )}
         {!photoMat && (
           // 사진이 없으면 발바닥 그림
-          <group position={[0, -0.03, 0.05]}>
+          <group position={[0, photoY - 0.03, 0.05]}>
             <mesh geometry={geo.cyl(0.09, 0.09, 0.01, 8)} material={mat(C.coral)} rotation={[Math.PI / 2, 0, 0]} />
             {[[-0.11, 0.08], [-0.04, 0.14], [0.04, 0.14], [0.11, 0.08]].map(([x, y], i) => (
               <mesh key={i} geometry={geo.cyl(0.035, 0.035, 0.01, 6)} material={mat(C.coral)} rotation={[Math.PI / 2, 0, 0]} position={[x, y, 0]} />
@@ -49,7 +143,7 @@ function PhotoFrame({ photo, alt }: { photo: string | null; alt: boolean }) {
 }
 
 /** 가구 한 개 (원점 = 바닥 중심) */
-export function FurnitureModel({ type, n, photo }: { type: string; n: number; photo: string | null }) {
+export function FurnitureModel({ type, n, photo, item, onOpen }: { type: string; n: number; photo: string | null; item?: PlacedItem; onOpen?: (url: string) => void }) {
   switch (type) {
     case 'dogbed':
       return (
@@ -89,7 +183,11 @@ export function FurnitureModel({ type, n, photo }: { type: string; n: number; ph
         </group>
       );
     case 'frame':
-      return <PhotoFrame photo={photo} alt={n % 2 === 1} />;
+      {
+        // 액자마다 따로 건 사진 (없으면 강아지 대표 사진)
+        const url = item?.photo ?? photo;
+        return <PhotoFrame photo={url} style={item?.style} fit={item?.fit} scale={item?.scale ?? 1} onOpen={onOpen && url ? () => onOpen(url) : undefined} />;
+      }
     case 'plant':
       return (
         <group>

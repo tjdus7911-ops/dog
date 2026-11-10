@@ -8,6 +8,7 @@ import { DOG_SCALE, Dog, type DogDriver } from './models/Dog';
 import { Leash } from './Leash';
 import { blobShadowMat, geo } from './lowpoly';
 import { useStore } from '../store';
+import { dogDrivers } from './fx';
 
 const BUBBLE_MS = 6000;
 
@@ -20,7 +21,7 @@ export interface PairRefs {
   tag: MutableRefObject<HTMLDivElement | null>;
 }
 
-export function AvatarPair({ profile, refs, isMe, onSelect }: { profile: PublicProfile; refs: PairRefs; isMe?: boolean; onSelect?: () => void }) {
+export function AvatarPair({ profile, refs, isMe, onSelect, onSelectDog }: { profile: PublicProfile; refs: PairRefs; isMe?: boolean; onSelect?: () => void; onSelectDog?: () => void }) {
   const hand = useRef<THREE.Object3D | null>(null);
   const anchor = useRef<THREE.Object3D | null>(null);
   const bubble = useStore((s) => s.bubbles[profile.id]);
@@ -36,15 +37,24 @@ export function AvatarPair({ profile, refs, isMe, onSelect }: { profile: PublicP
     return () => clearTimeout(t);
   }, [bubble]);
 
+  // 쓰다듬기 반응을 재생할 수 있게 강아지 드라이버 등록
+  useEffect(() => {
+    dogDrivers.set(profile.id, refs.dogDriver);
+    return () => { if (dogDrivers.get(profile.id) === refs.dogDriver) dogDrivers.delete(profile.id); };
+  }, [profile.id, refs.dogDriver]);
+
   useEffect(() => { document.body.style.cursor = hover ? 'pointer' : ''; return () => { document.body.style.cursor = ''; }; }, [hover]);
 
   const dogScale = DOG_SCALE[profile.dog.size];
   const clickable = !!onSelect;
-  const handlers = clickable ? {
-    onClick: (e: any) => { if (e.delta > 8) return; e.stopPropagation(); onSelect!(); },
+  const mk = (fn?: () => void) => fn ? {
+    onClick: (e: any) => { if (e.delta > 8) return; e.stopPropagation(); fn(); },
     onPointerOver: (e: any) => { e.stopPropagation(); setHover(true); },
     onPointerOut: () => setHover(false),
   } : {};
+  const handlers = mk(onSelect);
+  // 강아지를 누르면 강아지 메뉴 (없으면 사람과 같은 동작)
+  const dogHandlers = mk(onSelectDog ?? onSelect);
 
   return (
     <>
@@ -61,8 +71,10 @@ export function AvatarPair({ profile, refs, isMe, onSelect }: { profile: PublicP
         <Html position={[0, 1.55, 0]} zIndexRange={[20, 10]} style={{ pointerEvents: 'none' }}>
           <div ref={refs.tag} className="flex flex-col items-center" style={{ transform: 'translate(-50%, -100%)' }}>
             {showBubble && bubble && <div className="bubble pop">{bubble.text}</div>}
-            <div className="name-tag" style={isMe ? { background: '#f39a7b', color: 'white' } : hover ? { background: '#fff3e8' } : undefined}>
-              {profile.nickname} <span style={{ opacity: 0.75 }}>· 🐶 {profile.dogName}</span>
+            <div className="name-tag" style={profile.guest ? { background: isMe ? '#8fb7d9' : '#eef5fb', color: isMe ? 'white' : '#4b6a86', border: '1.5px dashed #8fb7d9' } : isMe ? { background: '#f39a7b', color: 'white' } : hover ? { background: '#fff3e8' } : undefined}>
+              {/* 둘러보기 방문자는 회원과 구분되는 이름표 */}
+              {profile.guest && <span className="mr-1 rounded-full bg-white/80 px-1.5 text-[10px] text-[#4b6a86]">👀 방문자</span>}
+              {profile.nickname} {!profile.guest && <span style={{ opacity: 0.75 }}>· 🐶 {profile.dogName}</span>}
             </div>
           </div>
         </Html>
@@ -70,8 +82,8 @@ export function AvatarPair({ profile, refs, isMe, onSelect }: { profile: PublicP
       <group ref={refs.dog}>
         <Dog avatar={profile.dog} driver={refs.dogDriver} anchorRef={anchor} />
         <mesh geometry={geo.circle(0.3 * dogScale, 10)} material={blobShadowMat} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]} scale={[0.8, 1.3, 1]} />
-        {clickable && (
-          <mesh {...handlers} position={[0, 0.35 * dogScale, 0]}>
+        {(clickable || onSelectDog) && (
+          <mesh {...dogHandlers} position={[0, 0.35 * dogScale, 0]}>
             <boxGeometry args={[0.5 * dogScale, 0.7 * dogScale, 0.9 * dogScale]} />
             <meshBasicMaterial transparent opacity={0} depthWrite={false} />
           </mesh>

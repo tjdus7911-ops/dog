@@ -153,7 +153,7 @@ interface Access {
 }
 
 /** 호실 카드: 집주인·강아지 프로필, 입장/방문 신청, 이웃 신청 */
-function UnitCard({ ownerId, onClose }: { ownerId: number; onClose: () => void }) {
+function UnitCard({ ownerId, onClose, door }: { ownerId: number; onClose: () => void; door?: boolean }) {
   const me = useStore((s) => s.me)!;
   const [a, setA] = useState<Access | null>(null);
   const [busy, setBusy] = useState(false);
@@ -196,15 +196,16 @@ function UnitCard({ ownerId, onClose }: { ownerId: number; onClose: () => void }
             </div>
             <button className="btn btn-ghost w-11 h-11 shrink-0" onClick={onClose} aria-label="닫기">✕</button>
           </div>
+          {door && <div className="mt-3 rounded-2xl bg-[#f3f7ef] px-3 py-2 text-sm">🚪 <b>{residenceLabel(a.owner.residence)}</b> 문 앞이에요. {mine || a.allowed ? '바로 들어갈 수 있어요.' : a.canRequest ? '집주인 승인이 필요한 집이에요.' : '지금은 들어갈 수 없는 집이에요.'}</div>}
           {a.owner.dogIntro && <p className="mt-3 text-sm bg-cream-2 rounded-2xl px-3 py-2">{a.owner.dogIntro}</p>}
 
           <div className="mt-4 grid gap-2">
             {mine || a.allowed ? (
-              <button className="btn btn-coral py-3 text-lg" disabled={busy} onClick={enter}>{mine ? '🏠 우리 집 들어가기' : '🚪 집에 들어가기'}</button>
+              <button className="btn btn-coral py-3 text-lg" disabled={busy} onClick={enter}>{mine ? '🏠 우리 집 들어가기' : door ? '🚪 방문하기' : '🚪 집에 들어가기'}</button>
             ) : a.canRequest ? (
               a.request === 'pending'
                 ? <span className="btn bg-cream-2 py-3 text-cocoa-soft">⏳ 방문 신청 중 · 집주인 승인을 기다려요</span>
-                : <button className="btn btn-coral py-3" disabled={busy || DEMO} onClick={requestVisit}>📨 방문 신청하기{a.request === 'declined' ? ' (다시)' : ''}</button>
+                : <button className="btn btn-coral py-3" disabled={busy || DEMO} onClick={requestVisit}>{door ? '🚪 방문하기 (방문 요청 보내기)' : '📨 방문 신청하기'}{a.request === 'declined' ? ' (다시)' : ''}</button>
             ) : null}
             {!a.allowed && !mine && <p className="text-xs text-cocoa-soft text-center">{a.reason}</p>}
             {!mine && a.neighbor !== 'unavailable' && (
@@ -270,7 +271,10 @@ export function LobbyPanel() {
   const open = useStore((s) => s.lobbyPanel);
   const { data, error } = useApartment();
   const [moving, setMoving] = useState(false);
-  const [card, setCard] = useState<number | null>(null);
+  const [card, setCard] = useState<{ id: number; door?: boolean } | null>(null);
+  const focus = useStore((s) => s.lobbyFocus);
+  // 친구 목록에서 '집 놀러 가기' → 로비에 오면 그 집 문 앞 안내
+  useEffect(() => { if (focus !== null) { setCard({ id: focus, door: true }); set({ lobbyFocus: null, lobbyPanel: false }); } }, [focus]);
   const b = data?.buildings[0];
   const close = () => set({ lobbyPanel: false });
 
@@ -282,7 +286,7 @@ export function LobbyPanel() {
         {!open && <button className="btn btn-coral px-4 min-h-[44px] text-sm" onClick={() => set({ lobbyPanel: true })}>📋 호실 안내판</button>}
       </div>
       {open && (
-        <aside className="above-nav absolute z-30 inset-x-0 bottom-0 max-h-[72%] md:inset-x-auto md:right-3 md:top-[74px] md:bottom-3 md:w-[420px] md:max-h-none panel !rounded-b-none md:!rounded-[22px] p-4 overflow-y-auto scroll-soft pop"
+        <aside className="above-nav absolute z-30 inset-x-0 bottom-0 max-h-[min(72%,calc(100%-224px))] md:inset-x-auto md:right-3 md:top-[74px] md:bottom-3 md:w-[420px] md:max-h-none panel !rounded-b-none md:!rounded-[22px] p-4 overflow-y-auto scroll-soft pop"
           style={{ paddingBottom: 'calc(var(--safe-b) + 16px)' }}>
           <div className="flex items-center gap-2">
             <h2 className="font-display text-xl flex-1">📋 {b?.name ?? '멍글 아파트'} 호실 안내판</h2>
@@ -307,14 +311,14 @@ export function LobbyPanel() {
               <NeighborBox />
               {error && <p className="text-sm text-[#c4553a] bg-[#fff0ec] rounded-xl px-3 py-2 mt-3">{error}</p>}
               {!data && !error && <p className="text-cocoa-soft py-6 text-center">불러오는 중…</p>}
-              {b && <div className="mt-3"><UnitGrid b={b} selectable={false} onVisit={(id) => setCard(id)} /></div>}
+              {b && <div className="mt-3"><UnitGrid b={b} selectable={false} onVisit={(id) => setCard({ id })} /></div>}
               {b && <p className="text-[11px] text-cocoa-soft mt-2">주민이 사는 호실을 누르면 집주인과 강아지 프로필을 보고 들어가거나 방문을 신청할 수 있어요.</p>}
               {DEMO && <p className="text-[11px] text-cocoa-soft mt-2">미리보기에서는 다른 주민 없이 내 집만 표시돼요.</p>}
             </>
           )}
         </aside>
       )}
-      {card !== null && <UnitCard ownerId={card} onClose={() => setCard(null)} />}
+      {card !== null && <UnitCard ownerId={card.id} door={card.door} onClose={() => setCard(null)} />}
     </>
   );
 }

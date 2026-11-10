@@ -19,4 +19,12 @@ export const local = {
   jumpV: 0,
   /** 카메라 yaw (미니맵 회전 표시용) */
   camYaw: 0,
+  /** 지금 하고 있는 동작 (쓰다듬기·줍기·버리기) — 끝날 때까지 이동 입력을 받지 않음 */
+  action: null as { anim: number; until: number; petLow: number; faceX: number; faceZ: number } | null,
+  /** 배변봉투를 들고 있는지 (서버 상태) */
+  bag: false,
+  /** 서버가 시작한 내 강아지 배변 (LocalPlayer가 다음 프레임에 적용) */
+  poopStart: 0,
+  /** 내 강아지가 쓰다듬기를 받음: 바라볼 곳 */
+  petHold: null as { x: number; z: number } | null,
 };

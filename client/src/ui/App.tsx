@@ -16,7 +16,7 @@ export function App() {
   const me = useStore((s) => s.me);
   const onboarding = useStore((s) => s.onboarding);
   const moveInLater = useStore((s) => s.moveInLater);
-  const needMoveIn = !!me && !onboarding && !me.residence && !moveInLater;
+  const needMoveIn = !!me && me.role !== 'guest' && !onboarding && !me.residence && !moveInLater;
   const [booting, setBooting] = useState(!DEMO && !!tokenStore.get());
 
   useEffect(() => {

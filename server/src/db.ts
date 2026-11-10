@@ -3,7 +3,8 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_DOG, DEFAULT_HUMAN, normalizeDog, normalizeHuman, type DogAvatar, type HumanAvatar } from '../../shared/avatar';
+import { DEFAULT_DOG, DEFAULT_HUMAN, GUEST_DOG, GUEST_HUMAN, normalizeDog, normalizeHuman, type DogAvatar, type HumanAvatar } from '../../shared/avatar';
+import { DEFAULT_DOG_PROFILE, type DogProfileSettings } from '../../shared/protocol';
 import { DEFAULT_LAYOUT, validateLayout, type HomeVisibility, type PlacedItem } from '../../shared/home';
 import { DEFAULT_PRIVACY, type FriendStatus, type MyProfile, type PrivacySettings, type PublicProfile, type Residence } from '../../shared/protocol';
 
@@ -309,6 +310,7 @@ export const pendingVisits = (homeId: number) => all(`SELECT v.visitor_id, v.cre
 // ---------- profiles ----------
 function toPublic(r: Row): PublicProfile {
   return {
+    ...(r.role === 'guest' ? { guest: true } : {}),
     residence: getResidence(r.user_id),
     id: r.user_id, nickname: r.nickname, dogName: r.dog_name, dogIntro: r.dog_intro, dogPhoto: r.dog_photo ?? null,
     // 이전 버전 데이터도 새 항목 기본값으로 정규화해서 내보냄
@@ -316,7 +318,7 @@ function toPublic(r: Row): PublicProfile {
   };
 }
 export function getPublicProfile(id: number): PublicProfile | null {
-  const r = one('SELECT * FROM profiles WHERE user_id = ?', id);
+  const r = one('SELECT p.*, u.role FROM profiles p JOIN users u ON u.id = p.user_id WHERE p.user_id = ?', id);
   return r ? toPublic(r) : null;
 }
 export function getMyProfile(id: number): MyProfile | null {
@@ -407,3 +409,26 @@ export const listReports = () => all(`
   FROM reports r JOIN profiles pr ON pr.user_id = r.reporter_id JOIN profiles pt ON pt.user_id = r.target_id
   JOIN users u ON u.id = r.target_id ORDER BY r.status = 'open' DESC, r.id DESC LIMIT 200`);
 export const setReportStatus = (id: number, status: string) => run('UPDATE reports SET status=? WHERE id=?', status, id);
+
+// ---------- 강아지 프로필 (나이·성별·성격·사진첩·공개 범위·쓰다듬기 허용) ----------
+try { db.exec("ALTER TABLE profiles ADD COLUMN dog_profile TEXT NOT NULL DEFAULT '{}'"); } catch { /* 이미 있음 */ }
+export function getDogProfile(id: number): DogProfileSettings {
+  const r = one('SELECT dog_profile FROM profiles WHERE user_id = ?', id);
+  try { return { ...DEFAULT_DOG_PROFILE, ...JSON.parse((r?.dog_profile as string) || '{}') }; } catch { return { ...DEFAULT_DOG_PROFILE }; }
+}
+export const setDogProfile = (id: number, p: DogProfileSettings) => run('UPDATE profiles SET dog_profile=? WHERE user_id=?', JSON.stringify(p), id);
+export const setDogIntro = (id: number, intro: string) => run('UPDATE profiles SET dog_intro=? WHERE user_id=?', intro, id);
+
+// ---------- 비회원 둘러보기 계정 ----------
+export function createGuest(passHash: string, salt: string) {
+  const now = Date.now();
+  const tag = Math.floor(1000 + Math.random() * 9000);
+  const username = `guest_${now.toString(36)}${tag}`;
+  const r = run("INSERT INTO users (username, pass_hash, salt, role, created_at, agreed_at) VALUES (?,?,?,'guest',?,?)", username, passHash, salt, now, now);
+  const id = Number(r.lastInsertRowid);
+  run('INSERT INTO profiles (user_id, nickname, dog_name, dog_intro, human, dog, privacy) VALUES (?,?,?,?,?,?,?)',
+    id, `방문자${tag}`, '방문 강아지', '', JSON.stringify(GUEST_HUMAN), JSON.stringify(GUEST_DOG), JSON.stringify({ showOnline: false, showLocation: false, allowFriendRequests: false }));
+  return id;
+}
+/** 하루 지난 둘러보기 계정 정리 */
+export const purgeGuests = (olderThan: number) => run("DELETE FROM users WHERE role='guest' AND created_at < ?", olderThan);

@@ -1,6 +1,7 @@
 // 모바일 화면 구성: 장소 줄(두 번째 줄) · 하단 고정 내비게이션 · 더보기 메뉴 · 우측 빠른 메뉴 · 마을 지도 · 동네 일정
 // 3D 마을을 최대한 넓게 보이도록, 열린 창이 있으면 이동 조작 UI를 숨긴다.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { drawBinsAndPoops } from './MiniMap';
 import { get, set, toast, useStore } from '../store';
 import { joinPark } from '../net/socket';
 import { api } from '../lib/api';
@@ -40,6 +41,7 @@ export function PlaceBar() {
 async function goHome() {
   const me = get().me!;
   set({ moreOpen: false, panel: 'none', chatOpen: false });
+  if (me.role === 'guest') { set({ joinPrompt: true }); return; }
   if (me.residence) { await joinPark(homeSpaceId(me.id)); return; }
   toast('아직 입주한 집이 없어요. 로비 안내판에서 빈 호실에 입주해 보세요 🏠');
   if (get().park?.kind !== 'lobby') await joinPark('lobby-1');
@@ -64,7 +66,7 @@ export function BottomNav() {
     { id: 'shop', icon: '🛍️', label: '상점', active: park?.kind === 'shop', onClick: () => void goShop() },
     {
       id: 'friends', icon: '🐾', label: '친구', active: panel === 'friends', badge: friendBadge,
-      onClick: () => (DEMO ? toast('미리보기에서는 친구 기능을 쓸 수 없어요. (게임 서버에서 동작)') : set({ panel: panel === 'friends' ? 'none' : 'friends', moreOpen: false, chatOpen: false })),
+      onClick: () => (DEMO ? toast('미리보기에서는 친구 기능을 쓸 수 없어요. (게임 서버에서 동작)') : me.role === 'guest' ? set({ joinPrompt: true }) : set({ panel: panel === 'friends' ? 'none' : 'friends', moreOpen: false, chatOpen: false })),
     },
     {
       id: 'chat', icon: '💬', label: '채팅', active: chatOpen, badge: unread,
@@ -199,6 +201,7 @@ function drawPark(g: CanvasRenderingContext2D, size: number, friendIds: Set<numb
   g.fillStyle = '#9ad6e8'; g.beginPath(); g.arc(size / 2, size / 2, FOUNTAIN_RADIUS * k, 0, Math.PI * 2); g.fill();
   for (const t of TREES) { g.fillStyle = t.kind === 'cherry' ? '#f4b6c6' : '#86b874'; g.beginPath(); g.arc(...P(t.x, t.z), 2.6, 0, Math.PI * 2); g.fill(); }
   for (const b of BUILDINGS) { g.fillStyle = b.roof; const [x, y] = P(b.x - b.w / 2, b.z - b.d / 2); g.fillRect(x, y, b.w * k, b.d * k); }
+  drawBinsAndPoops(g, P, 4);
   rendered.forEach((r, id) => {
     const [x, y] = P(r.x, r.z);
     g.fillStyle = friendIds.has(id) ? '#5fa35a' : '#ffffff'; g.strokeStyle = '#5a4033'; g.lineWidth = 1;
@@ -260,7 +263,7 @@ export function VillageMap() {
               </button>
             ))}
           </div>
-          <p className="text-[11px] text-cocoa-soft text-center mt-2">🔶 나 · 🟢 친구 · ⚪ 다른 산책러 — 장소를 누르면 그쪽으로 걸어가요</p>
+          <p className="text-[11px] text-cocoa-soft text-center mt-2">🔶 나 · 🟢 친구 · ⚪ 다른 산책러 · 🟩 배변봉투 휴지통 — 장소를 누르면 그쪽으로 걸어가요</p>
         </>
       ) : <p className="text-sm text-cocoa-soft bg-cream-2 rounded-2xl px-3 py-3">지금은 {park?.name ?? '실내'}에 있어요. 공원 지도는 공원에서 볼 수 있어요.</p>}
       <div className="mt-3 grid grid-cols-2 gap-2">

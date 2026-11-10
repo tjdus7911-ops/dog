@@ -1,6 +1,6 @@
 // 실시간 미니맵 — 내 위치(주황), 친구(초록), 다른 사용자(흰색)
 import { useEffect, useRef } from 'react';
-import { BUILDINGS, FOUNTAIN_RADIUS, PATH_WIDTH, PLAZA_RADIUS, RADIAL_ANGLES, RING_RADIUS, TREES, WORLD_RADIUS } from '@shared/world';
+import { BINS, BUILDINGS, FOUNTAIN_RADIUS, PATH_WIDTH, PLAZA_RADIUS, RADIAL_ANGLES, RING_RADIUS, TREES, WORLD_RADIUS } from '@shared/world';
 import { local } from '../game/local';
 import { rendered } from '../net/remote';
 import { get, useStore } from '../store';
@@ -30,6 +30,7 @@ export function MiniMap() {
       g.fillStyle = '#9ad6e8'; g.beginPath(); g.arc(SIZE / 2, SIZE / 2, FOUNTAIN_RADIUS * k, 0, Math.PI * 2); g.fill();
       for (const t of TREES) { g.fillStyle = t.kind === 'cherry' ? '#f4b6c6' : '#86b874'; g.beginPath(); g.arc(...P(t.x, t.z), 1.6, 0, Math.PI * 2); g.fill(); }
       for (const b of BUILDINGS) { g.fillStyle = b.roof; const [x, y] = P(b.x - b.w / 2, b.z - b.d / 2); g.fillRect(x, y, b.w * k, b.d * k); }
+      drawBinsAndPoops(g, P, 2.6);
       const friendIds = new Set(get().friends.map((f) => f.profile.id));
       rendered.forEach((r, id) => {
         const [x, y] = P(r.x, r.z);
@@ -60,4 +61,21 @@ export function MiniMap() {
       </div>
     </div>
   );
+}
+
+/** 배변봉투 휴지통(초록 네모) · 치워야 할 내 강아지 배변(갈색 점) */
+export function drawBinsAndPoops(g: CanvasRenderingContext2D, P: (x: number, z: number) => [number, number], r: number) {
+  for (const b of BINS) {
+    const [x, y] = P(b.x, b.z);
+    g.fillStyle = '#5f9a5a'; g.strokeStyle = '#fff'; g.lineWidth = 1;
+    g.fillRect(x - r, y - r, r * 2, r * 2); g.strokeRect(x - r, y - r, r * 2, r * 2);
+    g.fillStyle = '#f6c453'; g.fillRect(x - r, y - r - 1, r * 2, 1.6);
+  }
+  const me = get().me?.id;
+  for (const p of Object.values(get().poops)) {
+    if (p.ownerId !== me) continue;
+    const [x, y] = P(p.x, p.z);
+    g.fillStyle = '#8b5a3a'; g.strokeStyle = '#fff'; g.lineWidth = 1.2;
+    g.beginPath(); g.arc(x, y, r * 1.1, 0, Math.PI * 2); g.fill(); g.stroke();
+  }
 }

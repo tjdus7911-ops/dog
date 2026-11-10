@@ -5,16 +5,25 @@ import * as repo from './db';
 import { userFromToken } from './auth';
 import { filterProfanity, RateLimiter, sanitize, SpamGuard } from './moderation';
 import {
-  CHAT_MAX_LEN, HumanAnim, NET_TICK_MS, PARKS, RUN_SPEED,
-  type ChatMessage, type FriendEntry, type NetState, type ParkInfo, type PlayerSnapshot, type PublicProfile, type SeatMap,
+  BIN_REACH, CHAT_MAX_LEN, DOG_ANIM_MAX, HUMAN_ANIM_MAX, HumanAnim, NET_TICK_MS, PARKS, PET_REACH, POOP_REACH, RUN_SPEED,
+  type ChatMessage, type PetEvent, type PoopInfo, type FriendEntry, type NetState, type ParkInfo, type PlayerSnapshot, type PublicProfile, type SeatMap,
 } from '../../shared/protocol';
-import { APARTMENT_ENTRANCE, CAFE_ENTRANCE, SHOP_ENTRANCE, SEAT_BY_ID, SEAT_REACH, WORLD_RADIUS, spawnPoint } from '../../shared/world';
+import { APARTMENT_ENTRANCE, BIN_BY_ID, CAFE_ENTRANCE, SHOP_ENTRANCE, SEAT_BY_ID, SEAT_REACH, WORLD_RADIUS, spawnPoint } from '../../shared/world';
 import { PLACES, SPAWNS, homeSpaceId, insideSpace, parseSpace, type SpaceKind } from '../../shared/spaces';
 import { canVisit } from './access';
 
 const CAPACITY = Number(process.env.MUNGLE_PARK_CAPACITY ?? 30);
 const HOME_CAPACITY = 10;
 const REPORT_REASONS = ['욕설/비하', '도배/스팸', '불쾌한 닉네임/사진', '사칭/사기', '기타'];
+/** 배변 이벤트: 산책(걷기·달리기) 누적 시간이 MIN~MAX초 사이의 임의 값에 도달하면 CHANCE 확률로 발생 */
+const POOP_MIN_S = Number(process.env.MUNGLE_POOP_MIN_S ?? 300);
+const POOP_MAX_S = Number(process.env.MUNGLE_POOP_MAX_S ?? 600);
+const POOP_CHANCE = Number(process.env.MUNGLE_POOP_CHANCE ?? 0.6);
+const POOP_SQUAT_MS = Number(process.env.MUNGLE_POOP_SQUAT_MS ?? 2600);
+const ROOM_POOP_MAX = 40;
+const nextPoopAt = () => POOP_MIN_S + Math.random() * Math.max(0, POOP_MAX_S - POOP_MIN_S);
+/** 다른 사용자 강아지 쓰다듬기 허용 범위 (보호자 설정) */
+export type PetPolicy = 'all' | 'friends' | 'none';
 
 interface Player {
   userId: number;
@@ -23,6 +32,11 @@ interface Player {
   state: NetState;
   lastTs: number;
   dirty: boolean;
+  /** 이번 공간에서 산책한 누적 시간(초)과 다음 배변 기준 */
+  walkSecs: number;
+  poopAt: number;
+  /** 배변 자세 중 (서버가 시작한 이벤트) */
+  pooping: boolean;
 }
 
 interface Room {
@@ -37,6 +51,8 @@ interface Room {
   recentChat: ChatMessage[];
   /** 벤치 좌석 점유: 좌석 id → 사용자 id */
   seats: Map<string, number>;
+  /** 아직 치우지 않은 배변 */
+  poops: Map<string, PoopInfo & { ts: number }>;
 }
 
 interface Session {
@@ -46,11 +62,16 @@ interface Session {
   parkId: string | null;
   blocked: Set<number>; // 내가 차단
   blockedBy: Set<number>; // 나를 차단
+  /** 배변봉투를 들고 있는지 (서버가 관리) */
+  bag: boolean;
+  /** 비회원 둘러보기 */
+  guest: boolean;
+  lastPet: number;
 }
 
 export function setupRealtime(io: Server) {
   // 상설 장소(공원·아파트 로비)는 미리 만들고, 개인 집은 누군가 들어갈 때 만들고 비면 정리한다
-  const rooms = new Map<string, Room>(PLACES.map((p) => [p.id, { id: p.id, name: p.name, kind: p.kind, icon: p.icon, players: new Map(), recentChat: [], seats: new Map() }]));
+  const rooms = new Map<string, Room>(PLACES.map((p) => [p.id, { id: p.id, name: p.name, kind: p.kind, icon: p.icon, players: new Map(), recentChat: [], seats: new Map(), poops: new Map() }]));
   const capacityOf = (r: Room) => (r.kind === 'home' ? HOME_CAPACITY : CAPACITY);
   function getOrCreateRoom(spaceId: string): Room | null {
     const existing = rooms.get(spaceId);
@@ -60,7 +81,7 @@ export function setupRealtime(io: Server) {
     const owner = repo.getPublicProfile(sp.ownerId);
     const res = repo.getResidence(sp.ownerId);
     if (!owner || !res) return null;
-    const room: Room = { id: spaceId, name: `${owner.nickname}네 집 (${res.unit}호)`, kind: 'home', icon: '🏠', ownerId: sp.ownerId, players: new Map(), recentChat: [], seats: new Map() };
+    const room: Room = { id: spaceId, name: `${owner.nickname}네 집 (${res.unit}호)`, kind: 'home', icon: '🏠', ownerId: sp.ownerId, players: new Map(), recentChat: [], seats: new Map(), poops: new Map() };
     rooms.set(spaceId, room);
     return room;
   }
@@ -111,6 +132,8 @@ export function setupRealtime(io: Server) {
     if (!s.parkId) return;
     const room = rooms.get(s.parkId)!;
     releaseSeat(room, s.userId);
+    // 정리 정책: 보호자가 공간을 떠나면(이동·접속 종료) 치우지 않은 배변도 함께 정리
+    for (const [id, poop] of room.poops) if (poop.ownerId === s.userId) { room.poops.delete(id); io.to(room.id).emit('poop:remove', { id, reason: 'left' }); }
     room.players.delete(s.userId);
     s.socket.leave(room.id);
     io.to(room.id).emit('players:leave', { id: s.userId });
@@ -142,6 +165,41 @@ export function setupRealtime(io: Server) {
     }
   }, NET_TICK_MS);
 
+  /** 입장 시 함께 보내는 공간 상태: 치우지 않은 배변, 봉투를 든 사람 */
+  function roomExtras(room: Room) {
+    return {
+      poops: [...room.poops.values()].map(({ id, ownerId, x, z }) => ({ id, ownerId, x, z })),
+      bags: [...room.players.keys()].filter((id) => sessions.get(id)?.bag),
+    };
+  }
+
+  // ---------- 배변 이벤트 (서버에서만 생성) ----------
+  setInterval(() => {
+    for (const room of rooms.values()) {
+      if (room.kind !== 'park' || room.poops.size >= ROOM_POOP_MAX) continue;
+      for (const p of room.players.values()) {
+        const s = sessions.get(p.userId);
+        if (!s || s.guest || p.pooping || p.walkSecs < p.poopAt) continue;
+        p.walkSecs = 0;
+        p.poopAt = nextPoopAt();
+        if ([...room.poops.values()].some((x) => x.ownerId === p.userId)) continue; // 한 번에 하나만
+        if (Math.random() > POOP_CHANCE) continue;
+        const id = crypto.randomUUID();
+        const x = Math.round(p.state[4] * 100) / 100, z = Math.round(p.state[5] * 100) / 100;
+        p.pooping = true;
+        io.to(room.id).emit('poop:begin', { id, ownerId: p.userId, x, z });
+        setTimeout(() => {
+          p.pooping = false;
+          // 그사이 보호자가 떠났다면 만들지 않음
+          if (room.players.get(p.userId) !== p || room.poops.size >= ROOM_POOP_MAX) return;
+          const poop = { id, ownerId: p.userId, x, z, ts: Date.now() };
+          room.poops.set(id, poop);
+          io.to(room.id).emit('poop:add', { id, ownerId: p.userId, x, z } satisfies PoopInfo);
+        }, POOP_SQUAT_MS);
+      }
+    }
+  }, Number(process.env.MUNGLE_POOP_TICK_MS ?? 5000)).unref();
+
   io.on('connection', (socket) => {
     const userId: number = socket.data.userId;
 
@@ -155,12 +213,19 @@ export function setupRealtime(io: Server) {
     const session: Session = {
       userId, role: socket.data.role, socket, parkId: null,
       blocked: new Set(repo.blockedIds(userId)), blockedBy: new Set(repo.blockedByIds(userId)),
+      bag: prev?.bag ?? false, guest: socket.data.role === 'guest', lastPet: 0,
     };
     sessions.set(userId, session);
     notifyFriendsPresence(userId);
 
     const fail = (ack: unknown, error: string) => typeof ack === 'function' && ack({ ok: false, error });
     const okAck = (ack: unknown, data: object = {}) => typeof ack === 'function' && ack({ ok: true, ...data });
+    /** 비회원 둘러보기에서는 막힌 기능 */
+    const memberOnly = (ack: unknown) => {
+      if (!session.guest) return false;
+      if (typeof ack === 'function') ack({ ok: false, error: '이 기능은 멍글마을 주민만 이용할 수 있어요.', code: 'members_only' });
+      return true;
+    };
     const targetId = (v: unknown) => (Number.isInteger(v) && (v as number) > 0 && v !== userId ? (v as number) : null);
 
     socket.on('park:list', (_: unknown, ack: unknown) => okAck(ack, { parks: [...rooms.values()].filter((x) => x.kind !== 'home').map(parkInfo) }));
@@ -174,6 +239,7 @@ export function setupRealtime(io: Server) {
       if (data?.parkId) {
         const sp = parseSpace(data.parkId);
         if (!sp) return fail(ack, '존재하지 않는 장소예요.');
+        if (session.guest && sp.kind !== 'park') { memberOnly(ack); return; }
         if (sp.kind === 'home') {
           const c = canVisit(userId, sp.ownerId!);
           if (!c.ok) return fail(ack, c.error);
@@ -188,7 +254,7 @@ export function setupRealtime(io: Server) {
       if (room.id === session.parkId) {
         // 같은 장소 재입장: 중복 입장 없이 현재 상태만 돌려줌
         const others = [...room.players.values()].filter((p) => p.userId !== userId && !hidden(session, p.userId)).map((p) => ({ profile: p.profile, state: p.state }));
-        return okAck(ack, { park: parkInfo(room), spawn: room.players.get(userId)!.state, players: others, seats: Object.fromEntries(room.seats) satisfies SeatMap });
+        return okAck(ack, { park: parkInfo(room), spawn: room.players.get(userId)!.state, players: others, seats: Object.fromEntries(room.seats) satisfies SeatMap, ...roomExtras(room) });
       }
       leavePark(session);
       // 건물에서 나오면 그 건물 입구 앞에 선다
@@ -198,7 +264,7 @@ export function setupRealtime(io: Server) {
         : [SPAWNS[room.kind][0] + ((userId % 5) - 2) * 0.35, SPAWNS[room.kind][1]];
       const face = room.kind === 'park' && !door ? Math.PI : 0;
       const state: NetState = [x, z, face, 0, x + 0.7, z + 0.3, face, 0];
-      const player: Player = { userId, socket, profile, state, lastTs: Date.now(), dirty: true };
+      const player: Player = { userId, socket, profile, state, lastTs: Date.now(), dirty: true, walkSecs: 0, poopAt: nextPoopAt(), pooping: false };
       const others: PlayerSnapshot[] = [...room.players.values()]
         .filter((p) => !hidden(session, p.userId))
         .map((p) => ({ profile: p.profile, state: p.state }));
@@ -208,7 +274,9 @@ export function setupRealtime(io: Server) {
       emitToRoomFiltered(room, userId, 'players:join', { profile, state } satisfies PlayerSnapshot);
       if (room.kind !== 'home') io.emit('park:count', parkInfo(room));
       notifyFriendsPresence(userId);
-      okAck(ack, { park: parkInfo(room), spawn: state, players: others, seats: Object.fromEntries(room.seats) satisfies SeatMap });
+      okAck(ack, { park: parkInfo(room), spawn: state, players: others, seats: Object.fromEntries(room.seats) satisfies SeatMap, ...roomExtras(room) });
+      // 봉투를 들고 다른 공간으로 왔다면 그 공간 사람들에게도 보이게
+      if (session.bag) io.to(room.id).emit('bag', { userId, holding: true });
     });
 
     socket.on('park:leave', (_: unknown, ack: unknown) => { leavePark(session); notifyFriendsPresence(userId); okAck(ack); });
@@ -247,9 +315,14 @@ export function setupRealtime(io: Server) {
       const seat = seatId ? SEAT_BY_ID.get(seatId) : undefined;
       if (seat && Math.hypot(x - seat.x, z - seat.z) > 1.2) releaseSeat(room, userId);
       const seated = !!seat && room.seats.get(seat.id) === userId;
-      let anim = ha >= 0 && ha <= 5 ? ha | 0 : 0;
+      let anim = ha >= 0 && ha <= HUMAN_ANIM_MAX ? ha | 0 : 0;
       if (anim === HumanAnim.Sit && !seated) anim = 0;
-      p.state = [round(x), round(z), round(rot), anim, round(dx), round(dz), round(drot), da >= 0 && da <= 6 ? da | 0 : 0];
+      let danim = da >= 0 && da <= DOG_ANIM_MAX ? da | 0 : 0;
+      // 배변 자세는 서버가 시작한 이벤트 동안에만 인정 (버튼만 눌러 배변 상태를 만들 수 없음)
+      if (danim === 7 && !p.pooping) danim = 0;
+      // 산책 시간 누적 (걷기·달리기)
+      if (anim === HumanAnim.Walk || anim === HumanAnim.Run) p.walkSecs += dt;
+      p.state = [round(x), round(z), round(rot), anim, round(dx), round(dz), round(drot), danim];
       p.lastTs = now;
       p.dirty = true;
     });
@@ -274,8 +347,62 @@ export function setupRealtime(io: Server) {
       okAck(ack);
     });
 
+    // ---------- 강아지 쓰다듬기 (내 강아지 / 다른 사용자 강아지) ----------
+    socket.on('pet', (data: { targetId?: unknown } | undefined, ack: unknown) => {
+      if (memberOnly(ack)) return;
+      if (!session.parkId) return fail(ack, '공간에 입장한 뒤 이용할 수 있어요.');
+      const room = rooms.get(session.parkId)!;
+      const me = room.players.get(userId);
+      const tid = Number(data?.targetId);
+      const target = Number.isInteger(tid) ? room.players.get(tid) : undefined;
+      if (!me || !target) return fail(ack, '근처에 있는 강아지만 쓰다듬을 수 있어요.');
+      if (tid !== userId) {
+        if (hidden(session, tid)) return fail(ack, '쓰다듬을 수 없는 강아지예요.');
+        const policy = repo.getDogProfile(tid).allowPetting;
+        if (policy === 'none' || (policy === 'friends' && !repo.areFriends(userId, tid))) return fail(ack, policy === 'friends' ? '보호자가 친구에게만 쓰다듬기를 허용했어요.' : '보호자가 쓰다듬기를 허용하지 않았어요.');
+      }
+      if (target.pooping) return fail(ack, '지금은 강아지가 볼일을 보는 중이에요.');
+      if (Math.hypot(me.state[0] - target.state[4], me.state[1] - target.state[5]) > PET_REACH) return fail(ack, '강아지에게 조금 더 가까이 가 주세요.');
+      const now = Date.now();
+      if (now - session.lastPet < 1800) return fail(ack, '잠시 후 다시 쓰다듬어 주세요.');
+      session.lastPet = now;
+      const ev: PetEvent = { fromId: userId, targetId: tid, size: target.profile.dog.size, ts: now };
+      emitToRoomFiltered(room, userId, 'pet', ev);
+      okAck(ack, { event: ev });
+    });
+
+    // ---------- 배변봉투로 줍기 → 휴지통에 버리기 ----------
+    socket.on('poop:pickup', (data: { id?: unknown } | undefined, ack: unknown) => {
+      if (!session.parkId) return fail(ack, '공원에서만 할 수 있어요.');
+      const room = rooms.get(session.parkId)!;
+      const poop = typeof data?.id === 'string' ? room.poops.get(data.id) : undefined;
+      const me = room.players.get(userId);
+      if (!poop || !me) return fail(ack, '이미 치웠거나 없는 배변이에요.');
+      if (poop.ownerId !== userId) return fail(ack, '내 강아지의 배변만 치울 수 있어요.');
+      if (Math.hypot(me.state[0] - poop.x, me.state[1] - poop.z) > POOP_REACH) return fail(ack, '조금 더 가까이 가 주세요.');
+      room.poops.delete(poop.id); // 먼저 지워서 중복 줍기 방지
+      session.bag = true;
+      io.to(room.id).emit('poop:remove', { id: poop.id, reason: 'picked' });
+      io.to(room.id).emit('bag', { userId, holding: true });
+      okAck(ack);
+    });
+    socket.on('bag:dispose', (data: { binId?: unknown } | undefined, ack: unknown) => {
+      if (!session.parkId) return fail(ack, '공원 휴지통에 버려 주세요.');
+      const room = rooms.get(session.parkId)!;
+      const me = room.players.get(userId);
+      const bin = typeof data?.binId === 'string' ? BIN_BY_ID.get(data.binId) : undefined;
+      if (!session.bag) return fail(ack, '버릴 배변봉투가 없어요.');
+      if (!me || !bin || room.kind !== 'park') return fail(ack, '휴지통을 찾을 수 없어요.');
+      if (Math.hypot(me.state[0] - bin.x, me.state[1] - bin.z) > BIN_REACH) return fail(ack, '휴지통에 조금 더 가까이 가 주세요.');
+      session.bag = false;
+      io.to(room.id).emit('bin', { binId: bin.id, userId });
+      io.to(room.id).emit('bag', { userId, holding: false });
+      okAck(ack);
+    });
+
     // ---------- 공개 채팅 ----------
     socket.on('chat:public', (text: unknown, ack: unknown) => {
+      if (memberOnly(ack)) return;
       if (!session.parkId) return fail(ack, '공원에 입장한 뒤 채팅할 수 있어요.');
       const clean = sanitize(text, CHAT_MAX_LEN);
       if (!clean) return fail(ack, '메시지를 입력해 주세요.');
@@ -307,6 +434,7 @@ export function setupRealtime(io: Server) {
     const sendFriendEvent = (to: number, kind: string) => sessions.get(to)?.socket.emit('friend:event', { kind, from: myPublic(), ts: Date.now() });
 
     socket.on('friend:request', (data: { userId?: unknown }, ack: unknown) => {
+      if (memberOnly(ack)) return;
       const to = targetId(data?.userId);
       if (!to || !repo.findUser(to)) return fail(ack, '잘못된 요청이에요.');
       if (!friendLimiter.allow(`f${userId}`)) return fail(ack, '잠시 후 다시 시도해 주세요.');
@@ -336,6 +464,7 @@ export function setupRealtime(io: Server) {
     });
 
     socket.on('friend:accept', (data: { userId?: unknown }, ack: unknown) => {
+      if (memberOnly(ack)) return;
       const from = targetId(data?.userId);
       if (!from || !repo.hasRequest(from, userId)) return fail(ack, '받은 친구 신청이 없어요.');
       if (repo.eitherBlocked(userId, from)) return fail(ack, '수락할 수 없는 신청이에요.');
@@ -440,6 +569,7 @@ export function setupRealtime(io: Server) {
 
     // ---------- 1:1 채팅 (친구 전용) ----------
     socket.on('dm:send', (data: { to?: unknown; text?: unknown }, ack: unknown) => {
+      if (memberOnly(ack)) return;
       const to = targetId(data?.to);
       if (!to) return fail(ack, '잘못된 요청이에요.');
       if (!repo.areFriends(userId, to)) return fail(ack, '친구에게만 메시지를 보낼 수 있어요.');
