@@ -5,6 +5,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/tjdus7911-ops/dog/main/deploy/setup.sh | sudo bash -s -- "" "운영자 이름" "연락 이메일"
 #   - 첫 번째 값: 도메인 (비워 두면 서버 IP로 무료 주소 <IP>.sslip.io 를 자동으로 사용)
 #   - 두 번째·세 번째 값: 이용약관/개인정보 처리방침에 표시할 운영자 이름과 연락처
+#   - 네 번째 값(선택): 운영자(관리 화면) 아이디, 쉼표로 여러 개
 #
 # 하는 일: Node.js 22·Caddy 설치 → 코드 내려받기·빌드 → 서비스 등록(자동 재시작) → HTTPS 자동 발급 → 방화벽 80/443 열기
 # 다시 실행해도 안전합니다. 데이터(/var/lib/mungle)와 설정(/etc/mungle.env)은 덮어쓰지 않습니다.
@@ -13,6 +14,7 @@ set -euo pipefail
 DOMAIN="${1:-}"
 OPERATOR="${2:-}"
 CONTACT="${3:-}"
+ADMINS="${4:-}"
 REPO="${MUNGLE_REPO:-https://github.com/tjdus7911-ops/dog.git}"
 APP=/opt/mungle
 DATA=/var/lib/mungle
@@ -68,7 +70,7 @@ MUNGLE_BACKUP_HOURS=24
 MUNGLE_OPERATOR=$OPERATOR
 MUNGLE_CONTACT=$CONTACT
 # 운영자(관리 화면) 아이디, 쉼표로 여러 개
-MUNGLE_ADMINS=
+MUNGLE_ADMINS=$ADMINS
 # AI 강아지 사진 분석을 쓰려면 키 입력 (유료 API)
 ANTHROPIC_API_KEY=
 ENV
@@ -76,6 +78,7 @@ ENV
 else
   if [ -n "$OPERATOR" ]; then sed -i "s|^MUNGLE_OPERATOR=.*|MUNGLE_OPERATOR=$OPERATOR|" "$ENVFILE"; fi
   if [ -n "$CONTACT" ]; then sed -i "s|^MUNGLE_CONTACT=.*|MUNGLE_CONTACT=$CONTACT|" "$ENVFILE"; fi
+  if [ -n "$ADMINS" ]; then sed -i "s|^MUNGLE_ADMINS=.*|MUNGLE_ADMINS=$ADMINS|" "$ENVFILE"; fi
 fi
 
 cat > /etc/systemd/system/mungle.service <<UNIT
