@@ -5,8 +5,36 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
-/** 모든 캐릭터가 공유하는 재질: 정점 색상 + 부드러운 셰이딩, 무광 점토 느낌 */
-export const characterMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+/**
+ * 캐릭터 재질 (v4): 말랑한 피규어 질감
+ * - 정점 색상(부위별 칠하기·그라데이션) + 부드러운 PBR 셰이딩
+ * - 아래를 향한 면은 살짝 어둡게(가짜 앰비언트 오클루전) → 턱 밑·팔 안쪽이 자연스럽게 가라앉음
+ * - 가장자리에 따뜻한 역광(림 라이트) → 배경에서 캐릭터 실루엣이 또렷하게
+ */
+function softToy(m: THREE.MeshStandardMaterial, rim: number) {
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uRim = { value: rim };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWN;')
+      .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\nvWN = normalize(mat3(modelMatrix) * objectNormal);');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWN;\nuniform float uRim;')
+      .replace('#include <opaque_fragment>', `
+        float ao = mix(0.74, 1.0, smoothstep(-0.9, 0.35, vWN.y));
+        outgoingLight *= ao;
+        float fres = pow(1.0 - clamp(dot(normalize(vNormal), normalize(vViewPosition)), 0.0, 1.0), 2.6);
+        outgoingLight += vec3(1.0, 0.93, 0.84) * fres * uRim * (0.55 + 0.45 * smoothstep(-0.2, 0.8, vWN.y));
+        #include <opaque_fragment>`);
+  };
+  m.customProgramCacheKey = () => `softToy${rim}`;
+  return m;
+}
+export const characterMaterial = softToy(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, metalness: 0, side: THREE.DoubleSide }), 0.32);
+/** 눈·코처럼 반짝이는 부위 */
+export const glossyMaterial = softToy(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.16, metalness: 0, side: THREE.DoubleSide }), 0.12);
+
+/** 부위별 정점 칠하기: 관절 좌표계 위치·법선을 받아 색을 돌려준다 (그라데이션·무늬 경계를 부드럽게) */
+export type Painter = (p: THREE.Vector3, n: THREE.Vector3) => THREE.ColorRepresentation;
 
 const geoCache = new Map<string, THREE.BufferGeometry>();
 function cached<T extends THREE.BufferGeometry>(key: string, make: () => T): T {
@@ -59,9 +87,10 @@ export const shape = {
 type V3 = [number, number, number];
 
 /** 파츠 추가 헬퍼: parent 아래에 색상 메시를 배치 */
-export function part(parent: THREE.Object3D, geo: THREE.BufferGeometry, color: string, pos: V3 = [0, 0, 0], scale: V3 | number = 1, rot: V3 = [0, 0, 0]) {
+export function part(parent: THREE.Object3D, geo: THREE.BufferGeometry, color: string | Painter, pos: V3 = [0, 0, 0], scale: V3 | number = 1, rot: V3 = [0, 0, 0], opts: { gloss?: boolean } = {}) {
   const m = new THREE.Mesh(geo);
-  m.userData.color = color;
+  if (typeof color === 'function') { m.userData.color = '#ffffff'; m.userData.paint = color; } else m.userData.color = color;
+  if (opts.gloss) m.userData.gloss = true;
   m.position.set(...pos);
   typeof scale === 'number' ? m.scale.setScalar(scale) : m.scale.set(...scale);
   m.rotation.set(...rot);
@@ -98,6 +127,8 @@ export function onSurface(center: V3, radii: V3, yaw: number, pitch: number, k =
 }
 
 const tmpColor = new THREE.Color();
+const tmpP = new THREE.Vector3();
+const tmpN = new THREE.Vector3();
 
 /** 관절별로 하위 파츠를 하나의 지오메트리로 합친다 (부드러운 법선 유지). */
 export function bake(root: THREE.Group) {
@@ -124,6 +155,7 @@ export function bake(root: THREE.Group) {
     if (!meshes?.length) continue;
     inv.copy(b.matrixWorld).invert();
     const geos: THREE.BufferGeometry[] = [];
+    const gloss: THREE.BufferGeometry[] = [];
     for (const m of meshes) {
       const g = m.geometry.clone();
       for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
@@ -142,17 +174,26 @@ export function bake(root: THREE.Group) {
       tmpColor.set(m.userData.color);
       const n = g.attributes.position.count;
       const col = new Float32Array(n * 3);
-      for (let i = 0; i < n; i++) { col[i * 3] = tmpColor.r; col[i * 3 + 1] = tmpColor.g; col[i * 3 + 2] = tmpColor.b; }
+      const paint = m.userData.paint as Painter | undefined;
+      const pos = g.attributes.position, nor = g.attributes.normal;
+      for (let i = 0; i < n; i++) {
+        if (paint) { tmpP.fromBufferAttribute(pos, i); tmpN.fromBufferAttribute(nor, i); tmpColor.set(paint(tmpP, tmpN)); }
+        col[i * 3] = tmpColor.r; col[i * 3 + 1] = tmpColor.g; col[i * 3 + 2] = tmpColor.b;
+      }
       g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-      geos.push(g);
+      (m.userData.gloss ? gloss : geos).push(g);
       m.removeFromParent();
     }
-    const merged = mergeGeometries(geos, false)!;
-    geos.forEach((g) => g.dispose());
-    merged.computeBoundingSphere();
-    const mesh = new THREE.Mesh(merged, characterMaterial);
-    mesh.name = `${b.name || 'root'}-mesh`;
-    b.add(mesh);
+    for (const [list, material, suffix] of [[geos, characterMaterial, ''], [gloss, glossyMaterial, '-gloss']] as const) {
+      if (!list.length) continue;
+      const merged = mergeGeometries(list, false)!;
+      list.forEach((g) => g.dispose());
+      merged.computeBoundingSphere();
+      const mesh = new THREE.Mesh(merged, material);
+      mesh.name = `${b.name || 'root'}-mesh${suffix}`;
+      mesh.castShadow = true;
+      b.add(mesh);
+    }
   }
   const empty: THREE.Object3D[] = [];
   root.traverse((o) => { if (o.type === 'Group' && !o.userData.bone && o !== root && o.children.length === 0) empty.push(o); });

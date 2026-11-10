@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import type { DogAvatar } from '@shared/avatar';
 import { bone, group, onSurface, part, shape, templateCache } from './bake';
 import { shade } from './humanModel';
+import { earSlab, mix, noise3, sculptSphere, smooth } from './sculpt';
 
 type V3 = [number, number, number];
 const EYE = '#1f1714';
@@ -23,6 +24,7 @@ const EAR_SCALE = { small: 0.78, medium: 1, large: 1.22 } as const;
 const lum = (hex: string) => { const c = new THREE.Color(hex); return 0.299 * c.r + 0.587 * c.g + 0.114 * c.b; };
 
 function buildDog(a: DogAvatar): THREE.Group {
+  if (a.breed === 'corgi') return buildCorgi(a);
   const root = new THREE.Group();
   root.name = 'dog';
   // 다리가 길면 몸 전체를 올린다 (산책 애니메이션은 root.userData.baseY 기준으로 위아래로 움직임)
@@ -169,6 +171,146 @@ function buildDog(a: DogAvatar): THREE.Group {
   }
   // 혀 (뛰거나 인사할 때만 보이도록 별도 관절)
   const tongue = bone(head, 'tongue', [0, -0.09, mz + len * 0.6]);
+  part(tongue, shape.ball(), '#f2838f', [0, -0.012, 0.006], [0.022, 0.012, 0.028], [0.5, 0, 0]);
+  return root;
+}
+
+// ====================================================================================
+// 웰시코기 (v4 조형): 하나로 이어진 곡면 몸통·머리, 부드러운 경계의 털 무늬를 정점 색으로 직접 칠함
+// ====================================================================================
+function buildCorgi(a: DogAvatar): THREE.Group {
+  const root = new THREE.Group();
+  root.name = 'dog';
+  const legD = LEG_EXTRA[a.legLen] ?? 0;
+  const dz = BODY_EXTRA[a.bodyLen] ?? 0;
+  const w = BUILD_W[a.build] ?? 1;
+  const es = EAR_SCALE[a.earSize] ?? 1;
+  root.userData.baseY = legD;
+  const body = bone(root, 'body', [0, legD, 0]);
+  const coat = a.coat, white = a.secondary;
+  const coatTop = shade(coat, -0.05), coatLight = shade(coat, 0.07);
+  const Z = (z: number) => (z > 0.04 ? z + dz : z < -0.04 ? z - dz : z);
+
+  // ---------- 몸통: 등선은 평평, 가슴은 앞아래로 볼록, 엉덩이는 동그란 한 덩어리 ----------
+  const RX = 0.17 * w, RY = 0.15, RZ = 0.25 + dz * 0.95;
+  const BC: V3 = [0, 0.27, -0.02];
+  const bodyGeo = sculptSphere(`corgiBody${w}${dz}`, (d) => {
+    const chest = smooth(0.15, 0.85, d.z) * smooth(0.3, -0.7, d.y);
+    const back = smooth(0.35, 0.95, d.y);
+    const rump = smooth(-0.3, -0.95, d.z);
+    return new THREE.Vector3(
+      d.x * (1 + 0.04 * rump - 0.04 * back),
+      d.y * (1 - 0.1 * back) - 0.18 * chest + 0.04 * rump * smooth(0, 0.8, d.y),
+      d.z * (1 + 0.1 * chest),
+    );
+  });
+  const nz = (p: THREE.Vector3) => noise3(p.x * 9, p.y * 9, p.z * 9) * 0.012;
+  part(body, bodyGeo, (p, n) => {
+    const belly = smooth(0.215, 0.165, p.y + nz(p));
+    const bib = smooth(BC[2] + RZ * 0.42, BC[2] + RZ * 0.72, p.z + nz(p)) * smooth(0.4, 0.3, p.y);
+    let c = mix(coat, coatTop, smooth(0.5, 0.95, n.y) * 0.8);
+    c = mix(c, coatLight, smooth(0.0, -0.5, n.y) * 0.5);
+    return mix(c, white, Math.max(belly, bib));
+  }, BC, [RX, RY, RZ]);
+
+  // 목: 가슴과 머리를 잇는 볼륨 (앞은 흰 털)
+  const neckC: V3 = [0, 0.4, Z(0.15)];
+  part(body, shape.ball(28, 20), (p) => mix(coat, white, smooth(neckC[2] + 0.02, neckC[2] + 0.08, p.z + nz(p)) * smooth(0.52, 0.44, p.y)), neckC, [0.12 * w, 0.14, 0.12], [-0.35, 0, 0]);
+  // 가슴 솜털: 동글동글한 털 뭉치
+  for (const [x, y, z, r] of [[0, 0.3, 0.235, 0.085], [-0.035, 0.27, 0.215, 0.05], [0.035, 0.27, 0.215, 0.05]] as const) {
+    part(body, shape.ball(20, 14), white, [x * w, y, Z(z) - 0.02], [r, r * 0.95, r * 0.8]);
+  }
+  // 엉덩이 하트(흰 털) — 뒤에서 보면 코기 특유의 하트 엉덩이
+  for (const s of [-1, 1]) part(body, shape.ball(16, 12), white, [s * 0.05 * w, 0.215, Z(-0.24)], [0.062 * w, 0.068, 0.04]);
+
+  // 목걸이 + 금색 이름표 + 목줄 고리
+  part(body, shape.torus(0.105, 0.018), a.harness, [0, 0.43, Z(0.17)], [w, 1, 1], [Math.PI / 2 - 0.65, 0, 0]);
+  const tag = group(body, [0, 0.355, Z(0.265)], [-0.35, 0, 0]);
+  part(tag, shape.cyl(0.026, 0.026, 0.01, 20), GOLD, [0, 0, 0], 1, [Math.PI / 2, 0, 0], { gloss: true });
+  part(tag, shape.ball(), shade(GOLD, -0.22), [0, -0.003, 0.006], [0.009, 0.007, 0.003]);
+  part(body, shape.torus(0.024, 0.007), '#c9c9cf', [0, 0.5, Z(0.1)], 1, [0, Math.PI / 2, 0], { gloss: true });
+  const anchor = new THREE.Object3D();
+  anchor.name = 'anchor';
+  anchor.position.set(0, 0.51, Z(0.1));
+  body.add(anchor);
+
+  // ---------- 다리: 짧고 통통, 흰 양말 + 발가락 ----------
+  const legs: [string, number, number][] = [['legFL', 0.085, 0.14], ['legFR', -0.085, 0.14], ['legBL', 0.09, -0.16], ['legBR', -0.09, -0.16]];
+  for (const [name, x, z] of legs) {
+    const leg = bone(body, name, [x * w, 0.19, Z(z)]);
+    const front = z > 0;
+    const sock = (p: THREE.Vector3) => mix(coat, white, smooth(front ? -0.02 : -0.06, front ? -0.06 : -0.1, p.y - legD + noise3(p.x * 30, 0, p.z * 30) * 0.008));
+    // 허벅지·어깨 근육이 몸통과 자연스럽게 이어지도록 큰 타원을 겹침
+    part(leg, shape.ball(20, 16), coat, [x > 0 ? -0.01 : 0.01, 0.045, front ? 0.0 : -0.01], front ? [0.052 * w, 0.075, 0.064] : [0.064 * w, 0.088, 0.085]);
+    part(leg, shape.capsule(0.048, 0.07 + legD), sock, [0, -0.06 - legD / 2, 0.003]);
+    // 발: 앞이 둥근 콩 모양 + 발가락 홈 3줄
+    part(leg, shape.ball(20, 14), white, [0, -0.152 - legD, 0.02], [0.054, 0.032, 0.066]);
+    for (const dx of [-0.02, 0, 0.02]) part(leg, shape.ball(8, 6), shade(white, -0.12), [dx, -0.15 - legD, 0.083], [0.0035, 0.014, 0.004]);
+  }
+
+  // ---------- 꼬리: 몽실한 솜털 꼬리 ----------
+  const tail = bone(body, 'tail', [0, 0.35, BC[2] - RZ + 0.01]);
+  part(tail, shape.ball(16, 12), coat, [0, 0.01, -0.02], [0.05, 0.05, 0.05]);
+  part(tail, shape.ball(16, 12), coatLight, [0, 0.03, -0.045], [0.042, 0.042, 0.04]);
+
+  // ---------- 머리: 주둥이가 이어진 한 덩어리 곡면 ----------
+  const head = bone(body, 'head', [0, 0.48, 0.21 + dz]);
+  const hr: V3 = [0.205, 0.182, 0.178];
+  const len = a.snout === 'short' ? 0.35 : a.snout === 'medium' ? 0.52 : 0.7;
+  const M = new THREE.Vector3(0, -0.42, 1).normalize();
+  const headGeo = sculptSphere(`corgiHead${len}`, (d) => {
+    const t = smooth(0.5, 0.97, d.dot(M));
+    const cheek = smooth(-0.05, -0.55, d.y) * smooth(0.3, 0.8, Math.abs(d.x));
+    const v = d.clone();
+    v.x *= (1 - 0.32 * t) * (1 + 0.07 * cheek);
+    v.y *= 1 - 0.18 * t;
+    v.addScaledVector(M, len * t * t);
+    // 이마는 살짝 둥글게 솟고, 주둥이 위(스톱)는 살짝 들어감
+    v.y += 0.04 * smooth(0.55, 0.95, d.y) * smooth(0.0, 0.6, d.z);
+    return v;
+  });
+  // 칠하기 기준: 머리 좌표 → 단위 방향
+  const blushPts = [-1, 1].map((s) => new THREE.Vector3(s * 0.13, -0.075, 0.12));
+  part(head, headGeo, (p) => {
+    const u = new THREE.Vector3(p.x / hr[0], p.y / hr[1], p.z / hr[2]);
+    const r = u.length();
+    const dir = u.clone().normalize();
+    const muzzle = smooth(0.86, 0.93, dir.dot(M) + nz(p) * 3) * smooth(0.95, 1.05, r * 0.98 + 0.06);
+    const lowFront = smooth(-0.4, -0.65, dir.y) * smooth(0.3, 0.7, dir.z);
+    const blazeW = 0.035 + 0.03 * smooth(0.2, -0.15, p.y);
+    const blaze = smooth(blazeW + 0.012, blazeW - 0.004, Math.abs(p.x)) * smooth(0.0, 0.08, p.z) * smooth(0.2, 0.12, p.y);
+    let c = mix(coat, coatTop, smooth(0.4, 0.95, dir.y) * 0.7);
+    c = mix(c, white, Math.max(muzzle, lowFront, blaze));
+    for (const b of blushPts) c = mix(c, '#f7a6a0', (1 - smooth(0.015, 0.05, p.distanceTo(b))) * 0.55);
+    return c;
+  }, [0, 0, 0], hr);
+  // 코: 반짝이는 둥근 세모 코 + 하이라이트
+  const tip = M.clone().multiplyScalar(1 + len * 0.98);
+  const nosePos: V3 = [0, tip.y * hr[1] * 0.82 + 0.012, tip.z * hr[2]];
+  part(head, shape.ball(20, 14), NOSE, nosePos, [0.034, 0.025, 0.024], [0.25, 0, 0], { gloss: true });
+  part(head, shape.ball(8, 6), WHITE, [nosePos[0] - 0.01, nosePos[1] + 0.011, nosePos[2] + 0.018], [0.008, 0.005, 0.004]);
+  // 입: 코 아래 'ㅅ' 선 + 웃는 입꼬리 두 개
+  const mouthY = nosePos[1] - 0.04, mouthZ = nosePos[2] - 0.012;
+  part(head, shape.capsule(0.004, 0.02), '#3a2620', [0, nosePos[1] - 0.026, nosePos[2] + 0.0], 1, [0.3, 0, 0]);
+  for (const s of [-1, 1]) part(head, shape.torus(0.02, 0.0045, Math.PI * 0.9, 6, 14), '#3a2620', [s * 0.019, mouthY, mouthZ], [1, 0.9, 1], [-0.2, s * 0.35, Math.PI + 0.15]);
+  // 눈: 반짝이는 큰 눈 (짙은 갈색 → 검은 동공) + 하이라이트 2개 + 눈두덩 크림 털
+  for (const s of [-1, 1]) {
+    const e = onSurface([0, 0, 0], hr, s * 0.44, 0.1, 0.97);
+    part(head, shape.ball(20, 16), (p) => mix('#1b1210', '#4b2c22', smooth(e[1] - 0.005, e[1] - 0.035, p.y)), e, [0.034, 0.04, 0.02], [0, s * 0.44, 0], { gloss: true });
+    part(head, shape.ball(10, 8), WHITE, [e[0] + 0.011 * s * 0 + 0.01, e[1] + 0.016, e[2] + 0.016], [0.011, 0.012, 0.005]);
+    part(head, shape.ball(8, 6), WHITE, [e[0] - 0.008, e[1] - 0.014, e[2] + 0.015], 0.005);
+    // 눈썹 자리 크림색 점
+    part(head, shape.ball(10, 8), shade(white, -0.02), onSurface([0, 0, 0], hr, s * 0.36, 0.42, 0.995), [0.025, 0.014, 0.012], [0, s * 0.36, s * 0.3]);
+  }
+  // 귀: 크게 쫑긋 선 둥근 삼각형 (두께·오목함 있음) + 안쪽 분홍 털
+  for (const s of [-1, 1]) {
+    const g = group(head, [s * 0.112, 0.12, -0.035], [-0.12, s * -0.18, s * -0.3]);
+    g.scale.setScalar(es);
+    part(g, earSlab(0.15, 0.19, 0.016, 0.3), shade(coat, -0.02), [0, 0, 0]);
+    part(g, earSlab(0.095, 0.13, 0.006, 0.3), (p) => mix(INNER_EAR, '#fff1ea', smooth(0.0, 0.09, p.y - 0.1)), [0, 0.016, 0.019]);
+  }
+  // 혀 (뛰거나 인사할 때만 보이도록 별도 관절)
+  const tongue = bone(head, 'tongue', [0, mouthY - 0.01, mouthZ - 0.005]);
   part(tongue, shape.ball(), '#f2838f', [0, -0.012, 0.006], [0.022, 0.012, 0.028], [0.5, 0, 0]);
   return root;
 }

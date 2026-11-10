@@ -1,11 +1,16 @@
-import { StrictMode } from 'react';
+import { lazy, StrictMode, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
 import { App } from './ui/App';
 
+// 모델 작업대: 자동 화면 테스트 표시(mungle.e2e)가 있을 때만 ?lab 으로 열림
+let lab = false;
+try { lab = new URLSearchParams(location.search).has('lab') && localStorage.getItem('mungle.e2e') === '1'; } catch { /* 무시 */ }
+const ModelLab = lazy(() => import('./ui/ModelLab'));
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    {lab ? <Suspense fallback={null}><ModelLab /></Suspense> : <App />}
   </StrictMode>,
 );
 

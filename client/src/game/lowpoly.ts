@@ -34,7 +34,7 @@ export const geo = {
 };
 
 /** 캐릭터 발밑 원형 그림자 (실시간 그림자맵 대신 사용 — 가볍고 부드러운 표현) */
-export const blobShadowMat = new THREE.MeshBasicMaterial({ color: '#4a3b2a', transparent: true, opacity: 0.16, depthWrite: false });
+export const blobShadowMat = new THREE.MeshBasicMaterial({ color: '#4a3b2a', transparent: true, opacity: 0.1, depthWrite: false });
 
 export const PALETTE = {
   grass: '#a9d38f',

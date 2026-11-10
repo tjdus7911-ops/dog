@@ -147,6 +147,8 @@ function prefersCollapsed() {
 }
 export function QuickMenu() {
   const touch = isTouchDevice();
+  // 실내(로비·집·카페·샵)는 왼쪽 위에 장소 버튼 줄이 있어 그 아래로 내림
+  const indoor = useStore((s) => s.park?.kind !== 'park');
   const [closed, setClosed] = useState(prefersCollapsed);
   const toggle = () => { setClosed(!closed); try { localStorage.setItem('mungle.quick', closed ? 'open' : 'closed'); } catch { /* 무시 */ } };
   const items = [
@@ -157,7 +159,7 @@ export function QuickMenu() {
   ];
   return (
     <div className="absolute z-10 right-2 md:right-3 flex flex-col items-center gap-2"
-      style={{ top: touch ? `calc(var(--safe-t) + ${MOBILE_TOP_ROWS}px)` : 78 }}>
+      style={{ top: touch ? `calc(var(--safe-t) + ${MOBILE_TOP_ROWS + (indoor ? 58 : 0)}px)` : 78 }}>
       {!closed && items.map((it) => (
         <button key={it.label} onClick={it.onClick} aria-label={it.label}
           className="w-[54px] h-[54px] rounded-[18px] bg-[#fffaf4]/92 border-2 border-white shadow-[0_3px_10px_rgba(90,64,51,.16)] flex flex-col items-center justify-center gap-0.5 active:scale-95 transition">

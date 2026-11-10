@@ -9,14 +9,16 @@ import {
   RING_RADIUS, TREES, WORLD_RADIUS, isOnPath, type BuildingDef,
 } from '@shared/world';
 import { PALETTE, geo, mat } from './lowpoly';
+import { lathe, smoothProfile } from './models/sculpt';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { set } from '../store';
 
 interface Inst { p: [number, number, number]; r?: [number, number, number]; s?: [number, number, number] | number; c: string }
 
 /** 인스턴스 묶음: 한 지오메트리를 여러 위치/색상으로 한 번에 그린다 */
-function Instanced({ geometry, items }: { geometry: THREE.BufferGeometry; items: Inst[] }) {
+function Instanced({ geometry, items, smooth = false, noCast = false }: { geometry: THREE.BufferGeometry; items: Inst[]; smooth?: boolean; noCast?: boolean }) {
   const ref = useRef<THREE.InstancedMesh>(null!);
-  const material = useMemo(() => new THREE.MeshLambertMaterial({ color: '#ffffff', flatShading: true }), []);
+  const material = useMemo(() => (smooth ? new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.9, vertexColors: !!geometry.attributes.color }) : new THREE.MeshLambertMaterial({ color: '#ffffff', flatShading: true })), [smooth, geometry]);
   useLayoutEffect(() => {
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3(), col = new THREE.Color();
     items.forEach((it, i) => {
@@ -32,7 +34,72 @@ function Instanced({ geometry, items }: { geometry: THREE.BufferGeometry; items:
     if (ref.current.instanceColor) ref.current.instanceColor.needsUpdate = true;
     ref.current.computeBoundingSphere();
   }, [items]);
-  return <instancedMesh ref={ref} args={[geometry, material, items.length]} frustumCulled={false} />;
+  return <instancedMesh ref={ref} args={[geometry, material, items.length]} frustumCulled={false} userData={{ noCast }} />;
+}
+
+/** 몽실한 나뭇잎·구름 덩어리: 매끈한 구에 큰 혹을 여러 개 붙이고, 아래는 어둡게 위는 밝게 정점 색을 넣음 */
+function makePuff(seed: number, bottomShade = 0.78, topShade = 1.06, flatBottom = 0) {
+  const g = mergeVertices(new THREE.SphereGeometry(1, 28, 20));
+  const r = seeded(seed);
+  const bumps = Array.from({ length: 9 }, () => new THREE.Vector3(r() * 2 - 1, r() * 1.4 - 0.4, r() * 2 - 1).normalize());
+  const pos = g.attributes.position;
+  const v = new THREE.Vector3();
+  const col: number[] = [];
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    let k = 1;
+    for (const b of bumps) k += 0.13 * Math.pow(Math.max(0, v.dot(b)), 5);
+    v.multiplyScalar(k);
+    if (flatBottom && v.y < -flatBottom) v.y = -flatBottom + (v.y + flatBottom) * 0.25;
+    pos.setXYZ(i, v.x, v.y, v.z);
+    const t = THREE.MathUtils.smoothstep(v.y, -0.9, 0.9);
+    const c = bottomShade + (topShade - bottomShade) * t;
+    col.push(c, c, c);
+  }
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+/** 광장 바닥 타일 텍스처 (파스텔 벽돌) */
+function makePlazaTexture() {
+  const S = 512, c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#e9cdbb'; g.fillRect(0, 0, S, S);
+  const r = seeded(41);
+  const rows = 8, cols = 4, th = S / rows, tw = S / cols;
+  const palette = ['#f6e2d4', '#f3dccb', '#f8e7db', '#f1d6c6', '#f5dfd2'];
+  for (let y = 0; y < rows; y++) {
+    for (let x = -1; x < cols + 1; x++) {
+      const ox = (y % 2) * tw / 2;
+      g.fillStyle = palette[Math.floor(r() * palette.length)];
+      const px = x * tw + ox + 3, py = y * th + 3, w = tw - 6, h = th - 6, rr = 6;
+      g.beginPath(); g.moveTo(px + rr, py); g.arcTo(px + w, py, px + w, py + h, rr); g.arcTo(px + w, py + h, px, py + h, rr); g.arcTo(px, py + h, px, py, rr); g.arcTo(px, py, px + w, py, rr); g.closePath(); g.fill();
+      // 타일 위쪽 하이라이트
+      g.fillStyle = 'rgba(255,255,255,0.18)'; g.fillRect(px + 4, py + 3, w - 8, 4);
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 4;
+  return t;
+}
+
+/** 분수 물줄기 텍스처 (세로 물결 줄무늬, 위아래로 흘러감) */
+function makeWaterTexture() {
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 256;
+  const g = c.getContext('2d')!;
+  const grad = g.createLinearGradient(0, 0, 64, 0);
+  grad.addColorStop(0, 'rgba(255,255,255,0.15)'); grad.addColorStop(0.5, 'rgba(255,255,255,0.55)'); grad.addColorStop(1, 'rgba(255,255,255,0.15)');
+  g.fillStyle = '#bfeaf7'; g.fillRect(0, 0, 64, 256);
+  const r = seeded(5);
+  for (let i = 0; i < 40; i++) { g.fillStyle = `rgba(255,255,255,${0.2 + r() * 0.5})`; g.fillRect(r() * 64, r() * 256, 2 + r() * 3, 20 + r() * 50); }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
 }
 
 function seeded(seed: number) {
@@ -59,21 +126,23 @@ export function World() {
 
 function Sky() {
   const g = useMemo(() => {
-    const geom = new THREE.SphereGeometry(180, 16, 10);
-    const top = new THREE.Color('#bfe3f5'), bottom = new THREE.Color('#fff2e3');
+    const geom = new THREE.SphereGeometry(180, 32, 20);
+    // 맑은 하늘: 위는 파스텔 하늘색, 지평선은 하얗게 밝고 아주 살짝 따뜻하게
+    const top = new THREE.Color('#7fc4ee'), mid = new THREE.Color('#b9e1f6'), bottom = new THREE.Color('#f4f8f2');
     const pos = geom.attributes.position;
     const colors: number[] = [];
     const c = new THREE.Color();
     for (let i = 0; i < pos.count; i++) {
-      const y = THREE.MathUtils.clamp(pos.getY(i) / 120, 0, 1);
-      c.copy(bottom).lerp(top, Math.pow(y, 0.6));
+      const y = THREE.MathUtils.clamp(pos.getY(i) / 150, 0, 1);
+      if (y < 0.25) c.copy(bottom).lerp(mid, Math.pow(y / 0.25, 0.8));
+      else c.copy(mid).lerp(top, Math.pow((y - 0.25) / 0.75, 0.9));
       colors.push(c.r, c.g, c.b);
     }
     geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     return geom;
   }, []);
   return (
-    <mesh geometry={g}>
+    <mesh geometry={g} userData={{ noShadow: true }}>
       <meshBasicMaterial vertexColors side={THREE.BackSide} fog={false} depthWrite={false} />
     </mesh>
   );
@@ -112,13 +181,19 @@ function Ground() {
 }
 
 function Paths() {
+  const { plazaGeo, plazaMat } = useMemo(() => {
+    const t = makePlazaTexture();
+    t.repeat.set(PLAZA_RADIUS * 2 / 2.2, PLAZA_RADIUS * 2 / 2.2); // 타일 묶음 하나가 약 2.2m
+    return { plazaGeo: new THREE.CircleGeometry(PLAZA_RADIUS, 64), plazaMat: new THREE.MeshLambertMaterial({ map: t }) };
+  }, []);
   return (
     <group>
       {/* 광장 */}
       <mesh geometry={geo.circle(PLAZA_RADIUS + 0.25, 24)} material={mat(PALETTE.pathEdge)} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]} />
-      <mesh geometry={geo.circle(PLAZA_RADIUS, 24)} material={mat(PALETTE.path)} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]} />
-      {/* 광장 바닥 패턴 */}
-      <mesh geometry={geo.ring(4.2, 4.5, 24)} material={mat(PALETTE.pathEdge)} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.025, 0]} />
+      {/* 광장: 파스텔 벽돌 타일 + 분수 둘레 원형 띠 */}
+      <mesh geometry={plazaGeo} material={plazaMat} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]} />
+      <mesh geometry={geo.ring(FOUNTAIN_RADIUS + 0.55, FOUNTAIN_RADIUS + 0.95, 48)} material={mat('#e7c3ad')} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.026, 0]} />
+      <mesh geometry={geo.ring(PLAZA_RADIUS - 0.45, PLAZA_RADIUS - 0.15, 64)} material={mat('#e7c3ad')} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.026, 0]} />
       {/* 순환 산책로 */}
       <mesh geometry={geo.ring(RING_RADIUS - PATH_WIDTH / 2 - 0.2, RING_RADIUS + PATH_WIDTH / 2 + 0.2, 48)} material={mat(PALETTE.pathEdge)} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]} />
       <mesh geometry={geo.ring(RING_RADIUS - PATH_WIDTH / 2, RING_RADIUS + PATH_WIDTH / 2, 48)} material={mat(PALETTE.path)} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]} />
@@ -143,30 +218,66 @@ function Paths() {
 
 function Fountain() {
   const spray = useRef<THREE.Group>(null!);
-  useFrame(({ clock }) => {
+  const ripples = useRef<THREE.Group>(null!);
+  const R = FOUNTAIN_RADIUS;
+  const parts = useMemo(() => {
+    const waterTex = makeWaterTexture();
+    const curtainTex = waterTex.clone(); curtainTex.needsUpdate = true; curtainTex.repeat.set(6, 1);
+    const jetTex = waterTex.clone(); jetTex.needsUpdate = true; jetTex.repeat.set(2, 1);
+    const stone = new THREE.MeshStandardMaterial({ color: '#efe7dc', roughness: 0.85 });
+    const stoneDark = new THREE.MeshStandardMaterial({ color: '#dccfbf', roughness: 0.85 });
+    const pool = new THREE.MeshStandardMaterial({ color: '#86d3ec', roughness: 0.15, metalness: 0.0, transparent: true, opacity: 0.9, emissive: '#4fb6da', emissiveIntensity: 0.18 });
+    const curtain = new THREE.MeshStandardMaterial({ map: curtainTex, color: '#dff6fd', transparent: true, opacity: 0.45, roughness: 0.2, side: THREE.DoubleSide, depthWrite: false, emissive: '#bfeaf7', emissiveIntensity: 0.25 });
+    const jet = new THREE.MeshStandardMaterial({ map: jetTex, color: '#e8f9ff', transparent: true, opacity: 0.7, roughness: 0.2, depthWrite: false, emissive: '#cdeffb', emissiveIntensity: 0.35 });
+    const rings = [0, 1, 2].map(() => new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.35, depthWrite: false }));
+    return {
+      stone, stoneDark, pool, curtain, jet, rings, curtainTex, jetTex,
+      basin: lathe('fBasin', smoothProfile([[R - 0.2, 0.0], [R + 0.18, 0.0], [R + 0.25, 0.1], [R + 0.2, 0.42], [R + 0.08, 0.58], [R - 0.08, 0.6], [R - 0.2, 0.52], [R - 0.22, 0.2]], 30), 64),
+      pillar: lathe('fPillar', smoothProfile([[0.55, 0.3], [0.42, 0.5], [0.3, 0.75], [0.26, 1.2], [0.3, 1.4], [0.42, 1.5]], 24), 40),
+      bowl: lathe('fBowl', smoothProfile([[0.3, 1.42], [0.7, 1.5], [1.08, 1.66], [1.2, 1.8], [1.12, 1.86], [0.95, 1.78], [0.2, 1.76]], 28), 56),
+      top: lathe('fTop', smoothProfile([[0.24, 1.76], [0.16, 1.95], [0.14, 2.15], [0.22, 2.3], [0.3, 2.42], [0.2, 2.52], [0.02, 2.56]], 24), 32),
+      curtainGeo: new THREE.CylinderGeometry(1.19, 1.32, 1.3, 48, 1, true),
+      jetGeo: new THREE.CylinderGeometry(0.05, 0.12, 0.75, 16, 1, true),
+    };
+  }, [R]);
+  useFrame(({ clock }, dt) => {
     const t = clock.elapsedTime;
+    parts.curtainTex.offset.y -= dt * 0.9;
+    parts.jetTex.offset.y += dt * 1.4;
     spray.current.children.forEach((c, i) => {
-      const k = (t * 0.9 + i / spray.current.children.length) % 1;
-      const a = (i / spray.current.children.length) * Math.PI * 2;
-      c.position.set(Math.sin(a) * k * 1.1, 2.15 + Math.sin(k * Math.PI) * 0.6 - k * 0.7, Math.cos(a) * k * 1.1);
-      c.scale.setScalar(1 - k * 0.5);
+      const n = spray.current.children.length;
+      const k = (t * 0.8 + i / n) % 1;
+      const a = (i / n) * Math.PI * 2;
+      c.position.set(Math.sin(a) * (0.1 + k * 0.95), 2.95 + Math.sin(k * Math.PI) * 0.45 - k * 1.1, Math.cos(a) * (0.1 + k * 0.95));
+      c.scale.setScalar(1 - k * 0.55);
+    });
+    ripples.current.children.forEach((c, i) => {
+      const k = (t * 0.35 + i / 3) % 1;
+      c.scale.setScalar(R - 0.9 + k * 0.6);
+      ((c as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.32 * (1 - k);
     });
   });
-  const stone = mat(PALETTE.stone), dark = mat(PALETTE.stoneDark), water = mat(PALETTE.water);
   return (
     <group>
-      <mesh geometry={geo.cyl(FOUNTAIN_RADIUS, FOUNTAIN_RADIUS + 0.15, 0.55, 10)} material={stone} position={[0, 0.27, 0]} />
-      <mesh geometry={geo.cyl(FOUNTAIN_RADIUS - 0.25, FOUNTAIN_RADIUS - 0.25, 0.05, 10)} material={water} position={[0, 0.5, 0]} />
-      <mesh geometry={geo.cyl(0.35, 0.5, 1.1, 8)} material={dark} position={[0, 1.0, 0]} />
-      <mesh geometry={geo.cyl(1.15, 0.7, 0.32, 9)} material={stone} position={[0, 1.6, 0]} />
-      <mesh geometry={geo.cyl(1.0, 1.0, 0.05, 9)} material={water} position={[0, 1.75, 0]} />
-      {/* 꼭대기: 발바닥 장식 */}
-      <group position={[0, 2.1, 0]}>
-        <mesh geometry={geo.cyl(0.18, 0.24, 0.55, 6)} material={dark} />
-        <mesh geometry={geo.ico(0.2, 0)} material={mat('#fdf6ec')} position={[0, 0.38, 0]} scale={[1.1, 0.8, 1.1]} />
+      <mesh geometry={parts.basin} material={parts.stone} />
+      <mesh geometry={geo.circle(R - 0.2, 48)} material={parts.pool} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.44, 0]} userData={{ noCast: true }} />
+      <group ref={ripples} position={[0, 0.455, 0]}>
+        {[0, 1, 2].map((i) => <mesh key={i} geometry={geo.ring(0.96, 1.0, 48)} material={parts.rings[i]} rotation={[-Math.PI / 2, 0, 0]} userData={{ noShadow: true }} />)}
       </group>
+      <mesh geometry={parts.pillar} material={parts.stoneDark} />
+      <mesh geometry={parts.bowl} material={parts.stone} />
+      <mesh geometry={geo.circle(1.06, 40)} material={parts.pool} rotation={[-Math.PI / 2, 0, 0]} position={[0, 1.79, 0]} userData={{ noCast: true }} />
+      <mesh geometry={parts.top} material={parts.stoneDark} />
+      {/* 꼭대기 발바닥 장식 */}
+      <group position={[0, 2.62, 0]}>
+        <mesh geometry={geo.sphere(0.13, 14, 10)} material={mat('#fdf6ec')} scale={[1.2, 0.85, 1.1]} />
+        {[[-0.13, 0.12], [-0.05, 0.19], [0.05, 0.19], [0.13, 0.12]].map(([x, y], i) => <mesh key={i} geometry={geo.sphere(0.05, 10, 8)} material={mat('#fdf6ec')} position={[x, y - 0.02, 0]} />)}
+      </group>
+      {/* 물줄기: 위로 솟는 분수 + 위 그릇에서 흘러내리는 물 커튼 */}
+      <mesh geometry={parts.jetGeo} material={parts.jet} position={[0, 2.85, 0]} userData={{ noShadow: true }} />
+      <mesh geometry={parts.curtainGeo} material={parts.curtain} position={[0, 1.18, 0]} userData={{ noShadow: true }} />
       <group ref={spray}>
-        {Array.from({ length: 10 }).map((_, i) => <mesh key={i} geometry={geo.ico(0.07, 0)} material={mat('#c8ecf6')} />)}
+        {Array.from({ length: 14 }).map((_, i) => <mesh key={i} geometry={geo.sphere(0.06, 8, 6)} material={parts.jet} userData={{ noShadow: true }} />)}
       </group>
     </group>
   );
@@ -188,48 +299,69 @@ function Trees() {
           : [[0, 2.0, 0, 1.15], [0.45, 2.55, 0.15, 0.75], [-0.5, 1.7, 0.3, 0.7]];
         blobs.forEach(([x, y, z, sz], k) => {
           const c = Math.cos(t.rot), sn = Math.sin(t.rot);
-          foliage.push({ p: [t.x + (x * c - z * sn) * s, y * s, t.z + (x * sn + z * c) * s], r: [r(), r() * 3, r()], s: sz * s, c: pal[(k + Math.floor(r() * 3)) % pal.length] });
+          foliage.push({ p: [t.x + (x * c - z * sn) * s, y * s, t.z + (x * sn + z * c) * s], r: [0, r() * 6, 0], s: sz * s * 0.95, c: pal[(k + Math.floor(r() * 3)) % pal.length] });
         });
       }
     }
     return { trunks, foliage, pines };
   }, []);
   const shadows = useMemo<Inst[]>(() => TREES.map((t) => ({ p: [t.x, 0.04, t.z], r: [-Math.PI / 2, 0, 0], s: 1.3 * t.scale, c: '#93c07c' })), []);
+  // 몽실한 잎 덩어리(아래는 어둡게, 위는 밝게) · 매끈한 원뿔 침엽수
+  const puff = useMemo(() => makePuff(13, 0.72, 1.08), []);
+  const pineGeo = useMemo(() => {
+    const g = new THREE.ConeGeometry(1, 1.3, 12, 3);
+    const pos = g.attributes.position;
+    const col: number[] = [];
+    for (let i = 0; i < pos.count; i++) { const c = 0.8 + 0.28 * THREE.MathUtils.smoothstep(pos.getY(i), -0.65, 0.65); col.push(c, c, c); }
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    return g;
+  }, []);
   return (
     <group>
-      <Instanced geometry={geo.circle(1, 8)} items={shadows} />
-      <Instanced geometry={geo.cyl(0.14, 0.22, 1.4, 5)} items={trunks} />
-      <Instanced geometry={geo.ico(1, 0)} items={foliage} />
-      <Instanced geometry={geo.cone(1, 1.3, 6)} items={pines} />
+      <Instanced geometry={geo.circle(1, 16)} items={shadows} noCast />
+      <Instanced geometry={geo.cyl(0.14, 0.22, 1.4, 8)} items={trunks} />
+      <Instanced geometry={puff} items={foliage} smooth />
+      <Instanced geometry={pineGeo} items={pines} smooth />
     </group>
   );
 }
 
+const HYDRANGEA = ['#b9a6e8', '#a7bdf2', '#f2b6d2', '#f7cfe1', '#cdb9f2', '#fde2a8'];
 function Flowers() {
-  const { blooms, beds } = useMemo(() => {
+  const { blooms, beds, leaves, daisies } = useMemo(() => {
     const r = seeded(19);
-    const blooms: Inst[] = [], beds: Inst[] = [];
+    const blooms: Inst[] = [], beds: Inst[] = [], leaves: Inst[] = [], daisies: Inst[] = [];
     for (const f of FLOWER_BEDS) {
-      beds.push({ p: [f.x, 0.03, f.z], r: [-Math.PI / 2, 0, 0], s: f.r, c: '#93c27b' });
-      const n = Math.round(f.r * 14);
+      beds.push({ p: [f.x, 0.03, f.z], r: [-Math.PI / 2, 0, 0], s: f.r, c: '#8fbf79' });
+      // 수국 덤불: 잎 덩어리 위에 작은 꽃송이 공을 여러 개 모아 붙임
+      const n = Math.round(f.r * 5);
       for (let i = 0; i < n; i++) {
-        const a = r() * Math.PI * 2, d = Math.sqrt(r()) * (f.r - 0.15);
-        blooms.push({ p: [f.x + Math.sin(a) * d, 0.16 + r() * 0.08, f.z + Math.cos(a) * d], r: [r(), r(), r()], s: 0.9 + r() * 0.5, c: PALETTE.flower[Math.floor(r() * PALETTE.flower.length)] });
+        const a = (i / n) * Math.PI * 2 + r() * 0.6, d = (0.35 + r() * 0.5) * (f.r - 0.35);
+        const cx = f.x + Math.sin(a) * d, cz = f.z + Math.cos(a) * d;
+        const color = HYDRANGEA[Math.floor(r() * HYDRANGEA.length)];
+        leaves.push({ p: [cx, 0.16, cz], r: [0, r() * 6, 0], s: [0.36, 0.22, 0.36], c: r() < 0.5 ? '#7fb56e' : '#6fa860' });
+        for (let k = 0; k < 7; k++) {
+          const ka = r() * Math.PI * 2, kd = r() * 0.17;
+          blooms.push({ p: [cx + Math.sin(ka) * kd, 0.34 + r() * 0.12, cz + Math.cos(ka) * kd], s: 0.85 + r() * 0.4, c: color });
+        }
       }
     }
     // 잔디 위 흩어진 데이지
-    while (blooms.length < 420) {
+    while (daisies.length < 380) {
       const a = r() * Math.PI * 2, d = 4 + r() * 30;
       const x = Math.sin(a) * d, z = Math.cos(a) * d;
       if (isOnPath(x, z, 0.4)) continue;
-      blooms.push({ p: [x, 0.08, z], r: [r(), r(), r()], s: 0.8, c: r() < 0.7 ? '#ffffff' : '#f6c453' });
+      daisies.push({ p: [x, 0.08, z], r: [r(), r(), r()], s: 0.8, c: r() < 0.7 ? '#ffffff' : '#f6c453' });
     }
-    return { blooms, beds };
+    return { blooms, beds, leaves, daisies };
   }, []);
+  const bloomGeo = useMemo(() => makePuff(23, 0.85, 1.08), []);
   return (
     <group>
-      <Instanced geometry={geo.circle(1, 9)} items={beds} />
-      <Instanced geometry={geo.ico(0.07, 0)} items={blooms} />
+      <Instanced geometry={geo.circle(1, 20)} items={beds} noCast />
+      <Instanced geometry={bloomGeo} items={leaves} smooth noCast />
+      <Instanced geometry={geo.sphere(0.085, 10, 8)} items={blooms} smooth noCast />
+      <Instanced geometry={geo.ico(0.07, 0)} items={daisies} noCast />
     </group>
   );
 }
@@ -429,19 +561,20 @@ function Clouds() {
   const ref = useRef<THREE.Group>(null!);
   const clouds = useMemo(() => {
     const r = seeded(29);
-    return Array.from({ length: 9 }).map(() => ({ x: (r() - 0.5) * 140, y: 22 + r() * 10, z: -40 - r() * 60 + (r() < 0.4 ? 110 : 0), s: 2 + r() * 2.5 }));
+    return Array.from({ length: 11 }).map(() => ({ x: (r() - 0.5) * 160, y: 26 + r() * 14, z: -45 - r() * 60 + (r() < 0.35 ? 120 : 0), s: 2.6 + r() * 2.6 }));
   }, []);
+  const puff = useMemo(() => makePuff(31, 0.86, 1.0, 0.35), []);
+  const white = useMemo(() => new THREE.MeshStandardMaterial({ color: '#ffffff', vertexColors: true, roughness: 1, emissive: '#ffffff', emissiveIntensity: 0.35, fog: false }), []);
   useFrame((_, dt) => {
-    ref.current.children.forEach((c) => { c.position.x += dt * 0.6; if (c.position.x > 80) c.position.x = -80; });
+    ref.current.children.forEach((c) => { c.position.x += dt * 0.6; if (c.position.x > 90) c.position.x = -90; });
   });
-  const white = mat('#ffffff');
   return (
     <group ref={ref}>
       {clouds.map((c, i) => (
         <group key={i} position={[c.x, c.y, c.z]} scale={c.s}>
-          <mesh geometry={geo.dodeca(1)} material={white} />
-          <mesh geometry={geo.dodeca(0.75)} material={white} position={[1.1, -0.2, 0]} />
-          <mesh geometry={geo.dodeca(0.7)} material={white} position={[-1.05, -0.25, 0.1]} />
+          {([[0, 0, 0, 1.1], [1.15, -0.2, 0.1, 0.8], [-1.1, -0.25, 0.05, 0.78], [0.45, 0.45, -0.1, 0.72], [-0.5, 0.35, 0.15, 0.65]] as const).map(([x, y, z, sc], k) => (
+            <mesh key={k} geometry={puff} material={white} position={[x, y, z]} scale={[sc, sc * 0.8, sc * 0.9]} userData={{ noShadow: true }} />
+          ))}
         </group>
       ))}
     </group>

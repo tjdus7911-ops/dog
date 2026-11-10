@@ -4,13 +4,13 @@
 import * as THREE from 'three';
 import type { HumanAvatar } from '@shared/avatar';
 import { bone, group, onSurface, part, shape, templateCache } from './bake';
+import { lathe, mix, sculptSphere, smooth, smoothProfile, strand } from './sculpt';
 
 type V3 = [number, number, number];
 
 const EYE = '#1f1714';
 const WHITE = '#ffffff';
 const BLUSH = '#f7a3a0';
-const MOUTH = '#c2463e';
 const TONGUE = '#f2837e';
 const SOCK = '#fbf8f3';
 const SOLE = '#ece4d8';
@@ -28,6 +28,15 @@ const isLight = (hex: string) => { const c = new THREE.Color(hex); return c.r * 
 // 머리 기준값 (head 관절 좌표계) — 레퍼런스처럼 약간 가로로 넓은 큰 머리
 const HC: V3 = [0, 0.3, 0];
 const HR: V3 = [0.318, 0.3, 0.292];
+
+/** 볼살 있는 머리 (단위 구 조형) */
+const HEAD_GEO = () => sculptSphere('humanHead', (d) => {
+  const y = d.y;
+  // 볼: 얼굴 아래 앞쪽을 살짝 부풀림, 턱 끝은 동그랗게 / 정수리는 아주 약간 납작
+  const cheek = smooth(0.45, -0.2, Math.abs(y + 0.32) * 2) * smooth(-0.3, 0.6, d.z);
+  const k = 1 + 0.055 * cheek;
+  return new THREE.Vector3(d.x * k, y > 0.55 ? y * (1 - (y - 0.55) * 0.06) : y * (1 - 0.03 * smooth(-0.6, -1, y)), d.z * (1 + 0.035 * cheek));
+});
 
 export const HUMAN_LAYOUT = { headCenter: 1.0, chest: 0.5, hips: 0.3, feet: 0.05, top: 1.32 };
 
@@ -74,8 +83,10 @@ function buildHuman(a: HumanAvatar, bald = false): THREE.Group {
   // 상의 몸판 — 아래로 살짝 넓어지는 후드티 실루엣
   const overalls = a.top === 'overalls';
   const shirt = overalls || a.top === 'jacket' ? '#fffaf2' : a.topColor;
-  part(torso, shape.ball(), shirt, [0, 0.2, 0], [0.158, 0.165, 0.128]);
-  part(torso, shape.cyl(0.13, 0.162, 0.12, 24), shirt, [0, 0.12, 0]);
+  // 몸판: 매끈한 회전체 (밑단은 넉넉, 어깨는 둥글게 좁아짐) + 위쪽이 살짝 밝은 그라데이션
+  const shirtTop = shade(shirt, 0.035), shirtLow = shade(shirt, -0.035);
+  part(torso, lathe('torso', smoothProfile([[0.148, 0.05], [0.166, 0.08], [0.165, 0.15], [0.16, 0.23], [0.145, 0.29], [0.11, 0.34], [0.062, 0.372]], 30), 40),
+    (p) => mix(shirtLow, shirtTop, smooth(0.08, 0.32, p.y)), [0, 0, 0], [1, 1, 0.8]);
   part(torso, shape.torus(0.158, 0.02), shade(shirt, -0.05), [0, 0.065, 0], [1, 0.82, 1], [Math.PI / 2, 0, 0]); // 밑단 시보리
   part(torso, shape.cyl(0.07, 0.08, 0.05, 20), a.skin, [0, 0.36, 0]); // 목
 
@@ -160,33 +171,47 @@ function buildHuman(a: HumanAvatar, bald = false): THREE.Group {
 
   // ---------- 머리 ----------
   const head = bone(torso, 'head', [0, 0.375, 0]);
-  part(head, shape.ball(32, 24), a.skin, HC, HR);
+  // 말랑한 얼굴: 볼살이 살짝 도톰하고 턱이 동그란 구 + 볼터치·턱 밑 그늘을 피부에 직접 그라데이션으로 칠함
+  const cheeks = [-1, 1].map((s) => new THREE.Vector3(...onSurface(HC, HR, s * 0.62, -0.3, 1.0)));
+  const skinShadow = shade(a.skin, -0.06);
+  part(head, HEAD_GEO(), (p) => {
+    let c = mix(a.skin, skinShadow, smooth(0.16, 0.3, HC[1] - p.y) * 0.6);
+    for (const ch of cheeks) {
+      const d = p.distanceTo(ch);
+      c = mix(c, BLUSH, (1 - smooth(0.02, 0.085, d)) * 0.75);
+    }
+    return c;
+  }, HC, HR);
   // 귀 — 레퍼런스처럼 크고 동그랗게
   for (const s of [-1, 1]) {
     const p = onSurface(HC, HR, s * 1.52, -0.06, 0.95);
     part(head, shape.ball(), a.skin, p, [0.038, 0.06, 0.05], [0, 0, s * -0.15]);
     part(head, shape.ball(), shade(a.skin, -0.05), [p[0] + s * 0.012, p[1], p[2] + 0.005], [0.02, 0.038, 0.028]);
   }
-  // 눈: 세로로 긴 반짝이는 눈 + 하이라이트 2개
+  // 눈: 반짝이는 큰 눈 — 짙은 갈색 홍채(아래쪽이 밝은 그라데이션) + 검은 동공 + 하이라이트 2개 + 속눈썹 선
   for (const s of [-1, 1]) {
-    const yaw = s * 0.34, pitch = -0.08;
-    part(head, shape.ball(), EYE, onSurface(HC, HR, yaw, pitch, 0.99), [0.034, 0.05, 0.02], [0, yaw, 0]);
-    part(head, shape.ball(), WHITE, onSurface(HC, HR, yaw + 0.045, pitch + 0.075, 1.035), 0.012);
-    part(head, shape.ball(), WHITE, onSurface(HC, HR, yaw - 0.03, pitch - 0.07, 1.03), 0.006);
+    const yaw = s * 0.36, pitch = -0.1;
+    const ec = onSurface(HC, HR, yaw, pitch, 0.985);
+    part(head, shape.ball(24, 18), (p) => mix('#2a1a14', '#7a4a33', smooth(ec[1] - 0.01, ec[1] - 0.05, p.y) * 0.85), ec, [0.04, 0.056, 0.022], [0, yaw, 0], { gloss: true });
+    part(head, shape.ball(), EYE, onSurface(HC, HR, yaw, pitch + 0.02, 1.0), [0.024, 0.034, 0.016], [0, yaw, 0], { gloss: true });
+    part(head, shape.ball(), WHITE, onSurface(HC, HR, yaw + s * 0.0 + 0.05, pitch + 0.085, 1.045), [0.0145, 0.016, 0.008], [0, yaw, 0]);
+    part(head, shape.ball(), WHITE, onSurface(HC, HR, yaw - 0.035, pitch - 0.075, 1.035), 0.0065);
+    // 위 속눈썹 선 (바깥쪽 끝이 살짝 올라감)
+    const lash = onSurface(HC, HR, yaw, pitch + 0.035, 1.012);
+    part(head, shape.torus(0.046, 0.0075, 1.9, 6, 18), '#2a1a14', lash, [1, 1.12, 1], [0, yaw, Math.PI / 2 - 0.95 + s * 0.12]);
     // 눈썹 (부드러운 아치)
     if (a.hat !== 'cap' && a.hat !== 'bucket') {
       const bp = onSurface(HC, HR, s * 0.35, 0.12, 1.0);
       part(head, shape.torus(0.05, 0.0085, 1.3, 8, 16), '#9b6a45', bp, [1, 0.55, 1], [0, s * 0.35, Math.PI / 2 - 0.65]);
     }
-    // 볼터치
-    part(head, shape.ball(), BLUSH, onSurface(HC, HR, s * 0.6, -0.27, 0.985), [0.055, 0.036, 0.014], [0, s * 0.6, 0]);
   }
   // 코 (작은 볼록)
   part(head, shape.ball(), shade(a.skin, -0.04), onSurface(HC, HR, 0, -0.18, 0.995), [0.016, 0.012, 0.012]);
   // 입: 크게 웃는 입 + 혀
   const mp = onSurface(HC, HR, 0, -0.33, 1.0);
-  part(head, shape.halfDisc(0.048), MOUTH, [mp[0], mp[1] + 0.008, mp[2] + 0.004], [1.05, 0.9, 1], [0.33, 0, 0]);
-  part(head, shape.ball(), TONGUE, [mp[0], mp[1] - 0.022, mp[2] + 0.001], [0.026, 0.013, 0.008], [0.33, 0, 0]);
+  // 입: 작게 벌린 웃는 입 (위는 평평, 아래는 둥근 반달) + 안쪽 혀
+  part(head, shape.halfDisc(0.036), '#8e3530', [mp[0], mp[1] + 0.012, mp[2] + 0.006], [1.0, 0.85, 1], [0.33, 0, 0]);
+  part(head, shape.ball(), TONGUE, [mp[0], mp[1] - 0.009, mp[2] + 0.004], [0.017, 0.008, 0.004], [0.33, 0, 0]);
 
   if (!bald) buildHair(head, a);
   buildHat(head, a);
@@ -225,8 +250,10 @@ function buildHair(head: THREE.Object3D, a: HumanAvatar) {
   };
   switch (a.hairStyle) {
     case 'bob':
-      shellTo(0.8);
-      bangs(0.45);
+      // 입체 단발: 매끈한 기본 볼륨 위에 가닥(끝이 안으로 말린 결)을 하나하나 얹는다
+      part(head, shape.hair(Math.PI / 2 + open, Math.PI * 2 - open * 2, Math.PI * 0.74, 9, 0.012), shade(h, -0.06), C, [R[0] * 0.985, R[1] * 0.99, R[2] * 0.985]);
+      part(head, shape.dome(0.3), h, C, R);
+      bobStrands(head, a, C, R, open);
       break;
     case 'long':
       shellTo(0.8);
@@ -270,6 +297,47 @@ function buildHair(head: THREE.Object3D, a: HumanAvatar) {
   }
 }
 
+/** 단발 가닥: 뒤·옆은 정수리에서 턱선까지 흘러내려 끝이 안쪽으로 말리고, 앞머리는 이마로 내려온다 */
+function bobStrands(head: THREE.Object3D, a: HumanAvatar, C: V3, R: V3, open: number) {
+  const h = a.hairColor;
+  const light = shade(h, 0.07), dark = shade(h, -0.06);
+  const paint = (p: THREE.Vector3) => mix(dark, light, smooth(-0.2, 0.15, p.y - C[1]));
+  const P = (yaw: number, pitch: number, k: number) => onSurface(C, R, yaw, pitch, k);
+  // 모자를 쓰면 가닥이 모자 테두리 아래에서 시작 (모자를 뚫고 나오지 않게)
+  const hat = a.hat === 'cap' || a.hat === 'bucket' || a.hat === 'beanie';
+  const top = hat ? 0.12 : 0.85;
+  // 뒤·옆 가닥
+  const n = 21;
+  const from = open + 0.12, to = Math.PI * 2 - open - 0.12;
+  for (let i = 0; i < n; i++) {
+    const yaw = from + ((to - from) * i) / (n - 1);
+    const sway = Math.sin(i * 1.7) * 0.05;
+    const jit = Math.sin(i * 2.9) * 0.5 + 0.5; // 가닥마다 굵기·길이를 조금씩 다르게
+    const nearFace = 1 - Math.min(1, Math.abs(Math.atan2(Math.sin(yaw), Math.cos(yaw))) / 1.6); // 얼굴 쪽일수록 1
+    const end = -0.5 - nearFace * 0.04 + (jit - 0.5) * 0.06;
+    const pts: V3[] = [
+      ...(hat ? [P(yaw, 0.2, 0.97), P(yaw + sway * 0.4, top, 1.03)] : [P(yaw, 0.85, 0.96), P(yaw + sway * 0.3, 0.45, 1.03)]), P(yaw + sway * 0.6, hat ? -0.08 : 0.05, 1.065),
+      P(yaw + sway, end + 0.25, 1.085), P(yaw + sway, end, 1.06), P(yaw + sway * 0.8, end - 0.07, 0.95),
+    ];
+    part(head, strand(pts, 0.07 + jit * 0.025, 0.026, { center: C, flat: 0.4 + jit * 0.15 }), paint);
+  }
+  // 앞머리 (모자를 쓰면 이마 아래로 살짝 보이는 정도)
+  const bangs = [-0.78, -0.5, -0.24, 0.02, 0.27, 0.52, 0.78];
+  bangs.forEach((yaw, i) => {
+    const tipPitch = 0.1 + Math.abs(yaw) * 0.12 + (i % 2) * 0.03;
+    const pts: V3[] = hat
+      ? [P(yaw * 0.95, 0.3, 0.97), P(yaw, 0.2, 1.03), P(yaw * 1.02, tipPitch + 0.0, 1.035), P(yaw * 1.06 + (yaw > 0 ? 0.03 : -0.03), tipPitch - 0.07, 1.01)]
+      : [P(yaw * 0.25, 1.0, 0.95), P(yaw * 0.6, 0.7, 1.05), P(yaw * 0.92, 0.42, 1.085), P(yaw * 1.02, tipPitch + 0.06, 1.075), P(yaw * 1.06 + (yaw > 0 ? 0.03 : -0.03), tipPitch, 1.04)];
+    part(head, strand(pts, 0.07, 0.026, { center: C, flat: 0.4 }), paint);
+  });
+  // 귀 앞 옆머리
+  for (const sd of [-1, 1]) {
+    const yaw = sd * (open + 0.02);
+    const pts: V3[] = [hat ? P(yaw * 0.95, 0.2, 0.98) : P(yaw * 0.9, 0.6, 1.0), P(yaw, hat ? 0.1 : 0.25, 1.06), P(yaw * 1.02, -0.1, 1.09), P(yaw * 1.0, -0.42, 1.07), P(yaw * 0.94, -0.52, 0.98)];
+    part(head, strand(pts, 0.065, 0.028, { center: C, flat: 0.45 }), paint);
+  }
+}
+
 function buildHat(head: THREE.Object3D, a: HumanAvatar) {
   const c = a.hatColor;
   const dark = shade(c, -0.07);
@@ -301,9 +369,10 @@ function buildHat(head: THREE.Object3D, a: HumanAvatar) {
       part(head, shape.torus(0.35, 0.012), dark, [0, HC[1] + 0.1, 0.005], 1, [Math.PI / 2, 0, 0]);
       break;
     case 'beanie':
-      part(head, shape.dome(0.56), c, [0, HC[1] + 0.025, -0.005], [HR[0] * 1.12, HR[1] * 1.14, HR[2] * 1.13]);
-      part(head, shape.torus(1, 0.075, Math.PI * 2, 12, 36), dark, [0, HC[1] + 0.05, -0.005], [HR[0] * 1.1, HR[2] * 1.11, 0.62], [Math.PI / 2, 0, 0]);
-      part(head, shape.ball(), shade(c, 0.12), [0, HC[1] + HR[1] * 1.16 + 0.05, -0.01], 0.07);
+      // 눈을 가리지 않도록 이마 위에 얹음
+      part(head, shape.dome(0.56), c, [0, HC[1] + 0.055, -0.005], [HR[0] * 1.12, HR[1] * 1.08, HR[2] * 1.13]);
+      part(head, shape.torus(1, 0.075, Math.PI * 2, 12, 36), dark, [0, HC[1] + 0.085, -0.005], [HR[0] * 1.1, HR[2] * 1.11, 0.6], [Math.PI / 2, 0, 0]);
+      part(head, shape.ball(), shade(c, 0.12), [0, HC[1] + HR[1] * 1.1 + 0.07, -0.01], 0.07);
       break;
     case 'headphones':
       part(head, shape.torus(0.37, 0.026, Math.PI, 10, 24), c, [0, HC[1] + 0.02, -0.02], [1, 1.06, 1]);
