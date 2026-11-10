@@ -109,6 +109,9 @@ interface State {
   runner: boolean;
   /** 멍글런너를 열면서 랭킹 창부터 보여 줄지 (광장 스크린에서 누름) */
   runnerRank: boolean;
+  /** 친구가 보낸 함께 달리기 초대 / 멍글런너를 열면서 바로 참가할 방 코드 */
+  runnerInvite: { code: string; nickname: string; dogName: string } | null;
+  runnerJoin: string | null;
   runnerVersion: number;
   /** 멍글 코인: 지갑 상태 / 열린 창 (출석·지갑) / 획득 애니메이션 / 이사 선택 화면 */
   coins: CoinStatus | null;
@@ -180,6 +183,8 @@ export const useStore = create<State>()(() => ({
   coinFx: [],
   moveOpen: false,
   runnerRank: false,
+  runnerInvite: null,
+  runnerJoin: null,
   runnerVersion: 0,
   furnUse: null,
   dogTaskKey: null,

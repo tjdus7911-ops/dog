@@ -20,6 +20,7 @@ import { DEFAULT_PRIVACY } from '../../shared/protocol';
 import { claimedItems, registerCommunity, screenExtras } from './community';
 import { ownedPhotoUrls, registerPets, retireDogPhoto } from './pets';
 import { registerRunner, runnerTop } from './runner';
+import { setupRunnerMulti } from './runnerMulti';
 import { COURSES } from '../../shared/runner';
 
 const PORT = Number(process.env.PORT ?? 3001);
@@ -43,6 +44,8 @@ app.use('/api', (req, res, next) => {
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: process.env.MUNGLE_CORS?.split(',') ?? false }, maxHttpBufferSize: 64 * 1024 });
 const rt = setupRealtime(io);
+// 멍글런너 함께 달리기 (같은 소켓 서버에 방·입력 중계를 더함)
+setupRunnerMulti(io, { notify: (u, e, p) => rt.notify(u, e, p) });
 
 const authLimiter = new RateLimiter(20, 10 * 60_000);
 const ip = (req: express.Request) => req.ip ?? 'unknown';

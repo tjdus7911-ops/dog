@@ -159,11 +159,18 @@ const ELISE_PATTERN: PatternRow[] = [
 export const ELISE_BPM = Math.round(60 / (ELISE_SIXTEENTH * 3));
 
 /** 패턴 표 → 판정 시각이 붙은 장애물 목록 */
-export function buildChart(courseId: string): Chart | null {
+export type RunnerDifficulty = 'easy' | 'normal';
+export const DIFFICULTY_LABEL: Record<RunnerDifficulty, string> = { easy: '쉬움', normal: '보통' };
+/**
+ * difficulty 'easy': 마디 첫 박(16분음표 칸 0) 장애물만 — 박과 박 사이 장애물이 빠져 여유로움 (함께 달리기용).
+ * 랭킹·싱글플레이는 'normal' 그대로.
+ */
+export function buildChart(courseId: string, difficulty: RunnerDifficulty = 'normal'): Chart | null {
   const song = buildSong(courseId);
   const info = COURSE_BY_ID.get(courseId);
   if (!song || !info?.available) return null;
-  const obs: Obstacle[] = ELISE_PATTERN.map(([bar, pos, k, lane, dir], id) => {
+  const rows = difficulty === 'easy' ? ELISE_PATTERN.filter((r) => r[1] === 0) : ELISE_PATTERN;
+  const obs: Obstacle[] = rows.map(([bar, pos, k, lane, dir], id) => {
     const b = song.bars[bar];
     const t = Math.round((b.t + (b.len / 6) * pos) * 1000);
     if (k === 'J') return { id, t, kind: 'log', blocked: ALL, safe: [], need: 'jump', bar, pos };

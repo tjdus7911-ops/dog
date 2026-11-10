@@ -86,15 +86,22 @@ export const setCoinNotifier = (fn: typeof notifier) => { notifier = fn; };
 
 /** 보상 지급: 하루 한도·중복을 서버에서 확인. 지급되면 금액, 아니면 null */
 export function earn(userId: number, kind: EarnKind, ref: string, ts = Date.now()): CoinEarned | null {
+  return earnAmount(userId, kind, ref, COIN_REWARDS[kind].amount, COIN_REWARDS[kind].label, ts);
+}
+/**
+ * 금액이 정해진 보상 (함께 달리기 순위 보상 등). 하루 횟수 제한은 같은 종류끼리 함께 센다
+ * — 멍글런너는 혼자 달리기와 함께 달리기를 합쳐 하루 3번.
+ */
+export function earnAmount(userId: number, kind: EarnKind, ref: string, amount: number, label: string, ts = Date.now()): CoinEarned | null {
   if (isGuest(userId)) return null;
   const rule = COIN_REWARDS[kind];
   try {
     const r = transaction(() => {
       if (rule.daily && todayCount(userId, kind, kstDay(ts)) >= rule.daily) return null;
-      return applyTx(userId, rule.amount, kind, ref, ts);
+      return applyTx(userId, amount, kind, ref, ts, label);
     });
     if (!r) return null;
-    const e: CoinEarned = { amount: rule.amount, kind, label: rule.label, balance: r.balance };
+    const e: CoinEarned = { amount, kind, label, balance: r.balance };
     notifier(userId, e);
     return e;
   } catch (e) {

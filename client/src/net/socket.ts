@@ -12,6 +12,7 @@ import { PLACES, homeSpaceId, spawnOf } from '@shared/spaces';
 import type { CoinEarned } from '@shared/coins';
 import { tierOfBuilding } from '@shared/home';
 import { onCoinEarned } from '../ui/Coins';
+import { attachMulti } from '../runner/multi';
 import { APARTMENT_ENTRANCE, BIN_BY_ID, CAFE_ENTRANCE, SHOP_ENTRANCE } from '@shared/world';
 import { ACTION_MS, PET_LOW, binOpenAt, petLow, playPet } from '../game/fx';
 import { onLayoutChanged, resetFurniture } from '../game/furniture';
@@ -40,6 +41,13 @@ export function request<T = {}>(ev: string, data?: unknown): Promise<AckRes<T>> 
   });
 }
 
+/** 응답이 필요 없는 실시간 전송 (연결이 끊겨 있으면 false) */
+export function emitRaw(ev: string, data: unknown) {
+  if (!socket?.connected) return false;
+  socket.emit(ev, data);
+  return true;
+}
+
 export function sendState(s: NetState) {
   socket?.volatile.emit('state', s);
 }
@@ -58,6 +66,8 @@ export function connect() {
   set({ connection: 'connecting', kickReason: null });
   const s = io({ auth: { token }, transports: ['websocket', 'polling'], reconnectionDelayMax: 4000 });
   socket = s;
+  // 멍글런너 함께 달리기 (방·입력·순위·초대)
+  attachMulti(s);
 
   s.on('connect', async () => {
     set({ connection: 'online' });

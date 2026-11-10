@@ -22,6 +22,7 @@ import { BottomNav, EventsPanel, MoreSheet, PlaceBar, QuickMenu, VillageMap } fr
 import { HomeEditor, HomePanel } from './Home';
 import { CoinFx, WalletModal } from './Coins';
 import { MoveModal } from './Move';
+import { RunnerInviteCard } from '../runner/InviteCard';
 
 const AvatarEditor = lazy(() => import('./AvatarEditor'));
 const AdminPanel = lazy(() => import('./AdminPanel'));
@@ -50,6 +51,7 @@ export default function Game() {
       <div className="relative h-full w-full overflow-hidden">
         <Suspense fallback={<div className="h-full grid place-items-center bg-cream font-display text-xl">🏃 멍글런너 준비 중…</div>}><RunnerApp /></Suspense>
         <InteractionOverlays />
+        <RunnerInviteCard />
         <CoinFx />
         <ConnectionOverlay />
       </div>
@@ -93,6 +95,7 @@ export default function Game() {
       {report && <ReportDialog profile={report} />}
       <WalletModal />
       <MoveModal />
+      <RunnerInviteCard />
       <CoinFx />
       <ConnectionOverlay />
     </div>

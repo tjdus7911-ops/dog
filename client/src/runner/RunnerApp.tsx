@@ -17,6 +17,8 @@ import { get, set, toast, useStore } from '../store';
 import { Modal } from '../ui/common';
 import { MusicPlayer, renderSong } from './music';
 import { COUNTDOWN_S, GRADE_COLOR, GRADE_LABEL, RunnerPlay, type PlayGame } from './RunnerPlay';
+import { MultiResultScreen, MultiScreen } from './MultiLobby';
+import { clearResults, joinRoom, leaveRoom, serverNow, useMulti, type StartSignal } from './multi';
 
 interface Bests { course: string; score: number; accuracy: number; maxCombo: number; rank: number; achievedAt: number }
 interface RankEntry { rank: number; userId: number; nickname: string; dogName: string; dogPhoto: string | null; coat: string; score: number; accuracy: number; maxCombo: number; points: number; course: string | null; achievedAt: number }
@@ -77,7 +79,11 @@ export default function RunnerApp() {
   const practiceOnly = guest || DEMO;
   const avatar: DogAvatar = guest ? GUEST_DOG : me.dog;
   const human: HumanAvatar = guest ? GUEST_HUMAN : me.human;
-  const [screen, setScreen] = useState<'lobby' | 'play' | 'result'>('lobby');
+  const [screen, setScreen] = useState<'lobby' | 'play' | 'result' | 'multi' | 'mwait' | 'mresult'>(() => (get().runnerJoin || useMulti.getState().room ? 'multi' : 'lobby'));
+  const runnerJoin = useStore((s) => s.runnerJoin);
+  const prepared = useRef<MusicPlayer | null>(null);
+  const mStart = useMulti((s) => s.start);
+  const mResults = useMulti((s) => s.results);
   const [courseId, setCourseId] = useState('elise');
   const [modal, setModal] = useState<'rank' | 'how' | 'settings' | 'reward' | null>(() => (get().runnerRank ? 'rank' : null));
   const [settings, setSettings] = useState<Settings>(loadSettings);
@@ -93,6 +99,21 @@ export default function RunnerApp() {
   const myBest = bests.find((b) => b.course === courseId) ?? null;
 
   useEffect(() => { setMoveLocked(true, 'runner'); set({ runnerRank: false }); return () => setMoveLocked(false, 'runner'); }, []);
+  // 친구 초대 카드에서 '참가' → 그 방으로
+  useEffect(() => {
+    if (!runnerJoin) return;
+    set({ runnerJoin: null });
+    setScreen('multi');
+    void joinRoom(runnerJoin).catch((e) => toast((e as Error).message, 'error'));
+  }, [runnerJoin]);
+  // ---------------- 함께 달리기: 서버가 정한 시작 시각에 맞춰 출발 / 결과 받기
+  useEffect(() => { if (mStart && (!game?.multi || game.multi.round !== mStart.round)) void startMulti(mStart); }, [mStart]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!mResults || !game?.multi || mResults.round !== game.multi.round) return;
+    game.ended = true;
+    window.setTimeout(() => game.player.stop(), 600);
+    setScreen('mresult');
+  }, [mResults]); // eslint-disable-line react-hooks/exhaustive-deps
   const loadSummary = () => { if (!practiceOnly) api<{ bests: Bests[] }>('/api/runner/summary').then((r) => setBests(r.bests)).catch(() => {}); };
   useEffect(loadSummary, []); // eslint-disable-line react-hooks/exhaustive-deps
   // 곡을 고르면 연주를 미리 만들어 둠
@@ -122,8 +143,37 @@ export default function RunnerApp() {
     game?.player.close();
     setGame(g); setScreen('play'); setStarting(false);
   }
+  /** 준비 완료를 누를 때 오디오를 미리 켜 둠 (모바일은 사용자 터치가 있어야 소리가 남) */
+  function prepareAudio() {
+    if (!prepared.current) prepared.current = new MusicPlayer(settings.volume);
+    void prepared.current.ctx.resume().catch(() => {});
+  }
+  async function startMulti(sig: StartSignal) {
+    const c = COURSES.find((x) => x.id === sig.courseId);
+    const sg = buildSong(sig.courseId), ch = buildChart(sig.courseId, sig.difficulty);
+    const room = useMulti.getState().room;
+    if (!c || !sg || !ch || !room) return;
+    let buf: AudioBuffer;
+    try { buf = await renderSong(sg); } catch { toast('이 기기에서 음악을 만들지 못했어요.', 'error'); return; }
+    const player = prepared.current ?? new MusicPlayer(settings.volume);
+    prepared.current = null;
+    const g: PlayGame = {
+      chart: ch, song: sg, course: c, player, inputs: [...(sig.myInputs ?? [])], calib: settings.calib, sfx: settings.sfx, paused: false, ended: false, live: null, lastEvent: null, stumbleAt: -1e9,
+      multi: { round: sig.round, myId: me.id, players: room.players },
+    };
+    // 서버 시작 시각까지 남은 시간만큼 기다렸다가 재생 (늦게 들어왔으면 그만큼 건너뛰고 재생)
+    const delay = (sig.startAt - serverNow()) / 1000;
+    if (delay >= 0) await player.play(buf, 0, delay);
+    else await player.play(buf, Math.min(-delay, buf.duration - 0.5), 0);
+    game?.player.close();
+    setResult(null);
+    setGame(g); setScreen('play');
+  }
+
   function finish() {
     if (!game) return;
+    // 함께 달리기: 서버 최종 판정을 기다림
+    if (game.multi) { setScreen(useMulti.getState().results?.round === game.multi.round ? 'mresult' : 'mwait'); return; }
     const r = judgeRun(game.chart, game.inputs);
     setResult({ r, inputs: [...game.inputs], runId: (game as PlayGame & { runId: string | null }).runId, course: game.course, prevBest: myBest?.score ?? null });
     window.setTimeout(() => { game.player.stop(); }, 1200);
@@ -135,7 +185,7 @@ export default function RunnerApp() {
     <div className="absolute inset-0 z-40 bg-cream overflow-hidden" data-testid="runner">
       {screen === 'play' && game && (
         <RunnerPlay game={game} avatar={avatar} human={human} best={myBest?.score ?? null} onEnd={finish}
-          onQuit={() => { game.player.close(); setGame(null); setScreen('lobby'); }}
+          onQuit={() => { game.player.close(); setGame(null); if (game.multi) { void leaveRoom(); } setScreen('lobby'); }}
           onRetry={() => { game.player.close(); setGame(null); void start(); }} />
       )}
       {screen === 'lobby' && (
@@ -185,9 +235,16 @@ export default function RunnerApp() {
                 })}
               </div>
               <div className="text-[11px] text-cocoa-soft text-center mt-1.5 shrink-0">{chart ? `${course.composer} · ${chart.bpm} BPM · 장애물 ${chart.obstacles.length}개 · ${mmss(chart.duration)}` : ''}</div>
-              <button className="btn btn-coral w-full py-3.5 text-xl mt-1 shrink-0 shadow-[0_4px_0_#d9705f]" data-testid="runner-start" disabled={!audio || starting || !course.available} onClick={() => void start()}>
-                {!course.available ? '🎵 음원 준비 중' : audioErr || (!audio ? '🎹 연주 준비 중…' : starting ? '출발 준비 중…' : '게임 시작')}
-              </button>
+              <div className="grid grid-cols-2 gap-2 mt-1 shrink-0">
+                <button className="btn btn-coral py-3.5 text-lg shadow-[0_4px_0_#d9705f] leading-tight" data-testid="runner-start" disabled={!audio || starting || !course.available} onClick={() => void start()}>
+                  {!course.available ? '🎵 음원 준비 중' : audioErr || (!audio ? '🎹 준비 중…' : starting ? '출발 준비 중…' : <>🐶 혼자 달리기</>)}
+                </button>
+                <button className="btn py-3.5 text-lg text-white bg-[#b9a6e6] shadow-[0_4px_0_#9b86cf] leading-tight disabled:opacity-60" data-testid="runner-multi" disabled={practiceOnly}
+                  onClick={() => setScreen('multi')} title={practiceOnly ? '함께 달리기는 게임 서버에서 회원만 이용할 수 있어요' : '친구와 최대 4명 대결'}>
+                  🐾 함께 달리기
+                </button>
+              </div>
+              {practiceOnly && <p className="text-[11px] text-cocoa-soft text-center mt-1">함께 달리기는 {DEMO ? '게임 서버에서' : '회원가입 후'} 친구와 최대 4명이 대결할 수 있어요.</p>}
             </div>
           </div>
           {/* 하단: 랭킹 · 보상 · 게임 방법 */}
@@ -202,6 +259,17 @@ export default function RunnerApp() {
         <ResultScreen res={result} avatar={avatar} human={human} practiceOnly={practiceOnly} onSaved={loadSummary}
           onRetry={() => { setResult(null); void start(); }} onCourses={() => { setResult(null); setGame(null); setScreen('lobby'); }} onExit={exit}
           onRanking={() => setModal('rank')} />
+      )}
+      {screen === 'multi' && <MultiScreen joinCode={null} onBack={() => setScreen('lobby')} onPrepare={prepareAudio} />}
+      {screen === 'mwait' && (
+        <div className="h-full grid place-items-center bg-[radial-gradient(circle_at_50%_0%,#fde4ea,transparent_60%)]" data-testid="mr-wait">
+          <div className="text-center"><div className="text-5xl pop">🏁</div><div className="font-display text-xl mt-2">완주! 다른 친구들을 기다리는 중…</div><p className="text-sm text-cocoa-soft">서버가 모두의 기록을 확인하고 있어요.</p></div>
+        </div>
+      )}
+      {screen === 'mresult' && mResults && (
+        <MultiResultScreen results={mResults.results}
+          onAgain={() => { clearResults(); game?.player.close(); setGame(null); setScreen('multi'); }}
+          onLeave={() => { clearResults(); game?.player.close(); setGame(null); void leaveRoom(); setScreen('lobby'); }} />
       )}
       {modal === 'rank' && <RankingModal courseId={courseId} onClose={() => setModal(null)} />}
       {modal === 'how' && <HowModal onClose={() => setModal(null)} />}

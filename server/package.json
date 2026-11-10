@@ -12,7 +12,8 @@
     "test:community": "tsx test/community.test.ts",
     "test:interaction": "tsx test/interaction.test.ts",
     "test:runner": "tsx test/runner.test.ts",
-    "test:economy": "tsx test/economy.test.ts"
+    "test:economy": "tsx test/economy.test.ts",
+    "test:runner-multi": "tsx test/runnerMulti.test.ts"
   },
   "dependencies": {
     "express": "^4.21.0",
