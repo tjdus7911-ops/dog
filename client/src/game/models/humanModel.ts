@@ -10,7 +10,7 @@ type V3 = [number, number, number];
 
 const EYE = '#1f1714';
 const WHITE = '#ffffff';
-const BLUSH = '#f7a3a0';
+const BLUSH = '#f3a5a0';
 const SOCK = '#fbf8f3';
 const SOLE = '#ece4d8';
 
@@ -179,13 +179,19 @@ function buildHuman(a: HumanAvatar, bald = false): THREE.Group {
   // ---------- 머리 ----------
   const head = bone(torso, 'head', [0, 0.375, 0]);
   // 말랑한 얼굴: 볼살이 살짝 도톰하고 턱이 동그란 구 + 볼터치·턱 밑 그늘을 피부에 직접 그라데이션으로 칠함
-  const cheeks = [-1, 1].map((s) => new THREE.Vector3(...onSurface(HC, HR, s * 0.56, -0.3, 1.0)));
-  const skinShadow = shade(a.skin, -0.06);
+  // 볼터치(v6): 이전보다 약 40% 넓게, 가운데에서 바깥으로 아주 부드럽게 옅어지는 코랄 핑크.
+  // 눈 아래·입 옆 사이(볼 가장 도톰한 곳)에 두어 눈·입과 겹치지 않고, 옆에서 봐도 볼을 따라 자연스럽게 감싼다.
+  const cheeks = [-1, 1].map((s) => new THREE.Vector3(...onSurface(HC, HR, s * 0.6, -0.31, 1.0)));
+  const skinShadow = shade(a.skin, -0.05);
+  // 어두운 피부에서는 볼터치가 분홍 스티커처럼 떠 보이지 않게 조금 옅게
+  const blushK = 0.62 * (0.55 + 0.45 * Math.min(1, new THREE.Color(a.skin).getHSL({ h: 0, s: 0, l: 0 }).l / 0.85));
+  const warm = mix(a.skin, '#ffc4ae', 0.07); // 얼굴 아래쪽에 아주 살짝 도는 혈색
   part(head, HEAD_GEO(), (p) => {
-    let c = mix(a.skin, skinShadow, smooth(0.16, 0.3, HC[1] - p.y) * 0.6);
+    let c = mix(a.skin, warm, smooth(0.0, 0.14, HC[1] - p.y) * (1 - smooth(0.16, 0.3, HC[1] - p.y)));
+    c = mix(c, skinShadow, smooth(0.18, 0.3, HC[1] - p.y) * 0.5);
     for (const ch of cheeks) {
-      const d = p.distanceTo(ch);
-      c = mix(c, BLUSH, (1 - smooth(0.015, 0.075, d)) * 0.6);
+      const t = 1 - smooth(0.0, 0.105, p.distanceTo(ch));
+      c = mix(c, BLUSH, t * t * (3 - 2 * t) * blushK);
     }
     return c;
   }, HC, HR);

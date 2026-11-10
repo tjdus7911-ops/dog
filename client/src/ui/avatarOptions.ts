@@ -56,9 +56,9 @@ export const SHOE_PRESETS: { shoes: ShoeStyle; shoeColor: string }[] = [
 /** 아바타 예시 (클릭하면 그대로 적용) */
 export const EXAMPLES: HumanAvatar[] = [
   { ...DEFAULT_HUMAN, skin: '#f6cfa8', hairStyle: 'short', hairColor: '#3b2a20', top: 'hoodie', topColor: '#ffffff', bottom: 'shorts', bottomColor: '#4a5a78', shoeColor: '#ffffff', hat: 'cap', hatColor: '#5b7fb8', accessory: 'none' },
-  { ...DEFAULT_HUMAN, skin: '#ffe0c7', hairStyle: 'twin', hairColor: '#6b4127', top: 'overalls', topColor: '#f4a6b8', bottom: 'skirt', bottomColor: '#f4a6b8', shoeColor: '#f4a6b8', hat: 'bucket', hatColor: '#f3e3c3', accessory: 'none' },
+  { ...DEFAULT_HUMAN, skin: '#f8d5bc', hairStyle: 'twin', hairColor: '#6b4127', top: 'overalls', topColor: '#f4a6b8', bottom: 'skirt', bottomColor: '#f4a6b8', shoeColor: '#f4a6b8', hat: 'bucket', hatColor: '#f3e3c3', accessory: 'none' },
   { ...DEFAULT_HUMAN, skin: '#e5b48a', hairStyle: 'short', hairColor: '#1f1f24', top: 'jacket', topColor: '#9c7656', bottom: 'pants', bottomColor: '#3a3a44', shoeColor: '#3a3a44', hat: 'beanie', hatColor: '#4a5a78', accessory: 'glasses' },
-  { ...DEFAULT_HUMAN, skin: '#ffe0c7', hairStyle: 'long', hairColor: '#6b4127', top: 'hoodie', topColor: '#c9b6e8', bottom: 'shorts', bottomColor: '#f3e3c3', shoeColor: '#ffffff', hat: 'headphones', hatColor: '#c9b6e8', accessory: 'none' },
+  { ...DEFAULT_HUMAN, skin: '#f8d5bc', hairStyle: 'long', hairColor: '#6b4127', top: 'hoodie', topColor: '#c9b6e8', bottom: 'shorts', bottomColor: '#f3e3c3', shoeColor: '#ffffff', hat: 'headphones', hatColor: '#c9b6e8', accessory: 'none' },
 ];
 
 /** 썸네일용 기준 아바타: 썸네일마다 관련 항목만 바꿔 불필요한 재렌더를 줄인다 */

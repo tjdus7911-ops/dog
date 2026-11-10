@@ -5,11 +5,12 @@ import { BREED_PRESETS, DEFAULT_HUMAN, HARNESS_COLORS, type DogAvatar } from '@s
 import { DogAnim, HumanAnim } from '@shared/protocol';
 import { Human, newHumanDriver } from '../game/models/Human';
 import { Dog, newDogDriver } from '../game/models/Dog';
+import { Lighting } from '../game/Lighting';
 
 const q = new URLSearchParams(location.search);
 const VIEW = q.get('view') ?? 'front';
 const WHO = q.get('who') ?? 'both';
-const human = { ...DEFAULT_HUMAN, ...(q.get('hat') ? { hat: q.get('hat') as typeof DEFAULT_HUMAN.hat } : {}), ...(q.get('hair') ? { hairStyle: q.get('hair') as typeof DEFAULT_HUMAN.hairStyle } : {}) };
+const human = { ...DEFAULT_HUMAN, ...(q.get('hat') ? { hat: q.get('hat') as typeof DEFAULT_HUMAN.hat } : {}), ...(q.get('skin') ? { skin: '#' + q.get('skin') } : {}), ...(q.get('hair') ? { hairStyle: q.get('hair') as typeof DEFAULT_HUMAN.hairStyle } : {}) };
 const corgi: DogAvatar = { ...BREED_PRESETS[q.get('breed') ?? 'corgi'].dog, harness: HARNESS_COLORS[0] };
 
 function Cam() {
@@ -51,10 +52,9 @@ export default function ModelLab() {
       <Canvas shadows dpr={1.5} camera={{ fov: 35, near: 0.05, far: 50 }}>
         <Cam />
         <color attach="background" args={['#d6eef8']} />
-        <hemisphereLight args={['#fdf7ee', '#d8e6c4', 1.7]} />
-        <directionalLight position={[3, 6, 4]} intensity={2.1} color="#fff1dc" castShadow shadow-mapSize={[1024, 1024]} shadow-bias={-0.0004} shadow-radius={4} />
-        <ambientLight intensity={0.2} />
-        <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow><circleGeometry args={[6, 40]} /><meshStandardMaterial color="#efd9c8" roughness={0.95} /></mesh>
+        {/* 게임 공원과 같은 조명 + 광장 바닥색 */}
+        <Lighting indoor={false} shadows />
+        <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow><circleGeometry args={[6, 40]} /><meshLambertMaterial color="#f3dccb" /></mesh>
         <Actors />
       </Canvas>
     </div>

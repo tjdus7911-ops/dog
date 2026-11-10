@@ -41,7 +41,7 @@ async function main() {
   check('API 키·버전 헤더', headers['x-api-key'] === 'test-key' && headers['anthropic-version'] === '2023-06-01');
   check('도구 호출 강제 (파츠 값만 받도록)', body.tool_choice?.name === 'report_dog_features' && body.tools[0].input_schema.properties.ear.enum.includes('pointy'));
   check('사진 2장이 이미지 블록으로 전송', body.messages[0].content.filter((c: any) => c.type === 'image').length === 2 && body.messages[0].content[1].source.media_type === 'image/jpeg');
-  check('결과를 파츠 값으로 변환', r.avatar.breed === 'corgi' && r.avatar.pattern === 'socks' && r.avatar.ear === 'pointy' && r.avatar.coat === '#d98c4a');
+  check('결과를 파츠 값으로 변환', r.avatar.breed === 'corgi' && r.avatar.pattern === 'socks' && r.avatar.ear === 'pointy' && r.avatar.coat === '#e9a05c'); // 이전 팔레트 색은 새 밝은 팔레트 색으로 바뀜
   const photoColor = interpretDogFeatures({ ...goodInput, coat: '#E39B4C', secondary: '#fff', pattern: 'mask' });
   check('사진 속 실제 털색(#rrggbb) 그대로 사용', photoColor.ok && photoColor.result.avatar.coat === '#e39b4c' && photoColor.result.avatar.secondary === '#ffffff');
   const badColor = interpretDogFeatures({ ...goodInput, coat: 'orange' });

@@ -1,7 +1,10 @@
 // 사람·강아지 아바타 설정 정의 (클라이언트 렌더링과 서버 검증이 함께 사용)
 // 3D 모델을 GLB로 교체하더라도 이 설정 구조는 그대로 유지하도록 설계했다.
 
-export const SKIN_TONES = ['#ffe0c7', '#f6cfa8', '#e5b48a', '#c98f62', '#9a6643'] as const;
+/** 피부색 (v5: 생기 있는 살구빛 계열) — 기본 · 밝은 · 베이지 · 태닝 · 어두운 */
+export const SKIN_TONES = ['#f8d5bc', '#ffe2ce', '#ebc09f', '#c98e69', '#936448'] as const;
+/** 이전 피부색 → 새 피부색 (저장된 아바타는 그대로 두고 읽을 때 같은 순서의 새 색으로 바꿔 보여줌) */
+const SKIN_UPGRADE: Record<string, string> = { '#ffe0c7': '#f8d5bc', '#f6cfa8': '#ffe2ce', '#e5b48a': '#ebc09f', '#c98f62': '#c98e69', '#9a6643': '#936448' };
 export const HAIR_COLORS = ['#3b2a20', '#6b4127', '#a8693a', '#e2b866', '#e9965a', '#1f1f24', '#d88a7a', '#f4a3b5', '#c4a8e8'] as const;
 export const CLOTH_COLORS = [
   '#fff3df', '#f6c453', '#f39a7b', '#8fb88a', '#7ea6d8', '#b59ad6', '#f4a6b8', '#4a5a78', '#c9a27a', '#ffffff',
@@ -39,10 +42,17 @@ export interface HumanAvatar {
   accessory: Accessory;
 }
 
+/** 털색 팔레트 (v5: 더 밝고 화사하게, 채도는 과하지 않게) */
 export const COAT_COLORS = [
-  '#f7f1e6', '#f2dcb8', '#e6b47a', '#d98c4a', '#b8703a', '#7a4a2c', '#3a302c', '#9a9aa2', '#e8e4dc',
-  '#eea54e', '#fbefd9',
+  '#fff8ee', '#f6e2bf', '#f1c77c', '#e9a05c', '#dda778', '#8a5a3a', '#3e3531', '#aab8c5', '#efebe4',
+  '#efae58', '#fff2de',
 ] as const;
+/** 이전 기본 털색 → 새 털색 (사진에서 뽑은 임의의 색은 바꾸지 않음) */
+const COAT_UPGRADE: Record<string, string> = {
+  '#f7f1e6': '#fff8ee', '#f2dcb8': '#f6e2bf', '#e6b47a': '#f1c77c', '#d98c4a': '#e9a05c', '#b8703a': '#dda778',
+  '#7a4a2c': '#8a5a3a', '#3a302c': '#3e3531', '#9a9aa2': '#aab8c5', '#e8e4dc': '#efebe4', '#eea54e': '#efae58', '#fbefd9': '#fff2de',
+};
+export const upgradeCoat = (c: string) => COAT_UPGRADE[c] ?? c;
 export const HARNESS_COLORS = ['#e8574a', '#f39a7b', '#5b8fd1', '#7cb36b', '#f6c453', '#b59ad6'] as const;
 
 export const DOG_SIZES = ['small', 'medium', 'large'] as const;
@@ -110,16 +120,16 @@ export const DEFAULT_HUMAN: HumanAvatar = {
 
 /** 견종 프리셋 — 수동 커스터마이징의 출발점. (AI 분석은 아직 연결되지 않음) */
 const RAW_PRESETS: Record<string, { label: string; dog: PresetDog }> = {
-  shiba: { label: '시바/진도형', dog: { breed: 'shiba', size: 'medium', coat: '#d98c4a', secondary: '#f7f1e6', pattern: 'mask', ear: 'pointy', tail: 'curl', fur: 'short', snout: 'medium', legLen: 'normal' } },
-  maltese: { label: '말티즈형', dog: { breed: 'maltese', size: 'small', coat: '#f7f1e6', secondary: '#f7f1e6', pattern: 'none', ear: 'floppy', tail: 'fluffy', fur: 'long', snout: 'short', earSize: 'small', build: 'chubby' } },
-  poodle: { label: '푸들형', dog: { breed: 'poodle', size: 'small', coat: '#b8703a', secondary: '#b8703a', pattern: 'none', ear: 'floppy', tail: 'fluffy', fur: 'long', snout: 'medium' } },
-  husky: { label: '허스키형', dog: { breed: 'husky', size: 'large', coat: '#9a9aa2', secondary: '#f7f1e6', pattern: 'mask', ear: 'pointy', tail: 'fluffy', fur: 'short', snout: 'long', legLen: 'long', build: 'normal' } },
-  retriever: { label: '리트리버형', dog: { breed: 'retriever', size: 'large', coat: '#e6b47a', secondary: '#e6b47a', pattern: 'none', ear: 'floppy', tail: 'straight', fur: 'short', snout: 'long', legLen: 'long', earSize: 'large', build: 'chubby' } },
-  beagle: { label: '비글형', dog: { breed: 'beagle', size: 'medium', coat: '#f7f1e6', secondary: '#b8703a', pattern: 'saddle', ear: 'floppy', tail: 'straight', fur: 'short', snout: 'medium', marking: 'blaze', legLen: 'normal', earSize: 'large' } },
-  corgi: { label: '웰시코기형', dog: { breed: 'corgi', size: 'small', coat: '#eea54e', secondary: '#fbefd9', pattern: 'socks', ear: 'pointy', tail: 'short', fur: 'short', snout: 'medium', marking: 'blaze', earSize: 'large', bodyLen: 'long' } },
-  pomeranian: { label: '포메라니안형', dog: { breed: 'pomeranian', size: 'small', coat: '#e6b47a', secondary: '#f7f1e6', pattern: 'mask', ear: 'pointy', tail: 'fluffy', fur: 'long', snout: 'short', earSize: 'small', build: 'chubby' } },
-  dachshund: { label: '닥스훈트형', dog: { breed: 'dachshund', size: 'small', coat: '#7a4a2c', secondary: '#d98c4a', pattern: 'mask', ear: 'floppy', tail: 'straight', fur: 'short', snout: 'long', bodyLen: 'long', earSize: 'large' } },
-  mix: { label: '믹스/기타', dog: { breed: 'mix', size: 'medium', coat: '#7a4a2c', secondary: '#f7f1e6', pattern: 'patch', ear: 'fold', tail: 'straight', fur: 'short', snout: 'medium' } },
+  shiba: { label: '시바/진도형', dog: { breed: 'shiba', size: 'medium', coat: '#e9a05c', secondary: '#fff4e6', pattern: 'mask', ear: 'pointy', tail: 'curl', fur: 'short', snout: 'medium', legLen: 'normal' } },
+  maltese: { label: '말티즈형', dog: { breed: 'maltese', size: 'small', coat: '#fff8ee', secondary: '#fff8ee', pattern: 'none', ear: 'floppy', tail: 'fluffy', fur: 'long', snout: 'short', earSize: 'small', build: 'chubby' } },
+  poodle: { label: '푸들형', dog: { breed: 'poodle', size: 'small', coat: '#dda778', secondary: '#dda778', pattern: 'none', ear: 'floppy', tail: 'fluffy', fur: 'long', snout: 'medium' } },
+  husky: { label: '허스키형', dog: { breed: 'husky', size: 'large', coat: '#aab8c5', secondary: '#fbfaf7', pattern: 'mask', ear: 'pointy', tail: 'fluffy', fur: 'short', snout: 'long', legLen: 'long', build: 'normal' } },
+  retriever: { label: '리트리버형', dog: { breed: 'retriever', size: 'large', coat: '#f1c77c', secondary: '#f1c77c', pattern: 'none', ear: 'floppy', tail: 'straight', fur: 'short', snout: 'long', legLen: 'long', earSize: 'large', build: 'chubby' } },
+  beagle: { label: '비글형', dog: { breed: 'beagle', size: 'medium', coat: '#fff8ee', secondary: '#d39a62', pattern: 'saddle', ear: 'floppy', tail: 'straight', fur: 'short', snout: 'medium', marking: 'blaze', legLen: 'normal', earSize: 'large' } },
+  corgi: { label: '웰시코기형', dog: { breed: 'corgi', size: 'small', coat: '#efae58', secondary: '#fff2de', pattern: 'socks', ear: 'pointy', tail: 'short', fur: 'short', snout: 'medium', marking: 'blaze', earSize: 'large', bodyLen: 'long' } },
+  pomeranian: { label: '포메라니안형', dog: { breed: 'pomeranian', size: 'small', coat: '#f1c27e', secondary: '#fff8ee', pattern: 'mask', ear: 'pointy', tail: 'fluffy', fur: 'long', snout: 'short', earSize: 'small', build: 'chubby' } },
+  dachshund: { label: '닥스훈트형', dog: { breed: 'dachshund', size: 'small', coat: '#8a5a3a', secondary: '#e9a05c', pattern: 'mask', ear: 'floppy', tail: 'straight', fur: 'short', snout: 'long', bodyLen: 'long', earSize: 'large' } },
+  mix: { label: '믹스/기타', dog: { breed: 'mix', size: 'medium', coat: '#8a5a3a', secondary: '#fff8ee', pattern: 'patch', ear: 'fold', tail: 'straight', fur: 'short', snout: 'medium' } },
 };
 
 export const BREED_PRESETS: Record<string, { label: string; dog: Omit<DogAvatar, 'harness'> }> = Object.fromEntries(
@@ -139,6 +149,7 @@ const oneOf = <T extends readonly string[]>(list: T, v: unknown): v is T[number]
 export function validateHuman(input: any): HumanAvatar | null {
   if (!input || typeof input !== 'object') return null;
   const v = { shoes: DEFAULT_HUMAN.shoes, ...input };
+  if (typeof v.skin === 'string' && SKIN_UPGRADE[v.skin]) v.skin = SKIN_UPGRADE[v.skin];
   const ok =
     oneOf(SKIN_TONES, v.skin) && oneOf(HAIR_STYLES, v.hairStyle) && oneOf(HAIR_COLORS, v.hairColor) &&
     oneOf(TOP_STYLES, v.top) && oneOf(CLOTH_COLORS, v.topColor) && oneOf(BOTTOM_STYLES, v.bottom) &&
@@ -168,7 +179,7 @@ export function validateDog(input: any): DogAvatar | null {
     oneOf(DOG_LENGTHS, v.bodyLen) && oneOf(DOG_LENGTHS, v.legLen);
   if (!ok) return null;
   return {
-    breed: v.breed, size: v.size, coat: v.coat, secondary: v.secondary, pattern: v.pattern, ear: v.ear,
+    breed: v.breed, size: v.size, coat: upgradeCoat(v.coat), secondary: upgradeCoat(v.secondary), pattern: v.pattern, ear: v.ear,
     tail: v.tail, fur: v.fur, snout: v.snout, harness: v.harness,
     marking: v.marking, earSize: v.earSize, build: v.build, bodyLen: v.bodyLen, legLen: v.legLen,
   };

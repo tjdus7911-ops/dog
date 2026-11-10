@@ -20,18 +20,27 @@ function softToy(m: THREE.MeshStandardMaterial, rim: number) {
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWN;\nuniform float uRim;')
       .replace('#include <opaque_fragment>', `
-        float ao = mix(0.74, 1.0, smoothstep(-0.9, 0.35, vWN.y));
+        // 피규어 채움광: 본래 색(albedo)을 일정량 더해 그늘이 잔디빛·회색으로 물들지 않고 제 색을 유지
+        outgoingLight = outgoingLight * 0.8 + diffuseColor.rgb * 0.3;
+        float ao = mix(0.9, 1.0, smoothstep(-0.9, 0.35, vWN.y));
         outgoingLight *= ao;
-        float fres = pow(1.0 - clamp(dot(normalize(vNormal), normalize(vViewPosition)), 0.0, 1.0), 2.6);
-        outgoingLight += vec3(1.0, 0.93, 0.84) * fres * uRim * (0.55 + 0.45 * smoothstep(-0.2, 0.8, vWN.y));
+        float fres = pow(1.0 - clamp(dot(normalize(vNormal), normalize(vViewPosition)), 0.0, 1.0), 2.8);
+        outgoingLight += vec3(1.0, 0.9, 0.82) * fres * uRim * (0.55 + 0.45 * smoothstep(-0.2, 0.8, vWN.y));
+        // 캐릭터 전용 톤 커브: 장면 톤매핑(ACES)을 쓰면 피부·털이 회색·탁하게 눌려서,
+        // 색상(색조·채도)은 그대로 두고 밝은 부분만 부드럽게 눌러 주는 곡선으로 대신한다.
+        float peak = max(max(outgoingLight.r, outgoingLight.g), outgoingLight.b);
+        outgoingLight *= 1.1 / (1.0 + 0.3 * max(peak - 0.7, 0.0));
+        float luma = dot(outgoingLight, vec3(0.299, 0.587, 0.114));
+        outgoingLight = mix(vec3(luma), outgoingLight, 0.84); // 채도는 살짝만 눌러 과하지 않게
         #include <opaque_fragment>`);
   };
+  m.toneMapped = false;
   m.customProgramCacheKey = () => `softToy${rim}`;
   return m;
 }
-export const characterMaterial = softToy(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, metalness: 0, side: THREE.DoubleSide }), 0.32);
+export const characterMaterial = softToy(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0, side: THREE.DoubleSide }), 0.2);
 /** 눈·코처럼 반짝이는 부위 */
-export const glossyMaterial = softToy(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.16, metalness: 0, side: THREE.DoubleSide }), 0.12);
+export const glossyMaterial = softToy(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.22, metalness: 0, side: THREE.DoubleSide }), 0.08);
 
 /** 부위별 정점 칠하기: 관절 좌표계 위치·법선을 받아 색을 돌려준다 (그라데이션·무늬 경계를 부드럽게) */
 export type Painter = (p: THREE.Vector3, n: THREE.Vector3) => THREE.ColorRepresentation;
