@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { io } from 'socket.io-client';
-import { RUNNER_GAME_VERSION, buildChart, judgeRun, type Lane, type RunnerInput } from '../../shared/runner';
+import { DUCK_MS, JUMP_MS, RUNNER_GAME_VERSION, buildChart, buildSong, judgeRun, validateChart, type Lane, type RunnerInput } from '../../shared/runner';
 
 const PORT = 3996;
 const BASE = `http://localhost:${PORT}`;
@@ -54,6 +54,17 @@ async function main() {
     const a = await user('runa01', '런너A', '콩떡');
     const b = await user('runb01', '런너B', '보리');
     const c = await user('runc01', '런너C', '호두');
+
+    console.log('\n[패턴 데이터]');
+    check('엘리제 패턴: 피할 수 없는 배치 없음 (validateChart)', validateChart(chart).length === 0, validateChart(chart));
+    const song = buildSong('elise')!;
+    const onsets = new Set(song.notes.map((n) => Math.round(n.t * 1000)));
+    check('장애물이 모두 실제 음표 시작 시각에 맞음', chart.obstacles.every((o) => onsets.has(o.t)), chart.obstacles.filter((o) => !onsets.has(o.t)).map((o) => o.t));
+    check('장애물 사이 최소 간격 · 점프/숙이기 시간 고려', chart.obstacles.every((o, i) => i === 0 || o.t - chart.obstacles[i - 1].t >= 520)
+      && chart.obstacles.every((o, i) => { const p = chart.obstacles.slice(0, i).reverse().find((x) => x.need === o.need); return !p || o.need !== 'jump' && o.need !== 'duck' || o.t - p.t >= (o.need === 'jump' ? JUMP_MS : DUCK_MS) + 40; }));
+    check('BPM·마디 위치 데이터', chart.bpm === 91 && chart.obstacles.every((o) => typeof o.bar === 'number' && typeof o.pos === 'number'));
+    const broken = { ...chart, obstacles: [...chart.obstacles.slice(0, 2), { ...chart.obstacles[1], id: 2, t: chart.obstacles[1].t + 100 }] };
+    check('너무 붙은 장애물은 검증에서 걸러짐', validateChart(broken).length > 0);
 
     console.log('\n[시작]');
     check('없는 코스 거부', (await start(a.token, 'nope')).status === 400);
@@ -119,6 +130,24 @@ async function main() {
     check('전체 랭킹: 정규화 포인트(0~1000)', ov.body.entries[0].points > 0 && ov.body.entries[0].points <= 1000);
     const sum = await api('/api/runner/summary', undefined, a.token);
     check('내 기록 요약 + 안내판 TOP 3', sum.body.bests[0].rank === 1 && sum.body.top.elise.length === 3);
+    const frOv = await api('/api/runner/ranking?scope=overall&friends=1', undefined, b.token);
+    check('모든 코스 합산도 친구만 보기 가능', frOv.body.entries.map((e: any) => e.nickname).join() === '런너A,런너B');
+    const around = await api('/api/runner/ranking?scope=course&course=elise&around=1', undefined, b.token);
+    check('내 순위 탭: 내 주변 순위 (순위 번호 유지)', around.body.entries.some((e: any) => e.nickname === '런너B' && e.rank === 3));
+    const screen = await api('/api/screen', undefined, a.token);
+    const slide = screen.body.slides.find((x: any) => x.kind === 'runner');
+    check('광장 스크린에 코스별 랭킹 슬라이드', slide && slide.course === 'elise' && slide.ranking.length === 3 && slide.ranking[0].nickname === '런너A' && slide.ranking[0].dogName === '콩떡', slide);
+    const d = await user('rund01', '런너D', '밤톨');
+    const sd1 = await start(d.token); await wait();
+    const first = await finish(d.token, sd1.body.runId, play(70, 5, 2));
+    check('첫 기록은 이전 순위 없음', first.status === 200 && first.body.prevRank === null && first.body.rank === 4, first.body);
+    // B보다 높고 1위보다 낮은 점수가 나오는 입력을 골라 제출 → 4위에서 3위로
+    const bScore = judgeRun(chart, play(140, 3)).score;
+    let better: RunnerInput[] | null = null;
+    for (let sd = 20; sd < 200 && !better; sd++) { const x = play(120, sd); const sc = judgeRun(chart, x).score; if (sc > bScore && sc < local.score) better = x; }
+    const sd2 = await start(d.token); await wait();
+    const up = await finish(d.token, sd2.body.runId, better!);
+    check('순위가 오르면 이전 순위도 알려 줌 (▲ 표시용)', up.status === 200 && up.body.prevRank === 4 && up.body.rank === 3, up.body);
   } finally {
     proc.kill();
     fs.rmSync(dataDir, { recursive: true, force: true });

@@ -106,6 +106,8 @@ interface State {
   lobbyFocus: number | null;
   /** 멍글런너 화면 (로비·게임·결과) 열림 / 랭킹 갱신 신호 */
   runner: boolean;
+  /** 멍글런너를 열면서 랭킹 창부터 보여 줄지 (광장 스크린에서 누름) */
+  runnerRank: boolean;
   runnerVersion: number;
   /** 집 가구: 쓰고 있는 가구·동작 / 강아지 혼자 쉬는 가구 / 열린 가구 메뉴 */
   furnUse: { key: string; action: 'sit' | 'lie' | 'sleep' } | null;
@@ -167,6 +169,7 @@ export const useStore = create<State>()(() => ({
   joinPrompt: false,
   lobbyFocus: null,
   runner: false,
+  runnerRank: false,
   runnerVersion: 0,
   furnUse: null,
   dogTaskKey: null,

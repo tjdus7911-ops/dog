@@ -102,3 +102,13 @@ canvas { touch-action: none; }
 .zzz span + span { font-size: 0.65em; transform: translateY(-16px); }
 .zzz-sm { font-size: 16px; }
 @keyframes zzz-float { 0%, 100% { opacity: 0.55; transform: translate(-50%, -100%); } 50% { opacity: 1; transform: translate(-40%, -125%); } }
+
+/* 멍글런너 판정 글자: 톡 커졌다가 위로 사라짐 (0.56초) */
+.judge-pop { animation: judge-pop 0.56s ease-out forwards; }
+@keyframes judge-pop {
+  0% { opacity: 0; transform: translate(-50%, 6px) scale(0.7); }
+  18% { opacity: 1; transform: translate(-50%, 0) scale(1.08); }
+  30% { transform: translate(-50%, 0) scale(1); }
+  75% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -12px) scale(1); }
+}

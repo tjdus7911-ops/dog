@@ -92,12 +92,13 @@ export class MusicPlayer {
     this.gain.gain.value = volume;
     this.gain.connect(this.ctx.destination);
   }
-  async play(buf: AudioBuffer, fromSec = 0) {
+  /** delaySec: 출발 카운트다운 동안 기다렸다가 재생 (그동안 now()는 음수) */
+  async play(buf: AudioBuffer, fromSec = 0, delaySec = 0) {
     if (this.ctx.state !== 'running') await this.ctx.resume();
     this.src?.stop(); this.src?.disconnect();
     const s = this.ctx.createBufferSource();
     s.buffer = buf; s.connect(this.gain);
-    const when = this.ctx.currentTime + 0.1;
+    const when = this.ctx.currentTime + 0.1 + delaySec;
     s.start(when, fromSec);
     this.src = s;
     this.startAt = when - fromSec;

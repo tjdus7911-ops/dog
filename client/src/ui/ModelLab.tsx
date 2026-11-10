@@ -46,7 +46,10 @@ function Actors() {
   const lastHeart = useRef(0);
   useFrame((_, dt) => {
     hd.current.anim = ACT ? HUMAN_ANIM[ACT] ?? 0 : walk ? HumanAnim.Walk : HumanAnim.Idle; hd.current.phase += walk ? dt * 7 : 0;
-    dd.current.anim = DOGACT === 'poop' ? DogAnim.Poop : DOGACT === 'sleep' ? DogAnim.Sleep : DOGACT === 'lie' ? DogAnim.Lie : walk ? DogAnim.Walk : DogAnim.Stand; dd.current.phase += walk ? dt * 11 : 0;
+    dd.current.anim = DOGACT === 'poop' ? DogAnim.Poop : DOGACT === 'sleep' ? DogAnim.Sleep : DOGACT === 'lie' ? DogAnim.Lie : DOGACT === 'run' ? DogAnim.Run : walk ? DogAnim.Walk : DogAnim.Stand; dd.current.phase += walk ? dt * 11 : 0;
+    // 멍글런너 자세 확인: dog=run, ph=다리 위상(고정), crouch/air/slide=0~1
+    if (q.has('ph')) dd.current.phase = Number(q.get('ph'));
+    dd.current.crouch = Number(q.get('crouch') ?? 0); dd.current.air = Number(q.get('air') ?? 0); dd.current.slide = Number(q.get('slide') ?? 0);
     if (q.has('bin')) binOpenAt.set('lab', performance.now() - 500);
     if (q.has('lids')) { const r = (g: { traverse: (f: (o: { name: string; visible: boolean }) => void) => void } | null) => g?.traverse((o) => { if (o.name === 'lids') o.visible = true; }); r(hg.current); }
     if (DOGACT === 'happy') {

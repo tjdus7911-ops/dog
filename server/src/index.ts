@@ -17,7 +17,8 @@ import { validateDog, validateHuman } from '../../shared/avatar';
 import { DEFAULT_PRIVACY } from '../../shared/protocol';
 import { claimedItems, registerCommunity, screenExtras } from './community';
 import { ownedPhotoUrls, registerPets, retireDogPhoto } from './pets';
-import { registerRunner } from './runner';
+import { registerRunner, runnerTop } from './runner';
+import { COURSES } from '../../shared/runner';
 
 const PORT = Number(process.env.PORT ?? 3001);
 const app = express();
@@ -464,6 +465,12 @@ function screenFeed() {
     })),
     ...dogs.filter((d) => d !== today && d.id !== pop?.id).slice(0, 6).map((d) => ({ ...toScreen(d), label: '우리 강아지 자랑' })),
     ...notices.slice(0, 3).map((n) => ({ ...toScreen(n), label: '운영 공지' })),
+    // 멍글런너 코스별 TOP 3 (기록이 있는 코스만)
+    ...COURSES.filter((c) => c.available).map((c) => ({ c, top: runnerTop(c.id, 3) })).filter((x) => x.top.length).map(({ c, top }) => ({
+      id: -c.order, kind: 'runner', label: '🏃 멍글런너 랭킹', title: `${c.course} · ${c.title}`, text: `${c.composer} · 1위 ${top[0].score.toLocaleString()}점`,
+      image: null, author: '', authorId: 0, dogName: null, ts: top[0].achievedAt, course: c.id,
+      ranking: top.map((t) => ({ rank: t.rank, nickname: t.nickname, dogName: t.dogName, score: t.score, coat: t.coat })),
+    })),
   ];
   return slides;
 }
@@ -526,7 +533,7 @@ app.post('/api/admin/notices', requireAuth, requireAdmin, (req, res) => {
 
 // ---------- 강아지 프로필 · 집 액자 사진 ----------
 registerPets(app, { saveImage, removeImage, profileChanged: (u) => rt.profileChanged(u) });
-registerRunner(app, { changed: () => rt.runnerChanged() });
+registerRunner(app, { changed: () => { rt.runnerChanged(); rt.screenUpdated(); } });
 
 // ---------- 멍글 동네 (강아지 자랑·산책 모임·강아지 모임·애견샵) ----------
 registerCommunity(app, { saveImage, removeImage, notify: (u, e, p) => rt.notify(u, e, p), screenUpdated: () => rt.screenUpdated() });

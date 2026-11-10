@@ -151,6 +151,8 @@ export function registerRunner(app: express.Express, deps: RunnerDeps) {
     const ins = run(`INSERT INTO runner_runs (user_id, course, score, accuracy, max_combo, perfect, great, good, miss, points, week, inputs_hash, created_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, uid, course, r.score, acc, r.maxCombo, r.counts.perfect, r.counts.great, r.counts.good, r.counts.miss, points, kstWeek(now), hash, now);
     const old = one('SELECT * FROM runner_best WHERE user_id=? AND course=?', uid, course) as unknown as Best | undefined;
+    // 이번 기록 전 순위 (결과 화면의 ▲ 순위 변화 표시용)
+    const prevRank = old ? rankOfBest(course, old) : null;
     const cur = { score: r.score, accuracy: acc, max_combo: r.maxCombo };
     const newBest = !old || better(cur, old);
     if (newBest) {
@@ -163,11 +165,14 @@ export function registerRunner(app: express.Express, deps: RunnerDeps) {
     res.json({
       result: { score: r.score, maxCombo: r.maxCombo, counts: r.counts, accuracy: r.accuracy, points },
       newBest, best: { score: best.score, accuracy: best.accuracy / 10000, maxCombo: best.max_combo, achievedAt: best.achieved_at },
-      rank: rankOfBest(course, best), total: Number(one('SELECT COUNT(*) n FROM runner_best WHERE course=?', course)?.n ?? 0),
+      rank: rankOfBest(course, best), prevRank, total: Number(one('SELECT COUNT(*) n FROM runner_best WHERE course=?', course)?.n ?? 0),
     });
   });
 
-  /** 랭킹: course(곡별) · weekly(주간, 월요일 00:00 KST) · friends(친구) · overall(전체 = 코스별 정규화 포인트 합) */
+  /**
+   * 랭킹: course(코스 전체 기간) · weekly(주간, 월요일 00:00 KST) · friends(친구) · overall(모든 코스 = 코스별 정규화 포인트 합)
+   * around=1 이면 '내 순위' 탭: 내 위아래 5명씩
+   */
   app.get('/api/runner/ranking', requireAuth, (req, res) => {
     const uid = me(req);
     const scope = String(req.query.scope ?? 'course');
@@ -185,11 +190,16 @@ export function registerRunner(app: express.Express, deps: RunnerDeps) {
       rows = all(`SELECT * FROM runner_best WHERE course=? ORDER BY ${ORDER}`, course) as unknown as Best[];
       if (scope === 'friends') { const ids = new Set([uid, ...repo.friendIds(uid)]); rows = rows.filter((r) => ids.has(r.user_id)); }
     }
+    // friends=1: 어느 범위든 나와 친구 기록만 (scope=friends는 코스 친구 랭킹)
+    if (req.query.friends === '1' && scope !== 'friends') { const ids = new Set([uid, ...repo.friendIds(uid)]); rows = rows.filter((r) => ids.has(r.user_id)); }
     rows = rows.filter((r) => r.user_id === uid || !repo.eitherBlocked(uid, r.user_id));
     const myIdx = rows.findIndex((r) => r.user_id === uid);
+    const around = req.query.around === '1';
+    const from = around ? Math.max(0, myIdx - 5) : 0;
+    const slice = around ? (myIdx < 0 ? [] : rows.slice(from, myIdx + 6)) : rows.slice(0, limit);
     res.json({
       scope, course, week, weekStart: week !== null ? kstWeekStart(week) : null, total: rows.length,
-      entries: rows.slice(0, limit).map((r, i) => entry({ ...r, course: scope === 'overall' ? undefined : course }, i + 1)),
+      entries: slice.map((r, i) => entry({ ...r, course: scope === 'overall' ? undefined : course }, from + i + 1)),
       me: myIdx >= 0 ? entry({ ...rows[myIdx], course: scope === 'overall' ? undefined : course }, myIdx + 1) : null,
     });
   });

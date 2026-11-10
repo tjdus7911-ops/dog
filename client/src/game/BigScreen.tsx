@@ -47,6 +47,7 @@ function draw(g: CanvasRenderingContext2D, s: ScreenSlide | null, img: HTMLImage
     g.textAlign = 'left';
     return;
   }
+  if (s.kind === 'runner' && s.ranking) { drawRunner(g, s, idx, total); return; }
   // 왼쪽 사진
   const px = 36, py = 36, pw = 470, ph = TH - 72;
   g.save(); roundRect(g, px, py, pw, ph, 28); g.clip();
@@ -71,6 +72,35 @@ function draw(g: CanvasRenderingContext2D, s: ScreenSlide | null, img: HTMLImage
   g.fillText(s.kind === 'notice' ? '멍글마을 운영팀' : s.kind === 'meetup' ? `모임장 ${s.author} · 눌러서 참가 신청` : `${s.author}${s.dogName ? ` · 🐶 ${s.dogName}` : ''}`, x, TH - 70);
   // 페이지 점
   for (let i = 0; i < total; i++) { g.fillStyle = i === idx ? '#f39a7b' : '#ead8c8'; g.beginPath(); g.arc(x + i * 26 + 8, TH - 36, 7, 0, Math.PI * 2); g.fill(); }
+}
+
+/** 멍글런너 코스 랭킹 슬라이드: 시상대 TOP 3 */
+function drawRunner(g: CanvasRenderingContext2D, s: ScreenSlide, idx: number, total: number) {
+  const font = (size: number) => `400 ${size}px Jua, "Gowun Dodum", sans-serif`;
+  const grd = g.createLinearGradient(0, 0, 0, TH); grd.addColorStop(0, '#fde4ea'); grd.addColorStop(1, '#fff6ec');
+  g.fillStyle = grd; g.fillRect(0, 0, TW, TH);
+  g.textAlign = 'center';
+  g.fillStyle = '#f39a7b'; g.font = font(30);
+  const lw = g.measureText(s.label).width + 44;
+  roundRect(g, TW / 2 - lw / 2, 30, lw, 50, 25); g.fill();
+  g.fillStyle = '#fff'; g.fillText(s.label, TW / 2, 66);
+  g.fillStyle = '#5a4033'; g.font = font(46); g.fillText(s.title, TW / 2, 140);
+  // 시상대: 2위 · 1위 · 3위
+  const slots: [number, number, string][] = [[1, 190, '#cfd8e6'], [0, 250, '#f6c453'], [2, 150, '#e8b48a']];
+  slots.forEach(([i, h], k) => {
+    const e = s.ranking![i];
+    const cx = TW / 2 + (k - 1) * 290, base = TH - 50;
+    roundRect(g, cx - 120, base - h, 240, h, 18); g.fillStyle = slots[k][2]; g.fill();
+    g.fillStyle = '#fff'; g.font = font(64); g.fillText(String(i + 1), cx, base - h + 72);
+    if (!e) { g.fillStyle = '#b8a598'; g.font = font(26); g.fillText('도전자를 기다려요', cx, base - h - 24); return; }
+    g.fillStyle = e.coat; g.beginPath(); g.arc(cx, base - h - 110, 38, 0, Math.PI * 2); g.fill();
+    g.font = font(40); g.fillText('🐶', cx, base - h - 96);
+    g.fillStyle = '#5a4033'; g.font = font(28); g.fillText(e.dogName || e.nickname, cx, base - h - 44, 270);
+    g.fillStyle = '#a3857a'; g.font = font(22); g.fillText(`${e.nickname} · ${e.score.toLocaleString()}점`, cx, base - h - 14, 270);
+  });
+  g.fillStyle = '#a3857a'; g.font = font(22); g.fillText('눌러서 전체 랭킹 보기', TW / 2, TH - 16);
+  g.textAlign = 'left';
+  for (let i = 0; i < total; i++) { g.fillStyle = i === idx ? '#f39a7b' : '#ead8c8'; g.beginPath(); g.arc(40 + i * 26, TH - 24, 7, 0, Math.PI * 2); g.fill(); }
 }
 
 export function BigScreen() {

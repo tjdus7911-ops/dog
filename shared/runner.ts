@@ -29,7 +29,7 @@ export interface CourseInfo {
 }
 
 export const COURSES: CourseInfo[] = [
-  { id: 'elise', order: 1, title: '엘리제를 위하여', composer: '베토벤', difficulty: 1, course: '벚꽃 산책길', theme: 'cherry', available: true, patternVersion: 1, speed: 7.5 },
+  { id: 'elise', order: 1, title: '엘리제를 위하여', composer: '베토벤', difficulty: 1, course: '벚꽃 산책길', theme: 'cherry', available: true, patternVersion: 1, speed: 4.6 },
   { id: 'danube', order: 2, title: '아름답고 푸른 도나우', composer: '요한 슈트라우스 2세', difficulty: 2, course: '구름 정원', theme: 'cloud', available: false, patternVersion: 0, speed: 8 },
   { id: 'turkish', order: 3, title: '터키 행진곡', composer: '모차르트', difficulty: 3, course: '장난감 마을', theme: 'toy', available: false, patternVersion: 0, speed: 9 },
   { id: 'revolutionary', order: 4, title: '혁명 연습곡', composer: '쇼팽', difficulty: 4, course: '별빛 숲길', theme: 'star', available: false, patternVersion: 0, speed: 10 },
@@ -107,7 +107,7 @@ export function buildSong(courseId: string): Song | null {
   return { courseId, notes, bars, beats, duration: t + 1.6 };
 }
 
-// ---------------------------------------------------------------- 장애물 패턴
+// ---------------------------------------------------------------- 장애물 패턴 (곡별 데이터)
 export interface Obstacle {
   id: number;
   /** 판정 시각 (음악 시작 기준 ms) — 이 박자에 맞춰 조작 */
@@ -119,65 +119,92 @@ export interface Obstacle {
   safe: Lane[];
   /** 필요한 조작 안내 */
   need: 'jump' | 'duck' | 'left' | 'right' | 'side';
+  /** 패턴 표의 위치 (마디 번호, 16분음표 칸) — 사람이 악보와 대조하기 위함 */
+  bar: number;
+  pos: number;
 }
-export interface Chart { courseId: string; patternVersion: number; obstacles: Obstacle[]; duration: number; maxScore: number }
+export interface Chart { courseId: string; patternVersion: number; obstacles: Obstacle[]; duration: number; maxScore: number; bpm: number }
 
 const ALL: Lane[] = [-1, 0, 1];
+const LANE_CODE: Record<string, Lane> = { L: -1, C: 0, R: 1 };
 
 /**
- * 악보에서 장애물을 만든다 (결정적).
- * - 으뜸화음(A) 베이스로 떨어지는 마디 첫 박 → 통나무(점프)
- * - 딸림화음(E) 베이스 마디 첫 박 → 리본(몸 낮추기)
- * - 미·레# 트릴 마디 → 화분/울타리(레인 이동)
- * - 가운데 부분(B)과 2절(셈여림이 강한 곳)은 아르페지오 시작 박(4번째 16분음표)에도 장애물 → 연속 조작
+ * 장애물 패턴 표 — 사람이 악보를 보며 직접 확인·수정할 수 있는 형식.
+ * [마디 번호(ELISE_PLAN 순서, 0부터), 마디 안 16분음표 칸(0=첫 박, 3=둘째 박), 종류, 레인, 방향]
+ *  - 'J' 통나무(점프) · 'D' 높은 리본 막대(숙이기)
+ *  - 'P' 화분: 레인 = 막힌 레인 (L/C/R) · 'F' 울타리: 레인 = 비어 있는 레인 (나머지 둘은 막힘)
+ *  - 방향(안내 화살표): 'S' 좌우 아무 쪽 · 'L' 왼쪽 · 'R' 오른쪽
+ * 마디 시각은 템포 지도(ELISE_PLAN)에서 계산하므로 루바토·리타르단도가 그대로 반영된다.
+ * 규칙(validateChart): 장애물 간격 ≥ 0.52초, 레인 장애물은 한 번 이동으로 피할 수 있게.
  */
+type PatternRow = [number, number, 'J' | 'D' | 'P' | 'F', string?, ('S' | 'L' | 'R')?];
+const ELISE_PATTERN: PatternRow[] = [
+  // 1절: 마디 2부터 (마디 0·1은 전주)
+  [2, 0, 'P', 'C', 'S'], [3, 0, 'J'], [4, 0, 'D'], [5, 0, 'J'],
+  [6, 0, 'F', 'C', 'R'], [7, 0, 'J'], [8, 0, 'D'], [9, 0, 'J'],
+  // 1절 반복
+  [10, 0, 'P', 'C', 'S'], [11, 0, 'J'], [12, 0, 'D'], [13, 0, 'J'],
+  [14, 0, 'P', 'L', 'R'], [15, 0, 'J'], [16, 0, 'D'], [17, 0, 'J'],
+  // 가운데 부분 (셈여림이 세서 아르페지오 시작 박에도 장애물)
+  [18, 0, 'J'], [18, 3, 'F', 'R', 'R'], [19, 0, 'D'], [20, 0, 'J'], [20, 3, 'F', 'C', 'L'], [21, 0, 'P', 'C', 'S'],
+  // 2절 (밝고 강하게)
+  [22, 0, 'P', 'L', 'R'], [23, 0, 'J'], [23, 3, 'P', 'C', 'S'], [24, 0, 'D'], [25, 0, 'J'],
+  [26, 0, 'F', 'C', 'R'], [27, 0, 'J'], [27, 3, 'P', 'C', 'S'], [28, 0, 'D'], [29, 0, 'J'],
+  [30, 0, 'J'], [30, 3, 'F', 'C', 'R'], [31, 0, 'D'], [32, 0, 'J'], [32, 3, 'F', 'R', 'R'], [33, 0, 'P', 'R', 'L'],
+  // 마지막 주제 → 리타르단도로 끝
+  [34, 0, 'P', 'C', 'S'], [35, 0, 'J'], [36, 0, 'D'], [37, 0, 'J'],
+  [38, 0, 'F', 'C', 'R'], [39, 0, 'J'], [40, 0, 'D'], [41, 0, 'J'],
+];
+/** 기본 템포: 3/8박자 점4분음표 기준 BPM (마디마다 ELISE_PLAN 배율로 변함) */
+export const ELISE_BPM = Math.round(60 / (ELISE_SIXTEENTH * 3));
+
+/** 패턴 표 → 판정 시각이 붙은 장애물 목록 */
 export function buildChart(courseId: string): Chart | null {
   const song = buildSong(courseId);
   const info = COURSE_BY_ID.get(courseId);
   if (!song || !info?.available) return null;
-  const obs: Obstacle[] = [];
-  let lane: Lane = 0; // 패턴이 기대하는 현재 레인
-  let flip = 0;
-  const ms = (x: number) => Math.round(x * 1000);
-  const add = (t: number, kind: ObstacleKind) => {
-    if (obs.length && ms(t) - obs[obs.length - 1].t < 520) return; // 너무 붙은 장애물은 빼서 쉬운 난이도 유지
-    if (kind === 'log') obs.push({ id: obs.length, t: ms(t), kind, blocked: ALL, safe: [], need: 'jump' });
-    else if (kind === 'ribbon') obs.push({ id: obs.length, t: ms(t), kind, blocked: ALL, safe: [], need: 'duck' });
-    else {
-      flip++;
-      if (kind === 'fence') {
-        // 지금 레인을 포함해 두 레인을 막고 옆 레인 하나만 비움
-        const target: Lane = lane === 0 ? (flip % 2 ? 1 : -1) : 0;
-        const blocked = ALL.filter((l) => l !== target);
-        obs.push({ id: obs.length, t: ms(t), kind, blocked, safe: [target], need: target > lane ? 'right' : 'left' });
-        lane = target;
-      } else {
-        // 화분: 지금 레인만 막음 → 좌우 어느 쪽으로든 피함
-        const safe = ALL.filter((l) => l !== lane);
-        obs.push({ id: obs.length, t: ms(t), kind, blocked: [lane], safe, need: lane === 0 ? 'side' : lane === 1 ? 'left' : 'right' });
-        lane = lane === 0 ? (flip % 2 ? -1 : 1) : 0;
-      }
-    }
-  };
-  song.bars.forEach((b, bi) => {
-    if (b.name.startsWith('intro') || b.name === 'END2') return;
-    const strong = b.vel >= 0.68;
-    const s = b.len / 6;
-    switch (b.name) {
-      case 'T1': add(b.t, (bi + b.part) % 3 === 0 ? 'fence' : 'pot'); break;
-      case 'T2': add(b.t, 'log'); if (strong) add(b.t + s * 3, 'pot'); break;
-      case 'T3': case 'T7': add(b.t, 'ribbon'); break;
-      case 'T4': add(b.t, 'log'); break;
-      case 'T8a': case 'T8b': case 'END1': add(b.t, 'log'); break;
-      case 'B9': case 'B11': add(b.t, 'log'); if (strong) add(b.t + s * 3, 'fence'); break;
-      case 'B10': add(b.t, 'ribbon'); break;
-      case 'B12': add(b.t, 'pot'); break;
-    }
+  const obs: Obstacle[] = ELISE_PATTERN.map(([bar, pos, k, lane, dir], id) => {
+    const b = song.bars[bar];
+    const t = Math.round((b.t + (b.len / 6) * pos) * 1000);
+    if (k === 'J') return { id, t, kind: 'log', blocked: ALL, safe: [], need: 'jump', bar, pos };
+    if (k === 'D') return { id, t, kind: 'ribbon', blocked: ALL, safe: [], need: 'duck', bar, pos };
+    const l = LANE_CODE[lane ?? 'C'];
+    const need = dir === 'L' ? 'left' : dir === 'R' ? 'right' : 'side';
+    if (k === 'P') return { id, t, kind: 'pot', blocked: [l], safe: ALL.filter((x) => x !== l), need, bar, pos };
+    return { id, t, kind: 'fence', blocked: ALL.filter((x) => x !== l), safe: [l], need, bar, pos };
   });
   // 최대 점수: 모두 PERFECT로 이어 간 경우
   let max = 0;
   obs.forEach((_, i) => { max += Math.round(GRADE_POINTS.perfect * comboMultiplier(i)); });
-  return { courseId, patternVersion: info.patternVersion, obstacles: obs, duration: ms(song.duration), maxScore: max };
+  return { courseId, patternVersion: info.patternVersion, obstacles: obs, duration: Math.round(song.duration * 1000), maxScore: max, bpm: ELISE_BPM };
+}
+
+/**
+ * 피할 수 없는 배치가 없는지 검사 (테스트·개발용). 문제 목록을 돌려준다.
+ * - 장애물 사이 최소 간격 (점프 체공·숙이기 시간 고려)
+ * - 레인 장애물: 안전한 레인이 있고, 패턴이 기대하는 레인에서 한 칸 이동으로 닿을 수 있음
+ */
+export function validateChart(c: Chart): string[] {
+  const errs: string[] = [];
+  let lane: Lane = 0;
+  c.obstacles.forEach((o, i) => {
+    const prev = c.obstacles[i - 1];
+    if (prev) {
+      const gap = o.t - prev.t;
+      if (gap < 520) errs.push(`#${o.id} 앞 장애물과 간격이 ${gap}ms`);
+      if (prev.need === 'jump' && o.need === 'jump' && gap < JUMP_MS + 40) errs.push(`#${o.id} 점프 착지 전에 다음 점프`);
+      if (prev.need === 'duck' && o.need === 'duck' && gap < DUCK_MS + 40) errs.push(`#${o.id} 숙이기가 끝나기 전에 다음 숙이기`);
+    }
+    if (o.kind === 'pot' || o.kind === 'fence') {
+      if (!o.safe.length) errs.push(`#${o.id} 피할 레인이 없음`);
+      if (o.blocked.includes(lane)) {
+        const reach = o.safe.filter((s) => Math.abs(s - lane) === 1);
+        if (!reach.length) errs.push(`#${o.id} 한 번 이동으로 피할 수 없음`);
+        lane = reach.includes(o.need === 'left' ? (lane - 1) as Lane : (lane + 1) as Lane) ? (o.need === 'left' ? lane - 1 : lane + 1) as Lane : reach[0] ?? lane;
+      }
+    }
+  });
+  return errs;
 }
 
 // ---------------------------------------------------------------- 판정 시뮬레이션

@@ -13,12 +13,16 @@ export interface DogDriver {
   look: number;
   /** 쓰다듬기를 받아 기뻐하는 시간 (performance.now 기준 ms) */
   happyUntil: number;
+  /** 멍글런너 자세 (0~1): 도약 전·착지 때 몸 낮춤 / 공중 / 숙여 미끄러지기 */
+  crouch: number;
+  air: number;
+  slide: number;
 }
-export const newDogDriver = (): DogDriver => ({ anim: DogAnim.Stand, phase: 0, look: 0, happyUntil: 0 });
+export const newDogDriver = (): DogDriver => ({ anim: DogAnim.Stand, phase: 0, look: 0, happyUntil: 0, crouch: 0, air: 0, slide: 0 });
 
 export const DOG_SCALE = { small: 0.82, medium: 1, large: 1.2 } as const;
 /** 한 걸음(반 주기)당 이동 거리 (scale 1 기준) */
-export const DOG_STEP = { walk: 0.19, run: 0.4 };
+export const DOG_STEP = { walk: 0.19, run: 0.42 };
 
 export function Dog({ avatar, driver, anchorRef }: { avatar: DogAvatar; driver: MutableRefObject<DogDriver>; anchorRef?: MutableRefObject<THREE.Object3D | null> }) {
   const key = JSON.stringify(avatar);
@@ -45,14 +49,17 @@ export function Dog({ avatar, driver, anchorRef }: { avatar: DogAvatar; driver: 
 
     const p = d.phase;
     const walkAmp = 0.65 * s.move * (1 - s.run);
-    const runAmp = 0.9 * s.run;
-    // 걷기: 대각선 다리가 같은 위상 / 달리기: 앞·뒷다리 쌍이 함께 (갤럽)
+    const runAmp = 0.55 * s.run;
+    // 걷기: 대각선 다리가 같은 위상
+    // 달리기: 작은 강아지의 '통통' 갤럽 — 앞다리 두 개, 뒷다리 두 개가 살짝 엇갈려 차례로 땅을 디딤.
+    // 다리를 앞으로 내딛는 동작은 빠르게, 땅을 밀어내는 동작은 천천히(비대칭)라 허우적거리지 않는다.
+    const stride = (x: number) => Math.sin(x) + 0.18 * Math.sin(2 * x);
     const [fl, fr, bl, br] = rig.legs;
-    fl.rotation.x = Math.sin(p) * walkAmp + Math.sin(p) * runAmp;
-    fr.rotation.x = -Math.sin(p) * walkAmp + Math.sin(p + 0.4) * runAmp;
+    fl.rotation.x = Math.sin(p) * walkAmp + stride(p) * runAmp;
+    fr.rotation.x = -Math.sin(p) * walkAmp + stride(p + 0.5) * runAmp;
     // 앉기: 뒷다리를 앞으로 접는다
-    bl.rotation.x = THREE.MathUtils.lerp(-Math.sin(p) * walkAmp + Math.sin(p + Math.PI) * runAmp, -1.25, s.sit);
-    br.rotation.x = THREE.MathUtils.lerp(Math.sin(p) * walkAmp + Math.sin(p + Math.PI + 0.4) * runAmp, -1.25, s.sit);
+    bl.rotation.x = THREE.MathUtils.lerp(-Math.sin(p) * walkAmp + stride(p + Math.PI + 0.2) * runAmp * 0.9, -1.25, s.sit);
+    br.rotation.x = THREE.MathUtils.lerp(Math.sin(p) * walkAmp + stride(p + Math.PI + 0.7) * runAmp * 0.9, -1.25, s.sit);
     fl.rotation.x = THREE.MathUtils.lerp(fl.rotation.x, 0.15, s.sit);
     fr.rotation.x = THREE.MathUtils.lerp(fr.rotation.x, 0.15, s.sit);
     // 엎드리기: 앞다리는 앞으로 쭉, 뒷다리는 접고 몸을 바닥으로
@@ -69,21 +76,25 @@ export function Dog({ avatar, driver, anchorRef }: { avatar: DogAvatar; driver: 
     fl.rotation.x = THREE.MathUtils.lerp(fl.rotation.x, 0.3, s.poop);
     fr.rotation.x = THREE.MathUtils.lerp(fr.rotation.x, 0.3, s.poop);
 
-    const bob = Math.abs(Math.sin(p)) * (0.018 * s.move + 0.045 * s.run);
+    // 몸 반동: 걷기는 한 걸음마다 살짝, 달리기는 한 주기에 한 번 부드럽게 (과하게 튀지 않게)
+    const bob = Math.abs(Math.sin(p)) * 0.018 * s.move * (1 - s.run) + (1 - Math.cos(p * 2)) * 0.5 * 0.014 * s.run;
+    const runPitch = Math.sin(p * 2 + 0.6) * 0.035 * s.run;
     const hop = s.greet * Math.max(0, Math.sin(t * 9)) * 0.05;
     // 쓰다듬기 반응: 살짝 몸을 낮추고 꼬리를 세차게, 고개를 들어 기대며 좌우로 비빈다
     const happyHop = s.happy * Math.max(0, Math.sin(t * 6)) * 0.018;
     rig.body.position.y = rig.baseY + bob + hop + happyHop - s.sit * 0.05 - s.lie * (0.12 + rig.baseY) - s.poop * 0.025 - s.happy * 0.015 + Math.sin(t * 3) * 0.004 * (1 + s.lie);
     rig.body.position.z = -s.sit * 0.04 - s.poop * 0.02;
-    rig.body.rotation.x = -s.sit * 0.5 - s.poop * 0.3 + Math.sin(p * 2) * 0.05 * s.run;
+    rig.body.rotation.x = -s.sit * 0.5 - s.poop * 0.3 + runPitch;
 
     rig.head.rotation.y = d.look * (1 - s.move) * (1 - s.happy) + Math.sin(t * 7) * 0.12 * s.greet + Math.sin(t * 3.2) * 0.22 * s.happy;
-    rig.head.rotation.x = s.sit * 0.4 + s.poop * 0.22 - s.happy * 0.32 - s.run * 0.08 + Math.sin(t * 1.7) * 0.03;
+    // 달릴 때 머리는 몸 기울기를 되돌려 거의 고정 (시선이 흔들리지 않게)
+    rig.head.rotation.x = s.sit * 0.4 + s.poop * 0.22 - s.happy * 0.32 - s.run * 0.06 - runPitch * 0.85 + Math.sin(t * 1.7) * 0.03 * (1 - s.run);
     rig.head.rotation.z = Math.sin(t * 0.9) * 0.06 * (1 - s.move) + Math.sin(t * 3.2) * 0.12 * s.happy;
 
     // 꼬리 흔들기 — 반가울수록 빠르게 (배변 중에는 꼬리를 들고 가만히)
-    const wag = 8 + s.greet * 14 + s.happy * 16 + s.run * 4 - s.lie * 3;
-    rig.tail.rotation.y = Math.sin(t * wag) * (0.35 + Math.max(s.greet, s.happy) * 0.35) * (1 - s.poop);
+    const wag = 8 + s.greet * 14 + s.happy * 16 - s.lie * 3;
+    // 달릴 때 꼬리는 발걸음에 맞춰 아주 살짝만
+    rig.tail.rotation.y = (Math.sin(t * wag) * (0.35 + Math.max(s.greet, s.happy) * 0.35) * (1 - s.run * 0.75) + Math.sin(p) * 0.12 * s.run) * (1 - s.poop);
     rig.tail.rotation.x = s.poop * 0.6;
     rig.tongue.visible = (s.run > 0.4 || s.greet > 0.4 || s.happy > 0.5) && s.sleep < 0.3;
     // 잠자기: 엎드린 채 몸을 살짝 옆으로 말고, 고개를 꼬리 쪽으로 돌려 내려놓고, 꼬리는 몸에 붙임 (천천히 숨쉬기)
@@ -97,6 +108,29 @@ export function Dog({ avatar, driver, anchorRef }: { avatar: DogAvatar; driver: 
       rig.tail.rotation.y = THREE.MathUtils.lerp(rig.tail.rotation.y, 1.1, s.sleep);
       rig.tail.rotation.x = THREE.MathUtils.lerp(rig.tail.rotation.x, -0.5, s.sleep);
     } else { rig.body.rotation.z = 0; rig.body.rotation.y = 0; }
+    // 멍글런너: 도약 준비·착지(몸 낮춤) → 공중(앞다리 접고 뒷다리 뻗기) / 숙여 미끄러지기(앞다리 앞으로, 뒷다리 뒤로)
+    if (d.crouch > 0.001) {
+      rig.body.position.y -= d.crouch * 0.035;
+      bl.rotation.x = THREE.MathUtils.lerp(bl.rotation.x, -0.45, d.crouch);
+      br.rotation.x = THREE.MathUtils.lerp(br.rotation.x, -0.45, d.crouch);
+      fl.rotation.x = THREE.MathUtils.lerp(fl.rotation.x, 0.25, d.crouch);
+      fr.rotation.x = THREE.MathUtils.lerp(fr.rotation.x, 0.25, d.crouch);
+    }
+    if (d.air > 0.001) {
+      fl.rotation.x = THREE.MathUtils.lerp(fl.rotation.x, -0.75, d.air);
+      fr.rotation.x = THREE.MathUtils.lerp(fr.rotation.x, -0.6, d.air);
+      bl.rotation.x = THREE.MathUtils.lerp(bl.rotation.x, 0.75, d.air);
+      br.rotation.x = THREE.MathUtils.lerp(br.rotation.x, 0.6, d.air);
+    }
+    if (d.slide > 0.001) {
+      rig.body.position.y -= d.slide * Math.min(0.09, rig.baseY * 0.55);
+      fl.rotation.x = THREE.MathUtils.lerp(fl.rotation.x, -1.15, d.slide);
+      fr.rotation.x = THREE.MathUtils.lerp(fr.rotation.x, -1.15, d.slide);
+      bl.rotation.x = THREE.MathUtils.lerp(bl.rotation.x, 1.05, d.slide);
+      br.rotation.x = THREE.MathUtils.lerp(br.rotation.x, 1.05, d.slide);
+      rig.head.rotation.x += d.slide * 0.12;
+      rig.tail.rotation.x = THREE.MathUtils.lerp(rig.tail.rotation.x, -0.3, d.slide);
+    }
     // 눈 감기: 쓰다듬기를 받을 때(기분 좋게) · 잠잘 때
     rig.lids.visible = s.happy > 0.5 || d.anim === DogAnim.Sleep;
   });

@@ -580,6 +580,7 @@ export function closeViewer() {
 
 /** 광장 스크린 슬라이드 열기: 사진이 있으면 크게 보기(누른 순간의 슬라이드 고정), 없으면 상세 */
 export function openScreenSlide(s: ScreenSlide | 'empty') {
+  if (s !== 'empty' && s.kind === 'runner') { set({ runner: true, runnerRank: true }); return; }
   if (s === 'empty' || !s.image) { set({ screenDetail: s }); return; }
   const slide = s;
   set({
