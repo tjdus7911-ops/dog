@@ -20,6 +20,16 @@ import type { MRPlayer } from '@shared/runnerMulti';
 import { multiLive, sendInput } from './multi';
 
 export const LANE_W = 1.35;
+/** 함께 달리기: 플레이어마다 독립 트랙 (트랙 안에 3레인). 트랙 중심 간격 */
+const TRACK_PITCH = 5.2;
+const TRACK_SLOTS = [0, 1, -1, 2];
+/** 트랙 배치: 나는 항상 가운데(0), 다른 참가자는 오른쪽 → 왼쪽 → 오른쪽 바깥 */
+export function trackLayout(game: { multi?: { myId: number; players: MRPlayer[] } }) {
+  if (!game.multi) return [{ id: -1, x: 0, me: true }];
+  const me = game.multi.myId;
+  const order = [me, ...game.multi.players.map((p) => p.id).filter((id) => id !== me)];
+  return order.map((id, i) => ({ id, x: TRACK_SLOTS[i] * TRACK_PITCH, me: id === me }));
+}
 /**
  * 자동 화면 테스트 전용: 한 컴퓨터에서 여러 브라우저(소프트웨어 렌더링)를 동시에 돌릴 때 화면 갱신을 초당 8번으로 줄임.
  * 판정은 음악 시계 기준이라 결과에는 영향이 없다. (mungle.e2e + mungle.e2e.lowfps 둘 다 있을 때만)
@@ -185,13 +195,23 @@ function Arch({ goal }: { goal?: boolean }) {
   );
 }
 
-function CherryWalk({ game }: { game: PlayGame }) {
+function CherryWalk({ game, xs }: { game: PlayGame; xs: number[] }) {
+  const minX = Math.min(...xs), maxX = Math.max(...xs), midX = (minX + maxX) / 2, span = maxX - minX;
+  const sorted = [...xs].sort((a, b) => a - b);
+  const dividers = sorted.slice(1).map((x, i) => (x + sorted[i]) / 2);
   const speed = game.course.speed;
   const petals = useRef<THREE.InstancedMesh>(null);
   const goal = useRef<THREE.Group>(null);
   const start = useRef<THREE.Group>(null);
   const tmp = useMemo(() => new THREE.Object3D(), []);
-  const petalData = useMemo(() => Array.from({ length: 60 }, (_, i) => ({ x: ((i * 37) % 100) / 100 * 11 - 5.5, y: ((i * 53) % 100) / 100 * 4, z: ((i * 71) % 100) / 100, r: i })), []);
+  const petalData = useMemo(() => Array.from({ length: 60 + xs.length * 20 }, (_, i) => ({ x: midX + ((i * 37) % 100) / 100 * (11 + span) - (5.5 + span / 2), y: ((i * 53) % 100) / 100 * 4, z: ((i * 71) % 100) / 100, r: i })), [midX, span, xs.length]);
+  // 트랙 사이 칸막이: 낮은 회양목 울타리 + 꽃
+  const hedge: Part[] = useMemo(() => [
+    { geo: geo.box(0.5, 0.34, 1.9), color: '#a9d38f', at: [0, 0.17, 0] },
+    { geo: geo.sphere(0.09, 8, 6), color: '#f7b8c8', at: [0.12, 0.38, -0.4] },
+    { geo: geo.sphere(0.08, 8, 6), color: '#ffffff', at: [-0.1, 0.37, 0.3] },
+    { geo: geo.sphere(0.08, 8, 6), color: '#b59ad6', at: [0.05, 0.37, 0.75] },
+  ], []);
   const finishT = game.chart.duration - 1600;
   // 반복 소품 모양
   const tree: Part[] = useMemo(() => [
@@ -249,39 +269,52 @@ function CherryWalk({ game }: { game: PlayGame }) {
     }
   });
   const edge = LANE_W * 1.5;
+  const outL = minX - edge, outR = maxX + edge;
+  const side = (i: number, d: number) => (i % 2 ? outR + d : outL - d);
   return (
     <group>
-      {/* 잔디 · 분홍 산책길 · 길 가장자리 */}
-      <mesh geometry={geo.box(70, 0.1, 140)} material={mat('#bfe0a5')} position={[0, -0.06, -50]} receiveShadow />
-      <mesh geometry={geo.box(edge * 2 + 0.3, 0.03, 140)} material={mat('#f6cfd6')} position={[0, 0.0, -50]} receiveShadow />
-      {[-1, 1].map((k) => <mesh key={k} geometry={geo.box(0.22, 0.07, 140)} material={mat('#f4a6b8')} position={[k * (edge + 0.15), 0.03, -50]} />)}
-      {/* 레인 구분 점선 (2줄) */}
-      <Instanced game={game} parts={dashes} count={18} spacing={2.2} xOf={(i) => (i % 2 ? 0.5 : -0.5) * LANE_W} />
+      {/* 잔디 */}
+      <mesh geometry={geo.box(70 + span, 0.1, 140)} material={mat('#bfe0a5')} position={[midX, -0.06, -50]} receiveShadow />
+      {xs.map((x) => (
+        <group key={x} position={[x, 0, 0]}>
+          {/* 트랙: 분홍 산책길 + 가장자리 (트랙마다 3레인) */}
+          <mesh geometry={geo.box(edge * 2 + 0.3, 0.03, 140)} material={mat(x === 0 || xs.length === 1 ? '#f6cfd6' : '#f3d7dc')} position={[0, 0.0, -50]} receiveShadow />
+          {[-1, 1].map((k) => <mesh key={k} geometry={geo.box(0.22, 0.07, 140)} material={mat(x === 0 ? '#f4a6b8' : '#e9b6c4')} position={[k * (edge + 0.15), 0.03, -50]} />)}
+          {/* 레인 구분 점선 (2줄) */}
+          <Instanced game={game} parts={dashes} count={18} spacing={2.2} xOf={(i) => (i % 2 ? 0.5 : -0.5) * LANE_W} />
+        </group>
+      ))}
+      {/* 박자선 (모든 트랙을 가로지름) */}
       {Array.from({ length: 16 }, (_, i) => (
-        <mesh key={i} ref={(m) => { beats.current[i] = m; }} geometry={geo.box(edge * 2, 0.006, 0.05)} visible={false}>
+        <mesh key={i} ref={(m) => { beats.current[i] = m; }} geometry={geo.box(edge * 2 + span, 0.006, 0.05)} position={[midX, 0, 0]} visible={false}>
           <meshBasicMaterial color="#ffffff" transparent opacity={0.5} toneMapped={false} />
         </mesh>
       ))}
-      {/* 흰 울타리 · 가로등 · 벚꽃나무 · 작은 화단 (양옆) */}
-      <Instanced game={game} parts={fence} count={44} spacing={1.5} xOf={(i) => (i % 2 ? 1 : -1) * (edge + 0.75)} />
-      <Instanced game={game} parts={lamp} count={10} spacing={6} offset={1.5} xOf={(i) => (i % 2 ? 1 : -1) * (edge + 0.45)} />
-      <Instanced game={game} parts={tree} count={20} spacing={3.4} xOf={(i) => (i % 2 ? 1 : -1) * (edge + 2.1 + (i % 3) * 0.9)} rot />
-      <Instanced game={game} parts={bed} count={12} spacing={5} offset={2.6} xOf={(i) => (i % 2 ? 1 : -1) * (edge + 1.25)} rot />
+      {/* 트랙 사이 칸막이 (넘어갈 수 없음) */}
+      {dividers.map((dx) => <Instanced key={dx} game={game} parts={hedge} count={36} spacing={2.0} xOf={() => dx} />)}
+      {/* 바깥쪽: 흰 울타리 · 가로등 · 벚꽃나무 · 작은 화단 */}
+      <Instanced game={game} parts={fence} count={44} spacing={1.5} xOf={(i) => side(i, 0.75)} />
+      <Instanced game={game} parts={lamp} count={10} spacing={6} offset={1.5} xOf={(i) => side(i, 0.45)} />
+      <Instanced game={game} parts={tree} count={20} spacing={3.4} xOf={(i) => side(i, 2.1 + (i % 3) * 0.9)} rot />
+      <Instanced game={game} parts={bed} count={12} spacing={5} offset={2.6} xOf={(i) => side(i, 1.25)} rot />
       <instancedMesh ref={petals} args={[undefined, undefined, petalData.length]} frustumCulled={false}>
         <circleGeometry args={[1, 5]} />
         <meshBasicMaterial color="#fac9d5" side={THREE.DoubleSide} toneMapped={false} />
       </instancedMesh>
-      <group ref={start}><Arch /></group>
-      <group ref={goal} visible={false}><Arch goal /></group>
+      {/* 출발·골인 아치: 트랙마다 하나씩 */}
+      <group ref={start}>{xs.map((x) => <group key={x} position={[x, 0, 0]}><Arch /></group>)}</group>
+      <group ref={goal} visible={false}>{xs.map((x) => <group key={x} position={[x, 0, 0]}><Arch goal /></group>)}</group>
     </group>
   );
 }
 
-function Obstacles({ game }: { game: PlayGame }) {
+/** 한 트랙의 장애물 (모든 트랙이 같은 기준 비트맵 · 판정은 그 트랙 주인 기준) */
+function Obstacles({ game, x = 0, live }: { game: PlayGame; x?: number; live?: () => RunResult | null }) {
   const obs = useRef<(THREE.Group | null)[]>([]);
   useFrame(() => {
     const now = game.player.now();
-    const done = new Map(game.live?.events.map((e) => [e.id, e]) ?? []);
+    const res = live ? live() : game.live;
+    const done = new Map(res?.events.map((e) => [e.id, e]) ?? []);
     game.chart.obstacles.forEach((o, i) => {
       const g = obs.current[i];
       if (!g) return;
@@ -294,7 +327,7 @@ function Obstacles({ game }: { game: PlayGame }) {
       g.scale.setScalar(ev && ev.grade !== 'miss' && dt < 0 ? Math.max(0.01, 1 + dt / 380) : 1);
     });
   });
-  return <>{game.chart.obstacles.map((o, i) => <group key={o.id} ref={(g) => { obs.current[i] = g; }} visible={false}><ObstacleModel o={o} /></group>)}</>;
+  return <group position={[x, 0, 0]}>{game.chart.obstacles.map((o, i) => <group key={o.id} ref={(g) => { obs.current[i] = g; }} visible={false}><ObstacleModel o={o} /></group>)}</group>;
 }
 
 // ---------------------------------------------------------------- 출발 전 응원하는 보호자
@@ -342,7 +375,7 @@ function poseAt(now: number, live: RunResult | null) {
   if (dk !== undefined) { const k = (now - dk) / DUCK_MS; slide = k < 0.25 ? smooth01(k / 0.25) : k < 0.75 ? 1 : smooth01((1 - k) / 0.25); }
   return { lane, jy, crouch, air, slide, j };
 }
-function Runner({ game, avatar }: { game: PlayGame; avatar: DogAvatar }) {
+function Runner({ game, avatar, tracks = 1, nickname }: { game: PlayGame; avatar: DogAvatar; tracks?: number; nickname?: string }) {
   const g = useRef<THREE.Group>(null);
   const shadow = useRef<THREE.Mesh>(null);
   const d = useRef(newDogDriver());
@@ -381,14 +414,28 @@ function Runner({ game, avatar }: { game: PlayGame; avatar: DogAvatar }) {
     // 카메라: 강아지 뒤에서 일정한 높이로 따라감 (점프·착지·비틀거림에 흔들리지 않음, 레인 이동만 부드럽게)
     const portrait = size.height > size.width;
     const cam = camera as THREE.PerspectiveCamera;
-    const fov = portrait ? 56 : 48;
+    // 참가자 수에 따라 구도를 정해 둠 (달리는 중에는 바뀌지 않음 → 줌인·줌아웃 없음)
+    //  - 혼자: 기존 구도 / 2명: 옆 트랙이 보이게 조금 높고 넓게 / 3~4명: 양옆 트랙까지
+    //  - 세로 화면(모바일): 내 트랙을 크게, 옆 트랙은 가장자리로 조금만 (순위판으로 보완)
+    const n = portrait ? Math.min(tracks, 2) : tracks;
+    const fov = portrait ? (n > 1 ? 58 : 56) : n >= 4 ? 62 : n === 3 ? 58 : n === 2 ? 52 : 48;
     if (cam.fov !== fov) { cam.fov = fov; cam.updateProjectionMatrix(); }
-    if (portrait) { cam.position.set(s.x * 0.45, 2.25, 3.55); cam.lookAt(s.x * 0.6, 0.5, -6); }
-    else { cam.position.set(s.x * 0.45, 2.2, 3.9); cam.lookAt(s.x * 0.6, 0.45, -7); }
+    if (portrait) { cam.position.set(s.x * 0.45, n > 1 ? 2.45 : 2.25, n > 1 ? 3.75 : 3.55); cam.lookAt(s.x * 0.6, 0.5, -6); }
+    else if (n === 1) { cam.position.set(s.x * 0.45, 2.2, 3.9); cam.lookAt(s.x * 0.6, 0.45, -7); }
+    else if (n === 2) { cam.position.set(s.x * 0.4 + 1.1, 3.0, 5.3); cam.lookAt(s.x * 0.5 + 1.4, 0.3, -9); }
+    else if (n === 3) { cam.position.set(s.x * 0.3, 3.9, 6.9); cam.lookAt(s.x * 0.35, 0.2, -10); }
+    else { cam.position.set(s.x * 0.25 + TRACK_PITCH / 2, 4.9, 8.8); cam.lookAt(s.x * 0.3 + TRACK_PITCH / 2, 0.2, -11); }
   });
   return (
     <>
-      <group ref={g}><Dog avatar={avatar} driver={d} /></group>
+      <group ref={g}>
+        <Dog avatar={avatar} driver={d} />
+        {nickname && (
+          <Html position={[0, 0.02, -0.55]} center zIndexRange={[4, 0]} style={{ pointerEvents: 'none' }}>
+            <div className="rounded-full bg-[#f39a7b] text-white px-2 py-0.5 text-[11px] font-display whitespace-nowrap shadow">나 · {nickname}</div>
+          </Html>
+        )}
+      </group>
       <mesh ref={shadow} geometry={geo.circle(0.32 * scale, 16)} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
         <meshBasicMaterial color="#4a3b2a" transparent opacity={0.14} depthWrite={false} />
       </mesh>
@@ -396,22 +443,30 @@ function Runner({ game, avatar }: { game: PlayGame; avatar: DogAvatar }) {
   );
 }
 
-// ---------------------------------------------------------------- 함께 달리는 강아지 (반투명 · 충돌 없음)
+// ---------------------------------------------------------------- 함께 달리는 강아지 (자기 트랙에서 · 서로 충돌 없음)
+/** 다른 참가자의 판정 결과 (프레임마다 한 번 계산해 장애물·강아지·이름표가 같이 씀) */
+const rivalLive: Record<number, RunResult> = {};
+function RivalJudge({ game }: { game: PlayGame }) {
+  useFrame(() => {
+    const now = game.player.now();
+    for (const p of game.multi?.players ?? []) if (p.id !== game.multi!.myId) rivalLive[p.id] = judgeRun(game.chart, multiLive.inputs[p.id] ?? [], now);
+  });
+  return null;
+}
 /**
- * 다른 참가자의 입력 기록을 같은 판정 규칙으로 재현해 레인·점프·숙이기를 보여 준다.
- * 반투명으로 그리고(깊이 기록 없음) 내 강아지와 같은 레인이면 살짝 앞에 둬서 장애물·내 강아지를 가리지 않는다.
+ * 다른 참가자의 입력 기록을 같은 판정 규칙으로 재현해 그 사람 트랙에서 레인·점프·숙이기를 보여 준다.
+ * 트랙이 따로라 내 강아지·장애물과 겹치지 않는다.
  */
-/** 함께 달리는 강아지 자리: 같은 레인에 겹치지 않도록 레인 안에서 살짝 옆으로 (인덱스별 고정) */
-const GHOST_SIDE = [-0.42, 0.42, 0.21];
-function Ghost({ game, p, color, idx }: { game: PlayGame; p: MRPlayer; color: string; idx: number }) {
+function Rival({ game, p, color, x }: { game: PlayGame; p: MRPlayer; color: string; x: number }) {
   const g = useRef<THREE.Group>(null);
+  const tag = useRef<HTMLDivElement>(null);
   const d = useRef(newDogDriver());
-  const st = useRef({ x: 0, ghosted: 0 });
+  const st = useRef({ x: 0, seen: 0, popAt: -1e9, pop: '' as Grade | '' });
   const scale = DOG_SCALE[p.dog.size];
   useFrame((_, rawDt) => {
     const dt = Math.min(rawDt, 0.05);
     const now = game.player.now();
-    const r = judgeRun(game.chart, multiLive.inputs[p.id] ?? [], now);
+    const r = rivalLive[p.id] ?? null;
     const { lane, jy, crouch, air, slide } = poseAt(now, r);
     const s = st.current;
     s.x += (lane * LANE_W - s.x) * Math.min(1, dt * 10); // 네트워크 지연을 감추는 부드러운 보간
@@ -422,35 +477,25 @@ function Ghost({ game, p, color, idx }: { game: PlayGame; p: MRPlayer; color: st
     const running = now >= 0 && !game.ended;
     drv.anim = running ? DogAnim.Run : DogAnim.Stand;
     if (running) drv.phase += dt * Math.min(MAX_GAIT_HZ, game.course.speed / (DOG_STEP.run * scale * 2)) * Math.PI * 2 * (1 - drv.air * 0.7) * (1 - drv.slide * 0.8);
-    // 내 강아지와 같은 줄(z)에서 레인 안 옆자리로: 앞의 장애물도, 내 강아지도 가리지 않음
-    const myLane = poseAt(now, game.live).lane;
-    const side = GHOST_SIDE[idx % GHOST_SIDE.length] * (lane === myLane ? 1.15 : 0.6);
-    if (g.current) {
-      g.current.position.set(s.x + side, jy * 0.9, 0.05);
-      g.current.rotation.set(0, Math.PI, 0);
-      g.current.scale.setScalar(0.78);
-      // 처음 그려질 때 재질을 반투명으로 바꿈 (다른 사람 강아지만)
-      let n = 0;
-      g.current.traverse((o) => {
-        const m = o as THREE.Mesh;
-        if (!m.isMesh || m.userData.ghost) return;
-        const src = m.material as THREE.Material;
-        const c = src.clone(); c.transparent = true; c.opacity = 0.55; c.depthWrite = true; // 깊이를 써야 머리 너머 얼굴이 비치지 않음
-        m.material = c; m.userData.ghost = true; m.renderOrder = 3; n++;
-      });
-      s.ghosted += n;
+    if (g.current) { g.current.position.set(x + s.x, jy, 0); g.current.rotation.set(0, Math.PI, 0); }
+    // 이름표: 닉네임 · 점수 · 콤보 · 방금 판정 (화면 갱신 없이 글자만 바꿈)
+    if (r && r.events.length > s.seen) { s.seen = r.events.length; s.pop = r.events[r.events.length - 1].grade; s.popAt = now; }
+    if (tag.current) {
+      const pop = s.pop && now - s.popAt < 650 ? `<b style="color:${GRADE_COLOR[s.pop]}">${GRADE_LABEL[s.pop]}</b>` : `${(r?.score ?? 0).toLocaleString()}${r && r.combo > 1 ? ` · ${r.combo}콤보` : ''}`;
+      if (tag.current.dataset.v !== pop) { tag.current.dataset.v = pop; tag.current.innerHTML = `<span style="background:${color}" class="rounded-full px-1.5 text-white">${p.nickname}</span> ${pop}`; }
     }
   });
   return (
     <group ref={g}>
       <Dog avatar={p.dog} driver={d} />
-      <Html position={[0, 0.95 * scale + 0.35, 0]} center zIndexRange={[4, 0]} style={{ pointerEvents: 'none' }}>
-        <div className="rounded-full px-2 py-0.5 text-[10px] font-display text-white whitespace-nowrap shadow" style={{ background: color }}>{p.dogName}</div>
+      {/* 이름표는 발밑 뒤쪽(카메라 쪽)에: 강아지 위에 띄우면 앞의 장애물을 가림 */}
+      <Html position={[0, 0.02, -0.55]} center zIndexRange={[4, 0]} style={{ pointerEvents: 'none' }}>
+        <div ref={tag} className="rounded-full bg-white/85 px-1 py-0.5 text-[10px] font-display whitespace-nowrap shadow" data-testid={`rival-${p.id}`} />
       </Html>
     </group>
   );
 }
-const GHOST_COLORS = ['#8fb5e8', '#b9a6e6', '#7fb07a', '#f6a94a'];
+const RIVAL_COLORS = ['#8fb5e8', '#b9a6e6', '#7fb07a', '#f6a94a'];
 
 /** 매 프레임 판정 계산 (서버와 같은 judgeRun) → 새 판정에 효과음·비틀거림 */
 function Judge({ game, onEnd }: { game: PlayGame; onEnd: () => void }) {
@@ -479,6 +524,7 @@ export function RunnerPlay({ game, avatar, human, best, onEnd, onQuit, onRetry }
 }) {
   const [, force] = useState(0);
   const [paused, setPaused] = useState(false);
+  const tracks = useMemo(() => trackLayout(game), [game]);
   const touch = isTouchDevice();
   // 자동 화면 테스트(mungle.e2e)에서만: 진행 중인 게임 상태를 노출해 박자에 맞춘 입력을 검증
   useEffect(() => {
@@ -547,11 +593,12 @@ export function RunnerPlay({ game, avatar, human, best, onEnd, onQuit, onRetry }
         <color attach="background" args={['#fde4ea']} />
         <fog attach="fog" args={['#fde4ea', 20, 52]} />
         <Lighting indoor={false} shadows={!touch} />
-        <CherryWalk game={game} />
-        <Obstacles game={game} />
+        <CherryWalk game={game} xs={tracks.map((t) => t.x)} />
+        {game.multi && <RivalJudge game={game} />}
+        {tracks.map((t) => t.me ? <Obstacles key={t.id} game={game} x={t.x} /> : <Obstacles key={t.id} game={game} x={t.x} live={() => rivalLive[t.id] ?? null} />)}
         {human && <Cheer game={game} human={human} />}
-        {game.multi?.players.filter((p) => p.id !== game.multi!.myId).map((p, i) => <Ghost key={p.id} game={game} p={p} idx={i} color={GHOST_COLORS[i % GHOST_COLORS.length]} />)}
-        <Runner game={game} avatar={avatar} />
+        {tracks.filter((t) => !t.me).map((t, i) => { const p = game.multi!.players.find((x) => x.id === t.id); return p ? <Rival key={t.id} game={game} p={p} x={t.x} color={RIVAL_COLORS[i % RIVAL_COLORS.length]} /> : null; })}
+        <Runner game={game} avatar={avatar} tracks={tracks.length} nickname={game.multi ? game.multi.players.find((p) => p.id === game.multi!.myId)?.nickname : undefined} />
         <Judge game={game} onEnd={onEnd} />
       </Canvas>
       </div>
@@ -599,7 +646,7 @@ export function RunnerPlay({ game, avatar, human, best, onEnd, onQuit, onRetry }
       {touch ? (
         <div className="shrink-0 px-3 pt-2 pb-[calc(8px+var(--safe-b))] bg-[linear-gradient(#f3d9d6,#fbe7e2)] border-t-2 border-white/70">
           <div className="mx-auto max-w-[460px] grid grid-cols-4 gap-2" data-testid="runner-controls">
-            <Btn a="L" label="왼쪽" icon="←" /><Btn a="J" label="뛰기" icon="↑" /><Btn a="D" label="숙이기" icon="↓" /><Btn a="R" label="오른쪽" icon="→" />
+            <Btn a="L" label="왼쪽" icon="←" /><Btn a="R" label="오른쪽" icon="→" /><Btn a="J" label="뛰기" icon="↑" /><Btn a="D" label="숙이기" icon="↓" />
           </div>
         </div>
       ) : (
@@ -627,15 +674,20 @@ function LiveRanking({ game }: { game: PlayGame }) {
   const rows = m.players.map((p) => {
     const st = multiLive.standings.find((x) => x.id === p.id);
     const score = p.id === m.myId ? game.live?.score ?? 0 : st?.score ?? 0;
-    return { p, score, gone: st ? st.left || !st.connected : !p.connected };
+    const live = p.id === m.myId ? game.live : rivalLive[p.id] ?? null;
+    const lane = live ? poseAt(game.player.now(), live).lane : 0;
+    return { p, score, combo: p.id === m.myId ? game.live?.combo ?? 0 : live?.combo ?? 0, lane, gone: st ? st.left || !st.connected : !p.connected };
   }).sort((a, b) => b.score - a.score);
   return (
-    <div className="mt-1 rounded-2xl bg-white/80 px-2 py-1 text-left min-w-[128px]" data-testid="mr-live">
+    <div className="mt-1 rounded-2xl bg-white/85 px-2 py-1 text-left min-w-[150px]" data-testid="mr-live">
       {rows.map((r, i) => (
         <div key={r.p.id} className={`flex items-center gap-1 text-[11px] leading-5 ${r.p.id === m.myId ? 'font-display text-[#e2604f]' : 'text-cocoa'} ${r.gone ? 'opacity-50' : ''}`}>
           <span className="w-4 text-center">{i + 1}</span>
-          <span className="flex-1 truncate max-w-[72px]">{r.p.dogName}</span>
-          <span className="tabular-nums">{r.score.toLocaleString()}</span>
+          <span className="flex-1 truncate max-w-[64px]">{r.p.nickname}</span>
+          {/* 그 사람 트랙의 레인 위치 (모바일에서 옆 트랙이 작게 보일 때 보완) */}
+          <span className="flex gap-[2px]" aria-hidden>{[-1, 0, 1].map((l) => <i key={l} className={`block w-1.5 h-1.5 rounded-full ${r.lane === l ? 'bg-[#f39a7b]' : 'bg-[#ead8c8]'}`} />)}</span>
+          <span className="tabular-nums w-11 text-right">{r.score.toLocaleString()}</span>
+          <span className="tabular-nums w-7 text-right text-[10px] text-cocoa-soft">{r.combo > 1 ? `×${r.combo}` : ''}</span>
         </div>
       ))}
     </div>

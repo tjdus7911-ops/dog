@@ -523,13 +523,14 @@ function HowModal({ onClose }: { onClose: () => void }) {
         <li>🚧 흰 울타리 → 화살표가 있는 <b>빈 레인으로 이동</b></li>
       </ul>
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-        <div className="rounded-xl bg-cream-2 px-3 py-2"><b>📱 모바일</b><br />아래 버튼 4개<br />← 왼쪽 · ↑ 뛰기 · ↓ 숙이기 · → 오른쪽</div>
+        <div className="rounded-xl bg-cream-2 px-3 py-2"><b>📱 모바일</b><br />아래 버튼 4개<br />← 왼쪽 · → 오른쪽 · ↑ 뛰기 · ↓ 숙이기</div>
         <div className="rounded-xl bg-cream-2 px-3 py-2"><b>💻 PC</b><br />← / A · → / D 레인 이동<br />↑ / Space 뛰기 · ↓ / Ctrl 숙이기</div>
       </div>
       <div className="mt-2 rounded-xl bg-cream-2 px-3 py-2">
         판정: PERFECT ±{JUDGE.perfect}ms (100점) · GREAT ±{JUDGE.great}ms (70점) · GOOD ±{JUDGE.good}ms (40점) · MISS 0점<br />
         콤보 10마다 점수 +10% (최대 +100%). 부딪히면 강아지가 비틀거리고 콤보가 초기화되지만 계속 달려요.
       </div>
+      <p className="mt-2 rounded-xl bg-[#f1ecfa] px-3 py-2">🐾 <b>함께 달리기</b>: 최대 4명이 각자 자기 트랙(3레인)에서 같은 음악·같은 장애물로 달려요. 다른 트랙으로는 넘어갈 수 없고, 점수·콤보·순위가 실시간으로 보여요.</p>
       <p className="mt-2 text-xs text-cocoa-soft">소리가 늦게 들리는 기기(블루투스 이어폰 등)는 설정의 ‘판정 보정’을 조절해 주세요. 일시정지했다가 이어 해도 음악과 장애물은 그대로 맞아요.</p>
     </Modal>
   );
