@@ -148,7 +148,12 @@ export function CameraRig() {
         cam.pitch = view.current.pitch; cam.dist = view.current.dist;
         cam.yaw = clearYaw(new THREE.Vector3(local.x, 1.05 + view.current.lookUp, local.z), local.rot + Math.PI, cam.pitch, cam.dist);
       }
-      else { cam.yaw = 0.55; cam.pitch = 0.62; cam.dist = kind === 'home' ? 7.2 : 7.8; }
+      else {
+        // 실내: 열린 앞쪽 대각선에서 내려다봄. 세로 화면(모바일)은 방 전체 구조가 보이게 조금 더 멀고 높게
+        const portrait = window.innerHeight > window.innerWidth;
+        cam.yaw = portrait ? 0.32 : 0.55; cam.pitch = portrait ? 0.74 : 0.62;
+        cam.dist = (kind === 'home' ? 7.2 : 7.8) * (portrait ? 1.3 : 1);
+      }
       cam.lastUserInput = performance.now();
       curDist.current = cam.dist;
       target.current.set(local.x, 1.05 + (kind === 'park' ? view.current.lookUp : 0), local.z);
@@ -165,7 +170,7 @@ export function CameraRig() {
     const park = space.kind === 'park';
     const v = view.current;
     // 시야각: 공원은 화면 방향(세로/가로)에 맞춰, 실내는 기본
-    const fov = park ? v.fov : INDOOR_FOV;
+    const fov = park ? v.fov : INDOOR_FOV + (window.innerHeight > window.innerWidth ? 6 : 0);
     const pc = camera as THREE.PerspectiveCamera;
     if (Math.abs(pc.fov - fov) > 0.01) { pc.fov = fov; pc.updateProjectionMatrix(); }
     // 부드럽게 따라가기 (이동 중엔 약간 늦게 따라와 자연스럽게)

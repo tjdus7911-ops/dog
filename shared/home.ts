@@ -372,7 +372,7 @@ export const WALLPAPERS = [
   { id: 'lilac', label: '라일락', color: '#efe6fa', side: '#e0d3f2' },
 ] as const;
 export const FLOORINGS = [
-  { id: 'oak', label: '원목', color: '#e3c39c', line: '#d2ae85' },
+  { id: 'oak', label: '원목', color: '#ecd0aa', line: '#dfbf95' },
   { id: 'maple', label: '밝은 원목', color: '#f0d9b5', line: '#e2c79c' },
   { id: 'walnut', label: '짙은 원목', color: '#c99a6b', line: '#b5865a' },
   { id: 'tile', label: '크림 타일', color: '#f4ebdf', line: '#e5d8c6' },

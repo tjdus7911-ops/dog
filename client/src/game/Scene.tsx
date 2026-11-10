@@ -1,6 +1,7 @@
-import { Canvas } from '@react-three/fiber';
+import { Canvas, useThree } from '@react-three/fiber';
+import * as THREE from 'three';
 import { AdaptiveDpr, PerformanceMonitor } from '@react-three/drei';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { World } from './World';
 import { CafeSpace, CurrentHomeRoom, HomeFurniture, LobbySpace, ShopSpace } from './Interiors';
 import { BigScreen } from './BigScreen';
@@ -11,6 +12,19 @@ import { useStore } from '../store';
 import { Lighting, ShadowFlags } from './Lighting';
 import { Bins, Hearts, Poops } from './Interact3D';
 import { RunnerArena } from './RunnerArena';
+
+/**
+ * 톤 매핑: 공원은 기존(ACES 필름풍), 실내는 파스텔 색이 탁해지지 않는 Neutral 톤 매핑
+ * (ACES는 밝은 크림·분홍을 회색빛으로 눌러 실내가 칙칙해 보였음). 노출은 과노출 없이 살짝만.
+ */
+function ToneBySpace({ indoor }: { indoor: boolean }) {
+  const gl = useThree((s) => s.gl);
+  useEffect(() => {
+    gl.toneMapping = indoor ? THREE.NeutralToneMapping : THREE.ACESFilmicToneMapping;
+    gl.toneMappingExposure = indoor ? 0.98 : 1;
+  }, [gl, indoor]);
+  return null;
+}
 
 export function Scene() {
   const me = useStore((s) => s.me);
@@ -34,6 +48,7 @@ export function Scene() {
       <AdaptiveDpr pixelated={false} />
       <color attach="background" args={[kind === 'park' ? '#d7eef8' : '#fff4e8']} />
       {kind === 'park' && <fog attach="fog" args={['#e4f2f4', 55, 150]} />}
+      <ToneBySpace indoor={kind !== 'park'} />
       <Lighting indoor={kind !== 'park'} shadows={shadows} />
       {/* 지금 있는 장소의 공간만 그림 (다른 장소의 아바타·사물은 없음) */}
       <ShadowFlags key={kind} cast={kind === 'park'}>
