@@ -114,6 +114,26 @@ export const BINS: BinDef[] = [
 ];
 export const BIN_BY_ID = new Map(BINS.map((b) => [b.id, b]));
 
+/**
+ * 멍글런너 경기장 — 광장 남동쪽 잔디밭 (나무·길과 겹치지 않는 빈 자리). 입구(발바닥 아치)는 광장 쪽을 본다.
+ * 경기장은 나무 배치(시드) 계산 뒤에 정의해 기존 공원 배치는 그대로 둔다.
+ */
+const RA_C = { x: 25.5, z: 14.5 };
+const RA_LEN = Math.hypot(RA_C.x, RA_C.z);
+const RA_U = { x: -RA_C.x / RA_LEN, z: -RA_C.z / RA_LEN }; // 광장 쪽 방향
+const RA_P = { x: -RA_U.z, z: RA_U.x }; // 옆 방향
+export const RUNNER_ARENA = {
+  x: RA_C.x, z: RA_C.z,
+  /** 입구가 바라보는 방향 (y축 회전) */
+  rot: Math.atan2(RA_U.x, RA_U.z),
+  gateX: RA_C.x + RA_U.x * 3.6, gateZ: RA_C.z + RA_U.z * 3.6,
+  /** 입장 버튼이 나타나는 범위 */
+  entrance: { x: RA_C.x + RA_U.x * 4.6, z: RA_C.z + RA_U.z * 4.6, r: 2.0 },
+  board: { x: RA_C.x + RA_U.x * 3.9 + RA_P.x * 2.7, z: RA_C.z + RA_U.z * 3.9 + RA_P.z * 2.7 },
+  posts: [-1, 1].map((k) => ({ x: RA_C.x + RA_U.x * 3.6 + RA_P.x * k * 1.25, z: RA_C.z + RA_U.z * 3.6 + RA_P.z * k * 1.25 })),
+  notes: [0.9, 2.2, -0.9, -2.2].map((a) => { const ang = Math.atan2(RA_U.x, RA_U.z) + Math.PI + a * 0.55; return { x: RA_C.x + Math.sin(ang) * 3.4, z: RA_C.z + Math.cos(ang) * 3.4 }; }),
+};
+
 export const LAMPS: LampDef[] = [];
 for (const a of RADIAL_ANGLES) {
   for (const d of [9.5, 21]) {
@@ -163,6 +183,11 @@ export const COLLIDERS_CIRCLE: Circle[] = [
   { x: PHOTO_ZONE.x, z: PHOTO_ZONE.z, r: 0.55 },
   { x: MEETING_BOARD.x, z: MEETING_BOARD.z, r: 0.6 },
   ...BINS.map((b) => ({ x: b.x, z: b.z, r: 0.32 })),
+  // 멍글런너 경기장: 가운데 조형물, 입구 기둥, 랭킹 안내판, 음표 장식
+  { x: RUNNER_ARENA.x, z: RUNNER_ARENA.z, r: 1.0 },
+  ...RUNNER_ARENA.posts.map((p) => ({ ...p, r: 0.3 })),
+  { ...RUNNER_ARENA.board, r: 0.55 },
+  ...RUNNER_ARENA.notes.map((p) => ({ ...p, r: 0.18 })),
 ];
 
 export const COLLIDERS_BOX: Box[] = BUILDINGS.map((b) => ({ x: b.x, z: b.z, hw: b.w / 2 + 0.1, hd: b.d / 2 + 0.1 }));

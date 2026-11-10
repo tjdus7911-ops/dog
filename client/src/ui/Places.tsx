@@ -6,7 +6,7 @@ import { local } from '../game/local';
 import { isTouchDevice } from '../game/input';
 import { joinPark } from '../net/socket';
 import { api } from '../lib/api';
-import { APARTMENT_ENTRANCE, CAFE_ENTRANCE, MEETING_BOARD, SHOP_ENTRANCE } from '@shared/world';
+import { APARTMENT_ENTRANCE, CAFE_ENTRANCE, MEETING_BOARD, RUNNER_ARENA, SHOP_ENTRANCE } from '@shared/world';
 import { openCommunity } from './Community';
 
 export const DOORS = [
@@ -14,6 +14,7 @@ export const DOORS = [
   { e: CAFE_ENTRANCE, id: 'cafe-1', label: '☕ 애견카페 들어가기' },
   { e: SHOP_ENTRANCE, id: 'shop-1', label: '🛍️ 애견샵 들어가기' },
   { e: MEETING_BOARD, id: 'board', label: '📋 동네 모임 게시판 보기' },
+  { e: RUNNER_ARENA.entrance, id: 'runner', label: '🏃 멍글런너 입장' },
 ] as const;
 
 /** 공원에서 건물 입구·모임 게시판 가까이 가면 들어가기 버튼 */
@@ -31,7 +32,7 @@ export function EntrancePrompt() {
   if (!near || !isPark || mobileChat) return null;
   return (
     <div className="absolute z-20 left-1/2 -translate-x-1/2 bottom-24 pop" style={{ bottom: isTouchDevice() ? ABOVE_CTRL : undefined }}>
-      <button className="btn btn-coral px-6 py-3 text-lg shadow-lg whitespace-nowrap" onClick={() => (near.id === 'board' ? openCommunity('meetups') : void joinPark(near.id))}>{near.label}</button>
+      <button className="btn btn-coral px-6 py-3 text-lg shadow-lg whitespace-nowrap" onClick={() => (near.id === 'board' ? openCommunity('meetups') : near.id === 'runner' ? set({ runner: true }) : void joinPark(near.id))}>{near.label}</button>
     </div>
   );
 }

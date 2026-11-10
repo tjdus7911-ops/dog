@@ -23,6 +23,7 @@ import { HomeEditor, HomePanel } from './Home';
 
 const AvatarEditor = lazy(() => import('./AvatarEditor'));
 const AdminPanel = lazy(() => import('./AdminPanel'));
+const RunnerApp = lazy(() => import('../runner/RunnerApp'));
 
 export default function Game() {
   const panel = useStore((s) => s.panel);
@@ -40,6 +41,17 @@ export default function Game() {
   // 강아지 메뉴·프로필·사진 보기·가입 안내가 열리면 이동 UI(조이스틱·액션 버튼)를 숨김
   const overlay = useOverlayOpen();
   const mobileChat = touch && chatOpen;
+  const runner = useStore((s) => s.runner);
+  // 멍글런너: 광장 3D 화면을 내리고 게임 화면만 (그래픽 자원 절약). 끝나면 경기장 앞으로 돌아옴
+  if (runner) {
+    return (
+      <div className="relative h-full w-full overflow-hidden">
+        <Suspense fallback={<div className="h-full grid place-items-center bg-cream font-display text-xl">🏃 멍글런너 준비 중…</div>}><RunnerApp /></Suspense>
+        <InteractionOverlays />
+        <ConnectionOverlay />
+      </div>
+    );
+  }
   return (
     <div className="relative h-full w-full overflow-hidden">
       <div className="absolute inset-0"><Scene /></div>

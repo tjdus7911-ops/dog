@@ -13,6 +13,7 @@ import { homeSpaceId } from '@shared/spaces';
 import {
   APARTMENT_ENTRANCE, BIG_SCREEN, BUILDINGS, CAFE_ENTRANCE, FOUNTAIN_RADIUS, MEETING_BOARD, PATH_WIDTH, PHOTO_ZONE,
   PLAZA_RADIUS, RADIAL_ANGLES, RING_RADIUS, SHOP_ENTRANCE, TREES, WORLD_RADIUS,
+  RUNNER_ARENA,
 } from '@shared/world';
 import type { MeetupView } from '@shared/community';
 import type { ScreenSlide } from '@shared/screen';
@@ -187,6 +188,7 @@ const LANDMARKS: { icon: string; label: string; x: number; z: number; spot?: { x
   { icon: '🏢', label: '멍글 아파트', x: APARTMENT_ENTRANCE.x, z: APARTMENT_ENTRANCE.z - 3.5, spot: APARTMENT_ENTRANCE },
   { icon: '☕', label: '애견카페', x: CAFE_ENTRANCE.x, z: CAFE_ENTRANCE.z - 3, spot: CAFE_ENTRANCE },
   { icon: '🛍️', label: '애견샵', x: SHOP_ENTRANCE.x, z: SHOP_ENTRANCE.z - 3, spot: SHOP_ENTRANCE },
+  { icon: '🏃', label: '멍글런너', x: RUNNER_ARENA.x, z: RUNNER_ARENA.z + 1, spot: RUNNER_ARENA.entrance },
 ];
 
 function drawPark(g: CanvasRenderingContext2D, size: number, friendIds: Set<number>) {

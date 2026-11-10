@@ -1,6 +1,6 @@
 // 실시간 미니맵 — 내 위치(주황), 친구(초록), 다른 사용자(흰색)
 import { useEffect, useRef } from 'react';
-import { BINS, BUILDINGS, FOUNTAIN_RADIUS, PATH_WIDTH, PLAZA_RADIUS, RADIAL_ANGLES, RING_RADIUS, TREES, WORLD_RADIUS } from '@shared/world';
+import { BINS, BUILDINGS, RUNNER_ARENA, FOUNTAIN_RADIUS, PATH_WIDTH, PLAZA_RADIUS, RADIAL_ANGLES, RING_RADIUS, TREES, WORLD_RADIUS } from '@shared/world';
 import { local } from '../game/local';
 import { rendered } from '../net/remote';
 import { get, useStore } from '../store';
@@ -65,6 +65,9 @@ export function MiniMap() {
 
 /** 배변봉투 휴지통(초록 네모) · 치워야 할 내 강아지 배변(갈색 점) */
 export function drawBinsAndPoops(g: CanvasRenderingContext2D, P: (x: number, z: number) => [number, number], r: number) {
+  // 멍글런너 경기장 (코랄 원)
+  { const [x, y] = P(RUNNER_ARENA.x, RUNNER_ARENA.z); const k = (P(RUNNER_ARENA.x + 4.4, 0)[0] - P(RUNNER_ARENA.x, 0)[0]);
+    g.fillStyle = '#f7b8a4'; g.strokeStyle = '#fff'; g.lineWidth = 1.2; g.beginPath(); g.arc(x, y, Math.max(3, k), 0, Math.PI * 2); g.fill(); g.stroke(); }
   for (const b of BINS) {
     const [x, y] = P(b.x, b.z);
     g.fillStyle = '#5f9a5a'; g.strokeStyle = '#fff'; g.lineWidth = 1;

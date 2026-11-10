@@ -619,6 +619,8 @@ export function setupRealtime(io: Server) {
     privacyChanged(userId: number) { notifyFriendsPresence(userId); },
     /** 광장 스크린 콘텐츠가 바뀌면 모두에게 알림 */
     screenUpdated() { io.emit('screen:updated'); },
+    /** 멍글런너 랭킹이 바뀌면 경기장 안내판 갱신 */
+    runnerChanged() { io.emit('runner:updated'); },
     /** 특정 사용자에게 실시간 알림 (방문 신청·이웃 신청 등) */
     notify(userId: number, event: string, payload: unknown) { sessions.get(userId)?.socket.emit(event, payload); },
     /** 집 꾸미기가 바뀌면 그 집에 있는 사람들에게 알림 */

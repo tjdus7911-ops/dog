@@ -104,6 +104,9 @@ interface State {
   joinPrompt: boolean;
   /** 친구 집 놀러 가기: 로비에 도착하면 이 집 문 앞 안내를 바로 띄움 */
   lobbyFocus: number | null;
+  /** 멍글런너 화면 (로비·게임·결과) 열림 / 랭킹 갱신 신호 */
+  runner: boolean;
+  runnerVersion: number;
 }
 
 export const useStore = create<State>()(() => ({
@@ -159,6 +162,8 @@ export const useStore = create<State>()(() => ({
   viewer: null,
   joinPrompt: false,
   lobbyFocus: null,
+  runner: false,
+  runnerVersion: 0,
 }));
 
 export const set = useStore.setState;

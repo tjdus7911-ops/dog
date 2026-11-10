@@ -17,6 +17,7 @@ import { validateDog, validateHuman } from '../../shared/avatar';
 import { DEFAULT_PRIVACY } from '../../shared/protocol';
 import { claimedItems, registerCommunity, screenExtras } from './community';
 import { ownedPhotoUrls, registerPets, retireDogPhoto } from './pets';
+import { registerRunner } from './runner';
 
 const PORT = Number(process.env.PORT ?? 3001);
 const app = express();
@@ -525,6 +526,7 @@ app.post('/api/admin/notices', requireAuth, requireAdmin, (req, res) => {
 
 // ---------- 강아지 프로필 · 집 액자 사진 ----------
 registerPets(app, { saveImage, removeImage, profileChanged: (u) => rt.profileChanged(u) });
+registerRunner(app, { changed: () => rt.runnerChanged() });
 
 // ---------- 멍글 동네 (강아지 자랑·산책 모임·강아지 모임·애견샵) ----------
 registerCommunity(app, { saveImage, removeImage, notify: (u, e, p) => rt.notify(u, e, p), screenUpdated: () => rt.screenUpdated() });

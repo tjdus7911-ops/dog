@@ -10,6 +10,7 @@ import { LocalPlayer, RemotePlayer } from './Players';
 import { useStore } from '../store';
 import { Lighting, ShadowFlags } from './Lighting';
 import { Bins, Hearts, Poops } from './Interact3D';
+import { RunnerArena } from './RunnerArena';
 
 export function Scene() {
   const me = useStore((s) => s.me);
@@ -36,7 +37,7 @@ export function Scene() {
       <Lighting indoor={kind !== 'park'} shadows={shadows} />
       {/* 지금 있는 장소의 공간만 그림 (다른 장소의 아바타·사물은 없음) */}
       <ShadowFlags key={kind} cast={kind === 'park'}>
-        {kind === 'park' && <><World /><BigScreen /><Bins /><Poops /></>}
+        {kind === 'park' && <><World /><BigScreen /><Bins /><Poops /><RunnerArena /></>}
         {kind === 'lobby' && <LobbySpace />}
         {kind === 'home' && <><HomeRoom /><HomeFurniture /></>}
         {kind === 'cafe' && <CafeSpace />}

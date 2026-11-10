@@ -78,7 +78,7 @@ function nearActions(): Act[] {
       if (bin) acts.push({ key: 'bin', icon: '🗑️', label: '봉투 버리기', run: () => void disposeBag(bin.id) });
     }
     const door = DOORS.find((x) => near(x.e.x, x.e.z, x.e.r));
-    if (door) acts.push({ key: door.id, icon: door.label.split(' ')[0], label: door.label.split(' ').slice(1).join(' '), run: () => (door.id === 'board' ? openCommunity('meetups') : void joinPark(door.id)) });
+    if (door) acts.push({ key: door.id, icon: door.label.split(' ')[0], label: door.label.split(' ').slice(1).join(' '), run: () => (door.id === 'board' ? openCommunity('meetups') : door.id === 'runner' ? set({ runner: true }) : void joinPark(door.id)) });
     if (near(PHOTO_ZONE.standX, PHOTO_ZONE.standZ, PHOTO_ZONE.r)) acts.push({ key: 'photo', icon: '📸', label: '포토존에서 사진 찍기', run: () => { local.rot = PHOTO_ZONE.rot; startPhotoMode(); } });
     // 광장 스크린 앞 (스크린 정면 쪽)
     if (Math.abs(local.x - BIG_SCREEN.x) < BIG_SCREEN.postX + 1.6 && local.z > BIG_SCREEN.z && local.z < BIG_SCREEN.z + 6.5) {

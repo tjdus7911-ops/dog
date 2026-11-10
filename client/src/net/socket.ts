@@ -88,6 +88,7 @@ export function connect() {
     toast(v.kind === 'request' ? `🏘️ ${v.nickname}님이 이웃 신청을 보냈어요` : `🏘️ ${v.nickname}님과 이웃이 되었어요`);
     set((x) => ({ visitRequestsVersion: x.visitRequestsVersion + 1 }));
   });
+  s.on('runner:updated', () => set((x) => ({ runnerVersion: x.runnerVersion + 1 })));
   s.on('screen:updated', () => set((x) => ({ screenVersion: x.screenVersion + 1 })));
   s.on('screen:decided', (v: { title: string; approved: boolean }) => toast(v.approved ? `📺 '${v.title}'이(가) 광장 스크린에 올라갔어요!` : `'${v.title}' 스크린 신청이 반려되었어요`));
   // ---------- 멍글 동네 ----------
