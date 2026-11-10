@@ -3,6 +3,8 @@ import { api, tokenStore } from '../lib/api';
 import { set } from '../store';
 import type { MyProfile } from '@shared/protocol';
 import { LegalModal, type LegalDoc } from './Legal';
+import { LogoMark } from './Logo';
+import { InstallCard } from './Install';
 
 export function AuthScreen() {
   // 둘러보기 중 '회원가입하기'를 누르고 왔으면 가입 탭으로 시작
@@ -46,8 +48,8 @@ export function AuthScreen() {
       <div className="min-h-full grid place-items-center p-5">
         <div className="w-full max-w-[420px]">
           <div className="text-center mb-6">
-            <div className="text-5xl">🐾</div>
-            <h1 className="font-display text-4xl mt-2">멍글마을</h1>
+            <div className="inline-block"><LogoMark size={96} /></div>
+            <h1 className="font-display text-4xl mt-1">멍글마을</h1>
             <p className="text-cocoa-soft mt-1 text-sm">우리 강아지와 함께 걷고, 만나고, 자랑하는 3D 커뮤니티</p>
           </div>
           <form onSubmit={submit} className="panel p-6 space-y-3">
@@ -92,6 +94,7 @@ export function AuthScreen() {
             </button>
           </form>
           <button type="button" className="btn btn-ghost w-full py-3 mt-3 border border-[#f1e2d2]" onClick={() => setBrowse(true)}>👀 그냥 둘러보기</button>
+          <InstallCard />
           <p className="text-center text-xs text-cocoa-soft mt-4">
             <button type="button" className="underline" onClick={() => setLegal('terms')}>이용약관</button>
             {' · '}

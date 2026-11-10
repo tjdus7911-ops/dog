@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { drawBinsAndPoops } from './MiniMap';
 import { get, set, toast, useStore } from '../store';
+import { canOfferInstall, usePwa } from '../pwa';
+import { installFromButton } from './Install';
 import { joinPark, warpTo } from '../net/socket';
 import { api } from '../lib/api';
 import { local } from '../game/local';
@@ -104,6 +106,7 @@ export function BottomNav() {
 export function MoreSheet() {
   const me = useStore((s) => s.me)!;
   const open = useStore((s) => s.activeMenu === 'more');
+  const pwa = usePwa();
   useEffect(() => { setMoveLocked(open, 'more'); return () => setMoveLocked(false, 'more'); }, [open]);
   if (!open) return null;
   const guest = me.role === 'guest';
@@ -125,6 +128,7 @@ export function MoreSheet() {
     ] },
     { title: '설정', items: [
       { label: '개인정보·차단 설정', onClick: fromMenu(() => set({ panel: 'settings' })), hide: DEMO || guest },
+      { label: '홈 화면에 추가', onClick: fromMenu(() => void installFromButton()), hide: !canOfferInstall(pwa) },
       { label: '운영 관리', onClick: fromMenu(() => set({ panel: 'admin' })), hide: DEMO || me.role !== 'admin' },
       DEMO ? { label: '처음부터 다시 만들기', onClick: fromMenu(resetDemo), soft: true } : { label: guest ? '둘러보기 끝내기' : '로그아웃', onClick: fromMenu(logout), soft: true },
     ] },

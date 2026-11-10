@@ -683,8 +683,41 @@ app.post('/api/admin/ban', requireAuth, requireAdmin, (req, res) => {
 // ---------- 프로덕션: 빌드된 클라이언트 제공 ----------
 const clientDist = path.resolve(import.meta.dirname, '../../client/dist');
 if (fs.existsSync(clientDist)) {
-  app.use(express.static(clientDist, { index: false }));
-  app.get(/^\/(?!api|uploads|socket\.io).*/, (_req, res) => res.sendFile(path.join(clientDist, 'index.html')));
+  // 빌드 파일(이름에 해시가 붙음)은 오래 보관해도 안전 · 없는 파일은 화면(html) 대신 404
+  app.use('/assets', express.static(path.join(clientDist, 'assets'), { index: false, immutable: true, maxAge: '365d', fallthrough: true }));
+  app.use('/assets', (_req, res) => res.status(404).end());
+  // 홈 화면 앱: 서비스 워커·앱 정보는 항상 새로 확인 (새 배포가 바로 반영되게)
+  app.use(express.static(clientDist, {
+    index: false,
+    setHeaders(res, file) {
+      const base = path.basename(file);
+      if (base === 'sw.js') { res.setHeader('Cache-Control', 'no-cache'); res.setHeader('Service-Worker-Allowed', '/'); }
+      else if (base === 'manifest.webmanifest') { res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8'); res.setHeader('Cache-Control', 'no-cache'); }
+      else if (/\.(png|svg|jpg)$/.test(base)) res.setHeader('Cache-Control', 'public, max-age=86400');
+    },
+  }));
+  // 첫 화면: 링크 미리보기(카카오톡·SNS)는 전체 주소가 필요해서 요청 주소로 채워 보냄
+  const indexFile = path.join(clientDist, 'index.html');
+  let indexCache: { mtime: number; html: string } | null = null;
+  const indexHtml = () => {
+    const mtime = fs.statSync(indexFile).mtimeMs;
+    if (!indexCache || indexCache.mtime !== mtime) indexCache = { mtime, html: fs.readFileSync(indexFile, 'utf8') };
+    return indexCache.html;
+  };
+  const publicOrigin = (req: express.Request) => {
+    const fixed = process.env.MUNGLE_PUBLIC_URL?.replace(/\/+$/, '');
+    if (fixed) return fixed;
+    const host = String(req.get('host') ?? '').replace(/[^a-zA-Z0-9.:\-[\]]/g, '');
+    return `${req.protocol}://${host}`;
+  };
+  app.get(/^\/(?!api|uploads|socket\.io).*/, (req, res) => {
+    const origin = publicOrigin(req);
+    const html = indexHtml()
+      .replace('property="og:url" content="/"', `property="og:url" content="${origin}/"`)
+      .replace('property="og:image" content="/og.jpg"', `property="og:image" content="${origin}/og.jpg"`);
+    res.setHeader('Cache-Control', 'no-cache');
+    res.type('html').send(html);
+  });
 }
 
 // ---------- 자동 백업 (기본 하루 1번, MUNGLE_BACKUP_HOURS=0 이면 끔) ----------

@@ -7,6 +7,8 @@ import { AuthScreen } from './AuthScreen';
 import { ErrorBoundary, Toasts } from './common';
 import type { MyProfile } from '@shared/protocol';
 import { DEMO, loadDemoProfile } from '../demo';
+import { InstallGuideSheet } from './Install';
+import { LogoMark } from './Logo';
 
 const Game = lazy(() => import('./Game'));
 const AvatarEditor = lazy(() => import('./AvatarEditor'));
@@ -52,6 +54,7 @@ export function App() {
           </Suspense>
         </ErrorBoundary>
       )}
+      <InstallGuideSheet />
       <Toasts />
     </>
   );
@@ -61,7 +64,7 @@ function Splash() {
   return (
     <div className="h-full grid place-items-center bg-cream">
       <div className="text-center">
-        <div className="text-5xl animate-bounce">🐾</div>
+        <div className="animate-bounce inline-block"><LogoMark size={72} /></div>
         <p className="font-display text-2xl mt-3 text-cocoa">멍글마을</p>
         <p className="text-sm text-cocoa-soft mt-1">공원을 준비하고 있어요…</p>
       </div>

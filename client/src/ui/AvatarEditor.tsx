@@ -1,5 +1,6 @@
 // 아바타 만들기 / 수정 — 왼쪽: 3D 미리보기 + 아바타 예시 / 오른쪽: 항목별 실제 3D 썸네일 커스터마이징
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { LogoMark } from './Logo';
 import {
   ACCESSORIES, BREED_PRESETS, CLOTH_COLORS, COAT_COLORS, DOG_BUILDS, DOG_EAR_SIZES, DOG_LENGTHS, DOG_MARKINGS, DOG_EARS, DOG_FUR, DOG_PATTERNS, DOG_SIZES, DOG_SNOUTS,
   DOG_TAILS, HAIR_COLORS, HAIR_STYLES, HARNESS_COLORS, HAT_STYLES, SKIN_TONES,
@@ -267,7 +268,7 @@ export default function AvatarEditor({ mode }: { mode: 'onboarding' | 'edit' }) 
       {/* 헤더 */}
       <header className="flex items-center gap-3 md:gap-5 px-4 md:px-7 pt-3 md:pt-5 pb-2 shrink-0">
         <div className="flex items-center gap-2">
-          <span className="text-3xl md:text-4xl leading-none">🐾</span>
+          <LogoMark size={40} className="md:w-12 md:h-auto" />
           <div className="leading-none"><div className="font-display text-xl md:text-[28px]">멍글마을</div><div className="text-[11px] font-display text-cocoa-soft hidden md:block mt-0.5">Mungle Village</div></div>
         </div>
         <span className="w-px h-7 bg-[#e9d8c6]" />

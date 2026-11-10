@@ -103,14 +103,15 @@ async function main() {
 
     // ================= 3) 출석 =================
     console.log('\n[출석 체크]');
-    const day0 = Date.parse('2026-11-02T15:30:00Z'); // 한국 시간 11/3 00:30
+    // 기준 날짜는 지난 날짜로 고정 (실제 오늘과 같은 날이 되면 가입 보상 등 실제 시각 기록이 '오늘 획득'에 섞임)
+    const day0 = Date.parse('2025-03-02T15:30:00Z'); // 한국 시간 3/3 00:30
     const H = (t: number) => ({ 'x-test-now': String(t) });
     const at1 = await api('/api/coins/attendance', {}, a.token, 'POST', H(day0));
     check('출석 100코인', at1.status === 200 && at1.body.got[0].amount === 100 && at1.body.coins.attendance.claimedToday);
     const at1b = await api('/api/coins/attendance', {}, a.token, 'POST', H(day0 + 3600_000));
     check('같은 날 두 번 출석 불가', at1b.status === 409 && at1b.body.coins.balance === 100);
     // 한국 시간 자정 직전(전날)과 직후
-    const before = Date.parse('2026-11-03T14:59:00Z'); // 11/3 23:59 KST → 같은 날
+    const before = Date.parse('2025-03-03T14:59:00Z'); // 3/3 23:59 KST → 같은 날
     check('한국 시간 기준 날짜 (23:59는 같은 날)', (await api('/api/coins/attendance', {}, a.token, 'POST', H(before))).status === 409);
     for (let d = 1; d <= 6; d++) await api('/api/coins/attendance', {}, a.token, 'POST', H(day0 + d * 86400_000));
     const c7 = await coins(a.token, H(day0 + 6 * 86400_000));
