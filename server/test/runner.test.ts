@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { io } from 'socket.io-client';
-import { DUCK_MS, JUMP_MS, RUNNER_GAME_VERSION, buildChart, buildSong, judgeRun, validateChart, type Lane, type RunnerInput } from '../../shared/runner';
+import { COURSES, DIFFICULTIES, DUCK_MS, JUMP_MS, RUNNER_GAME_VERSION, buildChart, buildSong, judgeRun, validateChart, type Chart, type Lane, type RunnerInput } from '../../shared/runner';
 
 const PORT = 3996;
 const BASE = `http://localhost:${PORT}`;
@@ -18,10 +18,10 @@ async function api(p: string, body?: object, token?: string, method?: string) {
 }
 const chart = buildChart('elise')!;
 /** 사람처럼 약간씩 어긋난 입력 (seed로 결정) */
-function play(jitter: number, seed: number, skipEvery = 0): RunnerInput[] {
+function play(jitter: number, seed: number, skipEvery = 0, ch: Chart = chart): RunnerInput[] {
   let s = seed; const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
   let lane: number = 0; const out: RunnerInput[] = [];
-  chart.obstacles.forEach((o, i) => {
+  ch.obstacles.forEach((o, i) => {
     if (skipEvery && i % skipEvery === 0) return;
     const t = Math.round(o.t + (rnd() * 2 - 1) * jitter);
     if (o.need === 'jump') out.push({ t, a: 'J' });
@@ -39,7 +39,7 @@ async function user(u: string, nick: string, dog: string) {
 }
 const finish = (token: string, runId: string, inputs: RunnerInput[], extra: object = {}) =>
   api('/api/runner/finish', { runId, courseId: 'elise', gameVersion: RUNNER_GAME_VERSION, patternVersion: chart.patternVersion, inputs, ...extra }, token);
-async function start(token: string, course = 'elise') { return api('/api/runner/start', { courseId: course }, token); }
+async function start(token: string, course = 'elise', difficulty?: string) { return api('/api/runner/start', { courseId: course, difficulty }, token); }
 
 async function main() {
   const proc = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
@@ -65,10 +65,30 @@ async function main() {
     check('BPM·마디 위치 데이터', chart.bpm === 91 && chart.obstacles.every((o) => typeof o.bar === 'number' && typeof o.pos === 'number'));
     const broken = { ...chart, obstacles: [...chart.obstacles.slice(0, 2), { ...chart.obstacles[1], id: 2, t: chart.obstacles[1].t + 100 }] };
     check('너무 붙은 장애물은 검증에서 걸러짐', validateChart(broken).length > 0);
+    // 전체 곡 개방: 5곡 × EASY/NORMAL/HARD 모두 패턴이 있고, 피할 수 있고, 음표 위에 놓임
+    const bad: string[] = [];
+    const counts: Record<string, number[]> = {};
+    for (const c of COURSES) {
+      const sg = buildSong(c.id);
+      const on = new Set(sg?.notes.map((n) => Math.round(n.t * 1000)) ?? []);
+      counts[c.id] = [];
+      for (const d of DIFFICULTIES) {
+        const ch = buildChart(c.id, d);
+        if (!sg || !ch) { bad.push(`${c.id}.${d}: 없음`); continue; }
+        counts[c.id].push(ch.obstacles.length);
+        const v = validateChart(ch);
+        if (v.length) bad.push(`${c.id}.${d}: ${v[0]}`);
+        if (!ch.obstacles.every((o) => on.has(o.t))) bad.push(`${c.id}.${d}: 음표 밖 장애물`);
+        if (ch.obstacles.length < 20) bad.push(`${c.id}.${d}: 장애물 너무 적음`);
+      }
+    }
+    check('5곡 × 3난이도 패턴 모두 생성 · 검증 통과 · 음표 위 배치', COURSES.length === 5 && COURSES.every((c) => c.available) && bad.length === 0, bad);
+    check('난이도가 오를수록 장애물이 많아짐 (EASY < NORMAL < HARD)', Object.values(counts).every(([e, n, h]) => e < n && n < h), counts);
+    check('기존 엘리제 NORMAL 패턴 그대로 (기존 기록 유지)', buildChart('elise', 'normal')!.obstacles.length === 46 && JSON.stringify(buildChart('elise')) === JSON.stringify(buildChart('elise', 'normal')));
 
     console.log('\n[시작]');
     check('없는 코스 거부', (await start(a.token, 'nope')).status === 400);
-    check('음원 준비 중인 코스 거부', (await start(a.token, 'danube')).status === 400);
+    check('잘못된 난이도 거부', (await start(a.token, 'elise', 'insane')).status === 400);
     const g = await api('/api/auth/guest', {});
     const gs = await start(g.body.token);
     check('둘러보기 방문자는 공식 기록 시작 불가 (연습만)', gs.status === 403 && gs.body.code === 'members_only');
@@ -156,6 +176,26 @@ async function main() {
     const sd2 = await start(d.token); await wait();
     const up = await finish(d.token, sd2.body.runId, better!);
     check('순위가 오르면 이전 순위도 알려 줌 (▲ 표시용)', up.status === 200 && up.body.prevRank === 4 && up.body.rank === 3, up.body);
+
+    console.log('\n[난이도별 기록]');
+    const ud = c; // (가입 횟수 제한 때문에 기존 사용자로)
+    const dh = buildChart('danube', 'hard')!;
+    const hd1 = await start(ud.token, 'danube', 'hard');
+    check('다른 곡 HARD 공식 기록 시작', hd1.status === 200 && !!hd1.body.runId, hd1.body);
+    await sleep(1400);
+    const wrongd = await api('/api/runner/finish', { runId: hd1.body.runId, courseId: 'danube', difficulty: 'normal', gameVersion: RUNNER_GAME_VERSION, patternVersion: dh.patternVersion, inputs: play(30, 5, 0, dh) }, ud.token);
+    check('시작한 난이도와 다른 난이도로 제출하면 거부', wrongd.status === 400, wrongd.body);
+    const hd2 = await start(ud.token, 'danube', 'hard');
+    await sleep(1400);
+    const okd = await api('/api/runner/finish', { runId: hd2.body.runId, courseId: 'danube', difficulty: 'hard', gameVersion: RUNNER_GAME_VERSION, patternVersion: dh.patternVersion, inputs: play(30, 5, 0, dh) }, ud.token);
+    const expd = judgeRun(dh, play(30, 5, 0, dh)).score;
+    check('HARD 기록: 서버가 HARD 패턴으로 다시 판정', okd.status === 200 && okd.body.result.score === expd && okd.body.rank === 1, okd.body);
+    const rh = await api('/api/runner/ranking?scope=course&course=danube.hard', undefined, ud.token);
+    const rn = await api('/api/runner/ranking?scope=course&course=danube', undefined, ud.token);
+    check('난이도별 랭킹 분리 (HARD 랭킹에만 기록)', rh.body.entries.length === 1 && rh.body.entries[0].userId === ud.id && rn.body.entries.every((e: any) => e.userId !== ud.id), { rh: rh.body.entries.length, rn: rn.body.entries.length });
+    const sm = await api('/api/runner/summary', undefined, ud.token);
+    check('내 기록 요약에 난이도 키로 표시', sm.body.bests.some((b: any) => b.course === 'danube.hard'));
+    check('없는 난이도 랭킹 요청 거부', (await api('/api/runner/ranking?scope=course&course=danube.insane', undefined, ud.token)).status === 400);
   } finally {
     proc.kill();
     fs.rmSync(dataDir, { recursive: true, force: true });

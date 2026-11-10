@@ -23,8 +23,17 @@ const BUILD_W = { slim: 0.88, normal: 1, chubby: 1.14 } as const;
 const EAR_SCALE = { small: 0.78, medium: 1, large: 1.22 } as const;
 const lum = (hex: string) => { const c = new THREE.Color(hex); return 0.299 * c.r + 0.587 * c.g + 0.114 * c.b; };
 
-function buildDog(a: DogAvatar): THREE.Group {
-  if (a.breed === 'corgi') return buildCorgi(a);
+/** 귀 관절: earBones면 이름 있는 관절(따로 움직일 수 있음), 아니면 머리에 합쳐지는 보조 그룹 */
+function earGroup(head: THREE.Object3D, side: number, earBones: boolean, pos: [number, number, number], rot: [number, number, number]) {
+  if (!earBones) return group(head, pos, rot);
+  const g = bone(head, side < 0 ? 'earR' : 'earL', pos);
+  g.rotation.set(...rot);
+  g.userData.baseRot = [...rot];
+  return g;
+}
+
+function buildDog(a: DogAvatar, earBones = false): THREE.Group {
+  if (a.breed === 'corgi') return buildCorgi(a, earBones);
   const root = new THREE.Group();
   root.name = 'dog';
   // 다리가 길면 몸 전체를 올린다 (산책 애니메이션은 root.userData.baseY 기준으로 위아래로 움직임)
@@ -162,15 +171,19 @@ function buildDog(a: DogAvatar): THREE.Group {
   for (const s of [-1, 1]) {
     const earColor = a.pattern === 'patch' && s > 0 ? sec : a.pattern === 'saddle' || a.breed === 'beagle' ? sec : coat;
     if (a.ear === 'pointy') {
-      const g = group(head, [s * 0.105 * f, 0.15 * f, -0.03], [0, 0, -s * 0.1]);
+      const g = earGroup(head, s, earBones, [s * 0.105 * f, 0.15 * f, -0.03], [0, 0, -s * 0.1]);
       g.scale.setScalar(es);
       part(g, shape.cone(0.09, 0.23), earColor, [0, 0.09, 0], [1, 1, 0.48]);
       part(g, shape.ball(), earColor, [0, 0.0, 0], [0.085, 0.04, 0.045]);
       part(g, shape.cone(0.064, 0.17), INNER_EAR, [0, 0.08, 0.03], [1, 1, 0.2]);
     } else if (a.ear === 'floppy') {
-      part(head, shape.ball(), earColor, [s * (0.17 + 0.006 * es) * f, -0.03 - (es - 1) * 0.04, -0.01], [0.045 * es, (long ? 0.13 : 0.11) * es, 0.075 * es], [0, 0, s * 0.18]);
+      // 늘어진 귀: 관절을 귀 윗부분(머리에 붙은 곳)에 두어 그 점을 중심으로 흔들리게
+      // (모양·위치는 기존과 같음: 귀 중심이 원래 자리에 오도록 관절 위치를 계산)
+      const ey = (long ? 0.13 : 0.11) * es, h = ey * 0.8, th = s * 0.18;
+      const g = earGroup(head, s, earBones, [s * (0.17 + 0.006 * es) * f - h * Math.sin(th), -0.03 - (es - 1) * 0.04 + h * Math.cos(th), -0.01], [0, 0, th]);
+      part(g, shape.ball(), earColor, [0, -h, 0], [0.045 * es, ey, 0.075 * es]);
     } else {
-      const g = group(head, [s * 0.11 * f, 0.13 * f, 0.02], [0.75, 0, -s * 0.35]);
+      const g = earGroup(head, s, earBones, [s * 0.11 * f, 0.13 * f, 0.02], [0.75, 0, -s * 0.35]);
       g.scale.setScalar(es);
       part(g, shape.cone(0.06, 0.12), earColor, [0, 0.05, 0], [1, 1, 0.5]);
     }
@@ -184,7 +197,7 @@ function buildDog(a: DogAvatar): THREE.Group {
 // ====================================================================================
 // 웰시코기 (v4 조형): 하나로 이어진 곡면 몸통·머리, 부드러운 경계의 털 무늬를 정점 색으로 직접 칠함
 // ====================================================================================
-function buildCorgi(a: DogAvatar): THREE.Group {
+function buildCorgi(a: DogAvatar, earBones = false): THREE.Group {
   const root = new THREE.Group();
   root.name = 'dog';
   const legD = LEG_EXTRA[a.legLen] ?? 0;
@@ -319,7 +332,7 @@ function buildCorgi(a: DogAvatar): THREE.Group {
   // 귀: 크게 쫑긋 선 둥근 삼각형 (두께·오목함 있음) + 안쪽 분홍 털
   for (const s of [-1, 1]) {
     // 귀: 적당한 크기의 둥근 삼각형, 머리 위 옆에서 살짝 바깥으로 기울어짐
-    const g = group(head, [s * 0.088, 0.105, -0.035], [-0.15, s * -0.2, s * -0.32]);
+    const g = earGroup(head, s, earBones, [s * 0.088, 0.105, -0.035], [-0.15, s * -0.2, s * -0.32]);
     g.scale.setScalar(es);
     part(g, earSlab(0.112, 0.135, 0.014, 0.28), shade(coat, -0.02), [0, 0, 0]);
     part(g, earSlab(0.068, 0.088, 0.005, 0.28), (p) => mix(INNER_EAR, '#fff1ea', smooth(0.0, 0.07, p.y - 0.08)), [0, 0.014, 0.015]);
@@ -344,14 +357,18 @@ export interface DogRig {
   lids: THREE.Object3D;
   /** 다리 길이에 따른 몸 기본 높이 */
   baseY: number;
+  /** 귀 관절 (createDog(a, { earBones: true })일 때만) */
+  ears: THREE.Object3D[];
 }
 
-export function createDog(a: DogAvatar): DogRig {
-  const root = cache(JSON.stringify(a), () => buildDog(a));
+export function createDog(a: DogAvatar, opts: { earBones?: boolean } = {}): DogRig {
+  const earBones = !!opts.earBones;
+  const root = cache(JSON.stringify(a) + (earBones ? '|ears' : ''), () => buildDog(a, earBones));
   const g = (n: string) => root.getObjectByName(n)!;
   return {
     root, body: g('body'), head: g('head'), tail: g('tail'), tongue: g('tongue'),
     legs: [g('legFL'), g('legFR'), g('legBL'), g('legBR')], anchor: g('anchor'), lids: g('lids'),
     baseY: Number(root.userData.baseY) || 0,
+    ears: earBones ? [root.getObjectByName('earL'), root.getObjectByName('earR')].filter((x): x is THREE.Object3D => !!x) : [],
   };
 }

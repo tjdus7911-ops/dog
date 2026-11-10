@@ -1,12 +1,14 @@
 // 멍글런너 '함께 달리기' 화면 — 방 만들기/참가 · 대기실(참가자·준비·곡/난이도·친구 초대) · 결과(1~4위)
 import { useEffect, useState } from 'react';
-import { COURSES, DIFFICULTY_LABEL, type RunnerDifficulty } from '@shared/runner';
+import { COURSES, DIFFICULTIES, DIFFICULTY_DESC, DIFFICULTY_LABEL, buildSong, type RunnerDifficulty } from '@shared/runner';
+import { renderSong } from './music';
 import { MR_MAX, MR_REWARD, type MRPlayer, type MRResult } from '@shared/runnerMulti';
 import { toast, useStore } from '../store';
 import { clearResults, createRoom, invite, joinRoom, leaveRoom, setReady, setSettings, useMulti } from './multi';
 
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 const AVAILABLE = COURSES.filter((c) => c.available);
+const stars = (n: number) => '★'.repeat(n) + '☆'.repeat(5 - n);
 
 function DogFace({ p, size = 48 }: { p: Pick<MRPlayer, 'dogPhoto' | 'dog'>; size?: number }) {
   return p.dogPhoto
@@ -30,14 +32,14 @@ function Entry({ onBack, initialCode }: { onBack: () => void; initialCode: strin
           <p className="text-xs text-cocoa-soft">내가 방장이 되어 곡과 난이도를 고르고, 친구를 초대해요. (최대 {MR_MAX}명)</p>
           <label className="block text-sm mt-3">🎵 곡 · 코스
             <select className="w-full mt-1 rounded-xl border border-[#f1e2d2] bg-white px-3 py-2.5" value={courseId} onChange={(e) => setCourseId(e.target.value)}>
-              {COURSES.map((c) => <option key={c.id} value={c.id} disabled={!c.available}>{c.order}. {c.course} · {c.composer} — {c.title}{c.available ? '' : ' (음원 준비 중)'}</option>)}
+              {AVAILABLE.map((c) => <option key={c.id} value={c.id}>{c.order}. {c.course} · {c.composer} — {c.title} {stars(c.difficulty)}</option>)}
             </select>
           </label>
           <div className="text-sm mt-3">⭐ 난이도</div>
-          <div className="grid grid-cols-2 gap-1.5 mt-1">
-            {(['easy', 'normal'] as RunnerDifficulty[]).map((d) => (
-              <button key={d} className={`btn py-2.5 border-2 ${difficulty === d ? 'border-[#f39a7b] bg-[#fff3ee]' : 'border-transparent bg-cream-2'}`} onClick={() => setDifficulty(d)}>
-                {DIFFICULTY_LABEL[d]}<span className="block text-[10px] text-cocoa-soft">{d === 'easy' ? '박 사이 장애물 없음' : '혼자 달리기와 같은 패턴'}</span>
+          <div className="grid grid-cols-3 gap-1.5 mt-1">
+            {DIFFICULTIES.map((d) => (
+              <button key={d} className={`btn py-2.5 border-2 leading-tight ${difficulty === d ? 'border-[#f39a7b] bg-[#fff3ee]' : 'border-transparent bg-cream-2'}`} data-testid={`mr-new-diff-${d}`} onClick={() => setDifficulty(d)}>
+                {DIFFICULTY_LABEL[d]}<span className="block text-[10px] text-cocoa-soft">{DIFFICULTY_DESC[d]}</span>
               </button>
             ))}
           </div>
@@ -70,6 +72,8 @@ function Room({ onPrepare }: { onPrepare: () => void }) {
   const host = room.hostId === me.id;
   const course = COURSES.find((c) => c.id === room.courseId)!;
   const allReady = room.players.length >= 2 && room.players.every((p) => p.ready && p.connected);
+  // 방의 곡 연주를 대기실에서 미리 만들어 둠 → 출발 신호가 오면 바로 참가자 소개부터 볼 수 있게
+  useEffect(() => { const sg = buildSong(room.courseId); if (sg) void renderSong(sg).catch(() => {}); }, [room.courseId]);
   const err = (e: unknown) => toast((e as Error).message, 'error');
   async function copy() {
     try { await navigator.clipboard.writeText(room.code); toast('방 코드를 복사했어요'); } catch { toast(`방 코드: ${room.code}`); }
@@ -86,13 +90,13 @@ function Room({ onPrepare }: { onPrepare: () => void }) {
         <div className="min-w-[200px] flex-1">
           <div className="text-xs text-cocoa-soft">곡 · 난이도 {host ? '(방장이 정해요)' : `(방장: ${room.players.find((p) => p.host)?.nickname ?? ''})`}</div>
           {host ? (
-            <div className="flex gap-1.5 mt-1">
-              <select className="flex-1 min-w-0 rounded-xl border border-[#f1e2d2] bg-white px-2 py-2 text-sm" value={room.courseId} data-testid="mr-course"
+            <div className="flex flex-wrap gap-1.5 mt-1">
+              <select className="basis-full sm:basis-0 sm:flex-1 min-w-0 rounded-xl border border-[#f1e2d2] bg-white px-2 py-2 text-sm" value={room.courseId} data-testid="mr-course"
                 onChange={(e) => void setSettings({ courseId: e.target.value }).catch(err)}>
-                {COURSES.map((c) => <option key={c.id} value={c.id} disabled={!c.available}>{c.course} · {c.title}{c.available ? '' : ' (준비 중)'}</option>)}
+                {AVAILABLE.map((c) => <option key={c.id} value={c.id}>{c.course} · {c.title}</option>)}
               </select>
-              {(['easy', 'normal'] as RunnerDifficulty[]).map((d) => (
-                <button key={d} className={`btn px-3 text-sm ${room.difficulty === d ? 'btn-peach' : 'btn-ghost'}`} data-testid={`mr-diff-${d}`} onClick={() => void setSettings({ difficulty: d }).catch(err)}>{DIFFICULTY_LABEL[d]}</button>
+              {DIFFICULTIES.map((d) => (
+                <button key={d} className={`btn flex-1 sm:flex-none px-2.5 py-2 text-xs ${room.difficulty === d ? 'btn-peach' : 'btn-ghost'}`} data-testid={`mr-diff-${d}`} onClick={() => void setSettings({ difficulty: d }).catch(err)}>{DIFFICULTY_LABEL[d]}</button>
               ))}
             </div>
           ) : <div className="font-display mt-1">🎵 {course.course} · {course.title} · ⭐ {DIFFICULTY_LABEL[room.difficulty]}</div>}
@@ -144,40 +148,52 @@ function Room({ onPrepare }: { onPrepare: () => void }) {
   );
 }
 
-/** 결과: 1~4위 · 점수 · 정확도 · 최대 콤보 · 코인 */
+/** 결과: 최종 순위(달린 거리 순) · 완주 기록(거리) · 점수 · 정확도 · 최대 콤보 · PERFECT/GREAT/GOOD/MISS · 코인 */
+const GRADES = [['perfect', 'PERFECT', '#f2836b'], ['great', 'GREAT', '#f6a94a'], ['good', 'GOOD', '#7fb07a'], ['miss', 'MISS', '#9a8b80']] as const;
 export function MultiResultScreen({ results, onAgain, onLeave }: { results: MRResult[]; onAgain: () => void; onLeave: () => void }) {
   const me = useStore((s) => s.me)!;
   const room = useMulti((s) => s.room);
   const mine = results.find((r) => r.id === me.id);
   const face = (id: number) => room?.players.find((p) => p.id === id);
+  const lead = results.find((r) => r.rank === 1);
   return (
     <div className="h-full overflow-y-auto scroll-soft pt-[calc(12px+var(--safe-t,0px))] pb-[calc(12px+var(--safe-b))] px-3 bg-[radial-gradient(circle_at_50%_0%,#fde4ea,transparent_60%)]" data-testid="mr-result">
-      <div className="max-w-[520px] mx-auto">
+      <div className="max-w-[560px] mx-auto">
         <div className="text-center">
           <div className="inline-block font-display text-2xl text-white bg-[#f39a7b] rounded-full px-6 py-1 shadow-[0_3px_0_#d9705f]">🏁 함께 달리기 결과</div>
           {mine && <div className="font-display text-xl mt-2" data-testid="mr-my-rank">{mine.rank ? `🐶 ${mine.dogName} · ${mine.rank}위!` : `${mine.reason ?? '완주하지 못했어요'}`}</div>}
+          {mine?.coin ? <div className="text-sm mt-0.5" data-testid="mr-my-coin">🪙 <b className="text-[#e2a21c]">+{mine.coin}코인</b> 받았어요</div> : null}
         </div>
         <div className="mt-3 space-y-2">
           {results.map((r) => {
             const p = face(r.id);
             const medal = r.rank ? ['🥇', '🥈', '🥉', '🏅'][r.rank - 1] : '—';
+            const behind = lead && r.rank && r.rank > 1 ? lead.distance - r.distance : null;
             return (
-              <div key={r.id} className={`panel p-3 flex items-center gap-3 ${r.id === me.id ? 'ring-2 ring-[#f39a7b]' : ''} ${r.completed ? '' : 'opacity-70'}`}>
-                <span className="w-9 text-center font-display text-2xl">{medal}</span>
-                {p ? <DogFace p={p} size={44} /> : <span className="w-11 h-11 rounded-full bg-cream-2 grid place-items-center">🐶</span>}
-                <div className="flex-1 min-w-0 leading-tight">
-                  <div className="font-display truncate">🐶 {r.dogName} <span className="text-xs text-cocoa-soft font-body">· {r.nickname}</span></div>
-                  <div className="text-[12px] text-cocoa-soft">{r.completed ? `정확도 ${pct(r.accuracy)} · 최대 콤보 ${r.maxCombo}` : r.reason}</div>
+              <div key={r.id} className={`panel p-3 ${r.id === me.id ? 'ring-2 ring-[#f39a7b]' : ''} ${r.completed ? '' : 'opacity-70'}`} data-testid={`mr-res-${r.id}`}>
+                <div className="flex items-center gap-3">
+                  <span className="w-9 text-center font-display text-2xl">{medal}</span>
+                  {p ? <DogFace p={p} size={44} /> : <span className="w-11 h-11 rounded-full bg-cream-2 grid place-items-center">🐶</span>}
+                  <div className="flex-1 min-w-0 leading-tight">
+                    <div className="font-display truncate">🐶 {r.dogName} <span className="text-xs text-cocoa-soft font-body">· {r.nickname}</span></div>
+                    <div className="text-[12px] text-cocoa-soft">{r.completed ? `점수 ${r.score.toLocaleString()} · 정확도 ${pct(r.accuracy)} · 최대 콤보 ${r.maxCombo}` : r.reason}</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="font-display text-lg tabular-nums text-[#e2604f]" data-testid={`mr-res-dist-${r.id}`}>{r.distance.toFixed(1)}m</div>
+                    <div className="text-[11px] text-cocoa-soft tabular-nums">{behind !== null ? `1위와 −${behind.toFixed(1)}m` : r.rank === 1 ? '선두' : ''}</div>
+                    <div className="text-[11px] text-[#b9851a]">{r.completed ? (r.coin ? `🪙 +${r.coin}` : '오늘 보상 횟수 끝') : ''}</div>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <div className="font-display text-lg tabular-nums text-[#e2604f]">{r.score.toLocaleString()}</div>
-                  <div className="text-[11px] text-[#b9851a]">{r.completed ? (r.coin ? `🪙 +${r.coin}` : '오늘 보상 횟수 끝') : ''}</div>
+                <div className="grid grid-cols-4 gap-1 mt-2 text-center">
+                  {GRADES.map(([g, label, col]) => (
+                    <div key={g} className="rounded-lg bg-cream-2 py-0.5 text-[10px] sm:text-[11px]" data-testid={`mr-res-${g}-${r.id}`}><b className="font-display" style={{ color: col }}>{label}</b> <span className="tabular-nums">{r.counts[g]}</span></div>
+                  ))}
                 </div>
               </div>
             );
           })}
         </div>
-        <p className="text-[11px] text-cocoa-soft text-center mt-2">순위 보상 {MR_REWARD.map((c, i) => `${i + 1}위 ${c}`).join(' · ')}코인 · 정상 완주자만 · 혼자 달리기와 합쳐 하루 3번</p>
+        <p className="text-[11px] text-cocoa-soft text-center mt-2">순위: 음악이 끝날 때까지 달린 거리 (같으면 정확도 → 점수) · 서버가 입력 기록으로 다시 계산<br />순위 보상 {MR_REWARD.map((c, i) => `${i + 1}위 ${c}`).join(' · ')}코인 · 정상 완주자만 · 혼자 달리기와 합쳐 하루 3번</p>
         <div className="grid grid-cols-2 gap-2 mt-3">
           <button className="btn btn-ghost bg-white py-3" onClick={onLeave}>🚪 방 나가기</button>
           <button className="btn btn-coral py-3" onClick={onAgain} data-testid="mr-again">🔁 같은 방에서 한 번 더</button>

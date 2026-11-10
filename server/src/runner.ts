@@ -7,7 +7,7 @@ import { requireAuth, type AuthedRequest } from './auth';
 import { RateLimiter } from './moderation';
 import { earn } from './coins';
 import {
-  COURSES, COURSE_BY_ID, JUDGE, RUNNER_GAME_VERSION, buildChart, judgeRun, kstWeek, kstWeekStart, normalizedPoints,
+  ALL_RANK_KEYS, COURSES, JUDGE, RUNNER_GAME_VERSION, buildChart, isDifficulty, judgeRun, kstWeek, kstWeekStart, normalizedPoints, parseRankKey, rankKey,
   type Chart, type RunnerInput,
 } from '../../shared/runner';
 
@@ -47,8 +47,9 @@ CREATE TABLE IF NOT EXISTS runner_best (
 );
 `);
 
+/** 랭킹 키(곡 + 난이도)별 장애물 패턴: 'elise'(NORMAL, 기존 기록 그대로) · 'elise.easy' · 'elise.hard' … */
 const charts = new Map<string, Chart>();
-for (const c of COURSES) { const ch = buildChart(c.id); if (ch) charts.set(c.id, ch); }
+for (const key of ALL_RANK_KEYS) { const k = parseRankKey(key)!; const ch = buildChart(k.courseId, k.difficulty); if (ch) charts.set(key, ch); }
 
 const me = (req: express.Request) => (req as AuthedRequest).userId;
 /** 플레이 시간 검증 배율 (자동 테스트에서만 줄임) */
@@ -97,7 +98,9 @@ export function registerRunner(app: express.Express, deps: RunnerDeps) {
   /** 공식 기록 도전 시작: 서버가 1회용 기록 번호를 준다 (비로그인 둘러보기는 연습만) */
   app.post('/api/runner/start', requireAuth, (req, res) => {
     const uid = me(req);
-    const course = String(req.body?.courseId ?? '');
+    const diff = req.body?.difficulty ?? 'normal';
+    if (!isDifficulty(diff)) return res.status(400).json({ error: '난이도가 올바르지 않아요.' });
+    const course = rankKey(String(req.body?.courseId ?? ''), diff);
     if (!charts.has(course)) return res.status(400).json({ error: '준비되지 않은 코스예요.' });
     if (!startLimiter.allow(String(uid))) return res.status(429).json({ error: '잠시 후 다시 시작해 주세요.' });
     const id = crypto.randomBytes(16).toString('hex');
@@ -115,7 +118,7 @@ export function registerRunner(app: express.Express, deps: RunnerDeps) {
     if (sess.used) return res.status(409).json({ error: '이미 제출한 기록이에요.', code: 'duplicate' });
     const course = String(sess.course);
     const chart = charts.get(course);
-    if (!chart || b.courseId !== course) return res.status(400).json({ error: '코스 정보가 맞지 않아요.' });
+    if (!chart || !isDifficulty(b.difficulty ?? 'normal') || rankKey(String(b.courseId), b.difficulty ?? 'normal') !== course) return res.status(400).json({ error: '코스 정보가 맞지 않아요.' });
     if (b.gameVersion !== RUNNER_GAME_VERSION || b.patternVersion !== chart.patternVersion) {
       return res.status(409).json({ error: '게임이 업데이트되었어요. 새로고침 후 다시 도전해 주세요.', code: 'version' });
     }
@@ -182,7 +185,7 @@ export function registerRunner(app: express.Express, deps: RunnerDeps) {
     const scope = String(req.query.scope ?? 'course');
     const course = String(req.query.course ?? 'elise');
     const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 50) || 50));
-    if (scope !== 'overall' && !COURSE_BY_ID.has(course)) return res.status(400).json({ error: '없는 코스예요.' });
+    if (scope !== 'overall' && !parseRankKey(course)) return res.status(400).json({ error: '없는 코스예요.' });
     let rows: Best[];
     let week: number | null = null;
     if (scope === 'weekly') {

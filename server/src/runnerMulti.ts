@@ -3,13 +3,16 @@
 // - 각자 자기 기기의 음악 시계로 입력 시각을 기록해 보내고, 서버는 같은 judgeRun으로 점수·순위를 계산 (보낸 점수는 쓰지 않음)
 // - 입력은 다른 참가자에게 그대로 전달 → 각 화면이 다른 강아지의 레인·점프를 같은 규칙으로 재현
 // - 중도 이탈·연결 끊김·재접속·방장 퇴장 처리, 끝나면 서버가 최종 판정·순위·코인 지급
+// - 리듬 페이스: 판정 결과로 플레이어마다 달린 거리를 서버가 직접 계산 (shared/runnerPace) → 순위는 거리 → 정확도 → 점수.
+//   화면이 보내는 거리·점수는 받지 않으므로 거리를 조작할 수 없다.
 import crypto from 'node:crypto';
 import type { Server, Socket } from 'socket.io';
 import * as repo from './db';
 import { earnAmount } from './coins';
-import { COURSE_BY_ID, JUDGE, buildChart, judgeRun, type Chart, type RunnerDifficulty, type RunnerInput } from '../../shared/runner';
+import { COURSE_BY_ID, JUDGE, buildChart, courseSpeed, isDifficulty, judgeRun, type Chart, type RunnerDifficulty, type RunnerInput } from '../../shared/runner';
+import { PaceSim, paceDistance } from '../../shared/runnerPace';
 import {
-  MR_CODE_CHARS, MR_COUNTDOWN_MS, MR_LEAD_MS, MR_MAX, MR_MIN_PASS, MR_REWARD, isRoomCode,
+  MR_CODE_CHARS, MR_COUNTDOWN_MS, MR_LEAD_MS, MR_MAX, MR_MIN_PASS, MR_REWARD, byDistance, isRoomCode, roundDist,
   type MRPlayer, type MRResult, type MRRoom, type MRStanding,
 } from '../../shared/runnerMulti';
 
@@ -31,6 +34,10 @@ interface Member extends MRPlayer {
   inputs: RunnerInput[];
   /** 이번 판 도중 나감 (결과에는 '중도 이탈'로 남음) */
   left: boolean;
+  /** 나간 음악 시각 (그 뒤로는 거리가 늘지 않음) */
+  leftAt: number;
+  /** 판정 결과 → 페이스·거리 (서버 계산) */
+  sim: PaceSim | null;
   lobbyTimer: NodeJS.Timeout | null;
 }
 interface Room extends Omit<MRRoom, 'players'> {
@@ -67,7 +74,7 @@ export function setupRunnerMulti(io: Server, deps: MultiDeps) {
   function member(userId: number, socketId: string): Member | null {
     const p = repo.getPublicProfile(userId);
     if (!p) return null;
-    return { id: userId, nickname: p.nickname, dogName: p.dogName, dogPhoto: p.dogPhoto, dog: p.dog, ready: false, host: false, connected: true, joinedAt: Date.now(), socketId, inputs: [], left: false, lobbyTimer: null };
+    return { id: userId, nickname: p.nickname, dogName: p.dogName, dogPhoto: p.dogPhoto, dog: p.dog, ready: false, host: false, connected: true, joinedAt: Date.now(), socketId, inputs: [], left: false, leftAt: Infinity, sim: null, lobbyTimer: null };
   }
   function setHost(r: Room) {
     const cand = active(r).filter((p) => p.connected).sort((a, b) => a.joinedAt - b.joinedAt)[0] ?? active(r).sort((a, b) => a.joinedAt - b.joinedAt)[0];
@@ -86,7 +93,7 @@ export function setupRunnerMulti(io: Server, deps: MultiDeps) {
     const p = r.players.find((x) => x.id === userId);
     if (!p) return;
     if (p.lobbyTimer) { clearTimeout(p.lobbyTimer); p.lobbyTimer = null; }
-    if (r.state === 'playing') { p.left = true; p.connected = false; p.ready = false; }
+    if (r.state === 'playing') { p.left = true; p.leftAt = chartNow(r); p.connected = false; p.ready = false; }
     else r.players = r.players.filter((x) => x.id !== userId);
     if (userRoom.get(userId) === r.code) userRoom.delete(userId);
     if (p.socketId) io.sockets.sockets.get(p.socketId)?.leave(chan(r.code));
@@ -108,22 +115,30 @@ export function setupRunnerMulti(io: Server, deps: MultiDeps) {
     r.state = 'playing';
     r.round += 1;
     r.startAt = Date.now() + MR_LEAD_MS + MR_COUNTDOWN_MS;
-    for (const p of r.players) p.inputs = [];
+    const speed = courseSpeed(r.courseId, r.difficulty);
+    for (const p of r.players) { p.inputs = []; p.sim = new PaceSim(r.chart, speed, r.difficulty); p.leftAt = Infinity; }
     io.to(chan(r.code)).emit('rm:start', { round: r.round, startAt: r.startAt, courseId: r.courseId, difficulty: r.difficulty, serverNow: Date.now() });
     broadcast(r);
     r.timer = setInterval(() => tick(r), 250);
   }
 
   function standings(r: Room, now: number): MRStanding[] {
-    return active(r).concat(r.players.filter((p) => p.left)).map((p) => {
-      const j = judgeRun(r.chart!, p.inputs, now);
-      return { id: p.id, score: j.score, combo: j.combo, maxCombo: j.maxCombo, judged: j.events.length, connected: p.connected, left: p.left };
-    }).sort((a, b) => b.score - a.score);
+    const list = active(r).concat(r.players.filter((p) => p.left)).map((p) => {
+      // 나간 사람은 나간 시각에서 거리가 멈춤
+      const until = Math.max(0, Math.min(now, p.leftAt));
+      const j = judgeRun(r.chart!, p.inputs, until);
+      const st = p.sim!.advance(j.events, until).state;
+      return { id: p.id, rank: 0, distance: roundDist(st.dist), pace: Math.round(st.pace * 1000) / 1000, score: j.score, accuracy: j.accuracy, combo: j.combo, maxCombo: j.maxCombo, judged: j.events.length, connected: p.connected, left: p.left };
+    });
+    // 순위: 이탈하지 않은 사람 먼저, 그 안에서 거리 → 정확도 → 점수
+    list.sort((a, b) => Number(a.left) - Number(b.left) || byDistance(a, b));
+    list.forEach((x, i) => { x.rank = i + 1; });
+    return list;
   }
   function tick(r: Room) {
     if (r.state !== 'playing' || !r.chart) return;
     const now = chartNow(r);
-    io.to(chan(r.code)).emit('rm:standings', { round: r.round, list: standings(r, now - LIVE_LAG_MS) });
+    io.to(chan(r.code)).emit('rm:standings', { round: r.round, t: now - LIVE_LAG_MS, list: standings(r, now - LIVE_LAG_MS) });
     if (now >= durationOf(r) + END_GRACE_MS) finish(r);
   }
 
@@ -132,8 +147,11 @@ export function setupRunnerMulti(io: Server, deps: MultiDeps) {
     if (r.timer) { clearInterval(r.timer); r.timer = null; }
     const chart = r.chart!;
     const dur = durationOf(r);
+    const speed = courseSpeed(r.courseId, r.difficulty);
     const results: MRResult[] = r.players.map((p) => {
       const j = judgeRun(chart, p.inputs.filter((x) => x.t <= dur), dur + 500);
+      // 거리: 음악이 끝나는 순간까지 (나간 사람은 나간 순간까지) — 처음부터 다시 계산해 확정
+      const distance = roundDist(paceDistance(chart, j.events, Math.min(dur, p.leftAt), speed, r.difficulty));
       const timed = j.events.filter((e) => e.delta !== null);
       const passed = j.events.filter((e) => e.grade !== 'miss').length;
       const total = chart.obstacles.filter((o) => o.t <= dur).length || 1;
@@ -143,15 +161,16 @@ export function setupRunnerMulti(io: Server, deps: MultiDeps) {
       else if (timed.length >= 15 && timed.every((e) => Math.abs(e.delta!) <= 4)) reason = '비정상 기록';
       else if (j.score > chart.maxScore || timed.some((e) => Math.abs(e.delta!) > JUDGE.good)) reason = '비정상 기록';
       else if (passed / total < MR_MIN_PASS) reason = '통과한 장애물이 너무 적어요';
-      return { id: p.id, nickname: p.nickname, dogName: p.dogName, rank: null, score: j.score, accuracy: j.accuracy, maxCombo: j.maxCombo, counts: j.counts, completed: !reason, reason, coin: 0 };
+      return { id: p.id, nickname: p.nickname, dogName: p.dogName, rank: null, distance, score: j.score, accuracy: j.accuracy, maxCombo: j.maxCombo, counts: j.counts, completed: !reason, reason, coin: 0 };
     });
-    const done = results.filter((x) => x.completed).sort((a, b) => b.score - a.score || b.accuracy - a.accuracy || b.maxCombo - a.maxCombo || a.id - b.id);
+    // 최종 순위: 달린 거리 → 정확도 → 점수 (→ 최대 콤보 → 먼저 들어온 사람)
+    const done = results.filter((x) => x.completed).sort((a, b) => byDistance(a, b) || b.maxCombo - a.maxCombo || a.id - b.id);
     done.forEach((x, i) => {
       x.rank = i + 1;
       const e = earnAmount(x.id, 'runner', `mr-${r.code}-${r.round}`, MR_REWARD[i] ?? MR_REWARD[MR_REWARD.length - 1], `함께 달리기 ${i + 1}위`);
       x.coin = e?.amount ?? 0;
     });
-    const out = [...done, ...results.filter((x) => !x.completed).sort((a, b) => b.score - a.score)];
+    const out = [...done, ...results.filter((x) => !x.completed).sort(byDistance)];
     io.to(chan(r.code)).emit('rm:result', { round: r.round, results: out });
     // 다음 판 준비: 이탈한 사람은 정리, 준비 상태 초기화
     for (const p of r.players.filter((x) => x.left)) if (userRoom.get(p.id) === r.code) userRoom.delete(p.id);
@@ -192,7 +211,7 @@ export function setupRunnerMulti(io: Server, deps: MultiDeps) {
       if (guest) return memberOnly(ack);
       if (myRoom()) return fail(ack, '이미 들어가 있는 방이 있어요. 먼저 나와 주세요.', 'in_room');
       const courseId = typeof d?.courseId === 'string' && COURSE_BY_ID.get(d.courseId)?.available ? d.courseId : 'elise';
-      const difficulty: RunnerDifficulty = d?.difficulty === 'easy' ? 'easy' : 'normal';
+      const difficulty: RunnerDifficulty = isDifficulty(d?.difficulty) ? d.difficulty : 'normal';
       const m = member(userId, socket.id);
       if (!m) return fail(ack, '프로필을 찾을 수 없어요.');
       m.host = true;
@@ -259,7 +278,7 @@ export function setupRunnerMulti(io: Server, deps: MultiDeps) {
         if (!COURSE_BY_ID.get(d.courseId)?.available) return fail(ack, '아직 음원이 준비되지 않은 곡이에요.');
         r.courseId = d.courseId;
       }
-      if (d?.difficulty === 'easy' || d?.difficulty === 'normal') r.difficulty = d.difficulty;
+      if (isDifficulty(d?.difficulty)) r.difficulty = d.difficulty;
       for (const p of r.players) p.ready = false;
       broadcast(r);
       ok(ack);

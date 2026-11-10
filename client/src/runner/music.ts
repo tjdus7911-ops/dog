@@ -116,6 +116,15 @@ export class MusicPlayer {
   async pause() { this.frozen = this.now(); await this.ctx.suspend(); }
   async resume() { await this.ctx.resume(); this.frozen = null; }
   stop() { try { this.src?.stop(); } catch { /* 이미 멈춤 */ } this.src = null; }
+  /** 미리 듣기: 곡의 한 부분만 짧게 들려주고 부드럽게 줄어들며 끝남 */
+  async preview(buf: AudioBuffer, fromSec: number, lenSec: number) {
+    await this.play(buf, Math.max(0, Math.min(fromSec, buf.duration - lenSec)), 0);
+    const t = this.ctx.currentTime + 0.1, v = this.gain.gain.value;
+    this.gain.gain.cancelScheduledValues(t);
+    this.gain.gain.setValueAtTime(0, t); this.gain.gain.linearRampToValueAtTime(v, t + 0.4);
+    this.gain.gain.setValueAtTime(v, t + lenSec - 1.5); this.gain.gain.linearRampToValueAtTime(0, t + lenSec);
+    this.src?.stop(t + lenSec + 0.05);
+  }
   /** 판정 효과음 */
   blip(kind: 'perfect' | 'great' | 'good' | 'miss') {
     const t = this.ctx.currentTime;

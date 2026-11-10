@@ -8,15 +8,16 @@ import * as THREE from 'three';
 import { DogAnim, HumanAnim } from '@shared/protocol';
 import type { DogAvatar, HumanAvatar } from '@shared/avatar';
 import {
-  DUCK_MS, JUMP_MS, judgeRun, type Chart, type CourseInfo, type Grade, type JudgeEvent, type Obstacle, type RunResult, type RunnerAction, type RunnerInput, type Song,
+  DIFFICULTY_LABEL, DUCK_MS, JUDGE, JUMP_MS, judgeRun, type Chart, type CourseInfo, type Grade, type JudgeEvent, type Lane, type Obstacle, type RunResult, type RunnerAction, type RunnerInput, type Song,
 } from '@shared/runner';
+import { PaceSim } from '@shared/runnerPace';
 import { Dog, DOG_SCALE, DOG_STEP, newDogDriver } from '../game/models/Dog';
 import { Human, newHumanDriver } from '../game/models/Human';
 import { geo, mat } from '../game/lowpoly';
 import { Lighting } from '../game/Lighting';
 import { isTouchDevice } from '../game/input';
 import type { MusicPlayer } from './music';
-import type { MRPlayer } from '@shared/runnerMulti';
+import { MR_COUNTDOWN_MS, byDistance, type MRPlayer, type MRResult } from '@shared/runnerMulti';
 import { multiLive, sendInput } from './multi';
 
 export const LANE_W = 1.35;
@@ -34,6 +35,8 @@ export function trackLayout(game: { multi?: { myId: number; players: MRPlayer[] 
  * 자동 화면 테스트 전용: 한 컴퓨터에서 여러 브라우저(소프트웨어 렌더링)를 동시에 돌릴 때 화면 갱신을 초당 8번으로 줄임.
  * 판정은 음악 시계 기준이라 결과에는 영향이 없다. (mungle.e2e + mungle.e2e.lowfps 둘 다 있을 때만)
  */
+/** 자동 화면 테스트 전용: 내 강아지를 옆에서 가까이 보는 카메라 (삐끗·귀 자세 확인) — mungle.e2e + mungle.e2e.sidecam */
+const SIDE_CAM = (() => { try { return localStorage.getItem('mungle.e2e') === '1' && localStorage.getItem('mungle.e2e.sidecam') === '1'; } catch { return false; } })();
 const LOW_FPS = (() => { try { return localStorage.getItem('mungle.e2e') === '1' && localStorage.getItem('mungle.e2e.lowfps') === '1'; } catch { return false; } })();
 function LowFpsTicker() {
   const { invalidate } = useThree();
@@ -52,10 +55,24 @@ export interface PlayGame {
   /** 화면 표시용 최신 판정 결과 */
   live: RunResult | null;
   lastEvent: { e: JudgeEvent; at: number; points: number } | null;
-  stumbleAt: number;
   /** 함께 달리기: 판 번호 · 나 · 참가자 (없으면 혼자 달리기) */
   multi?: { round: number; myId: number; players: MRPlayer[] };
+  /** 거리 경쟁·삐끗·추월 상태 (플레이 화면이 만듦) */
+  race?: Race;
+  /** 함께 달리기: 음악이 끝난 시각 (performance.now) → 마무리 연출 */
+  finaleAt?: number;
+  /** 함께 달리기: 서버가 확정한 최종 결과 (마무리 연출에서 순위 발표) */
+  results?: MRResult[] | null;
 }
+
+/** 화면 시각: 함께 달리기는 음악이 끝나면 강아지들이 천천히 멈추듯 (마무리 연출) */
+export function sceneNow(game: PlayGame) {
+  const now = game.player.now(), end = game.chart.duration;
+  if (!game.multi || now <= end) return now;
+  return end + 700 * (1 - Math.exp(-(now - end) / 700));
+}
+/** 마무리 연출 중 달리는 빠르기 비율 (1 → 0) */
+const sceneSpeed = (game: PlayGame) => { const now = game.player.now(), end = game.chart.duration; return !game.multi || now <= end ? 1 : Math.exp(-(now - end) / 700); };
 
 export const GRADE_LABEL: Record<Grade, string> = { perfect: 'PERFECT', great: 'GREAT', good: 'GOOD', miss: 'MISS' };
 export const GRADE_COLOR: Record<Grade, string> = { perfect: '#f2836b', great: '#f6a94a', good: '#7fb07a', miss: '#9a8b80' };
@@ -150,7 +167,7 @@ function Instanced({ parts, count, spacing, xOf, game, offset = 0, rot = false }
   const tmp = useMemo(() => new THREE.Object3D(), []);
   const z = useLoop(count, spacing);
   useFrame(() => {
-    const dist = (Math.max(0, game.player.now()) / 1000) * game.course.speed;
+    const dist = (Math.max(0, sceneNow(game)) / 1000) * game.course.speed;
     parts.forEach((p, k) => {
       const m = refs.current[k];
       if (!m) return;
@@ -191,6 +208,35 @@ function Arch({ goal }: { goal?: boolean }) {
         <mesh geometry={geo.sphere(0.45, 14, 10)} material={mat('#f39a7b')} scale={[1.15, 0.85, 0.45]} />
         {[[-0.5, 0.45], [-0.18, 0.66], [0.18, 0.66], [0.5, 0.45]].map(([x, y], i) => <mesh key={i} geometry={geo.sphere(0.18, 10, 8)} material={mat('#f39a7b')} position={[x, y, 0]} scale={[1, 1.15, 0.5]} />)}
       </group>
+    </group>
+  );
+}
+
+/** 함께 달리기 출발선: 모든 트랙을 가로지르는 현수막 게이트 (기둥은 바깥 양끝에만 → 출발선 소개 때 강아지를 가리지 않음) */
+function StartGate({ xs }: { xs: number[] }) {
+  const edge = LANE_W * 1.5;
+  const L = Math.min(...xs) - edge - 0.45, R = Math.max(...xs) + edge + 0.45, W = R - L, cx = (L + R) / 2;
+  const cells = Math.max(8, Math.round(W / 0.5));
+  const cw = W / cells;
+  return (
+    <group>
+      {[L, R].map((x) => (
+        <group key={x} position={[x, 0, 0]}>
+          <mesh geometry={geo.cyl(0.2, 0.24, 4.2, 10)} material={mat('#fff1dc')} position={[0, 2.1, 0]} />
+          <mesh geometry={geo.sphere(0.28, 10, 8)} material={mat('#f39a7b')} position={[0, 4.3, 0]} />
+        </group>
+      ))}
+      {/* 현수막은 달리기 카메라보다 높이 (출발할 때 화면 위쪽을 가리지 않게) */}
+      <mesh geometry={geo.box(W, 0.62, 0.06)} material={mat('#fff1dc')} position={[cx, 3.9, 0]} />
+      {Array.from({ length: cells }, (_, i) => (
+        <mesh key={i} geometry={geo.box(cw, 0.3, 0.07)} material={mat('#f39a7b')} position={[L + cw * (i + 0.5), i % 2 ? 3.75 : 4.05, 0]} />
+      ))}
+      {xs.map((x) => (
+        <group key={x} position={[x, 4.5, 0.03]} scale={0.55}>
+          <mesh geometry={geo.sphere(0.45, 14, 10)} material={mat('#f39a7b')} scale={[1.15, 0.85, 0.45]} />
+          {[[-0.5, 0.45], [-0.18, 0.66], [0.18, 0.66], [0.5, 0.45]].map(([tx, ty], i) => <mesh key={i} geometry={geo.sphere(0.18, 10, 8)} material={mat('#f39a7b')} position={[tx, ty, 0]} scale={[1, 1.15, 0.5]} />)}
+        </group>
+      ))}
     </group>
   );
 }
@@ -240,11 +286,12 @@ function CherryWalk({ game, xs }: { game: PlayGame; xs: number[] }) {
   const dashes: Part[] = useMemo(() => [{ geo: geo.box(0.07, 0.012, 1.0), color: '#fffaf2', at: [0, 0.012, 0] }], []);
   const beats = useRef<(THREE.Mesh | null)[]>([]);
   useFrame(({ clock }) => {
-    const now = game.player.now();
+    const now = sceneNow(game);
     const dist = (Math.max(0, now) / 1000) * speed;
-    // 박자선: 실제 음악 박자 위치 (마디 첫 박은 조금 더 진하게)
+    // 박자선: 실제 음악 박자 위치 — 내 트랙에만 (다른 사람 트랙은 네트워크 지연만큼 늦게 그려서 박자선과 어긋나므로)
     let k = 0;
     for (const t of game.song.beats) {
+      if (now > game.chart.duration) break;
       const dt = t * 1000 - now;
       if (dt < -300 || dt > AHEAD_MS) continue;
       const m = beats.current[k++];
@@ -254,7 +301,8 @@ function CherryWalk({ game, xs }: { game: PlayGame; xs: number[] }) {
     }
     for (; k < beats.current.length; k++) if (beats.current[k]) beats.current[k]!.visible = false;
     if (goal.current) { goal.current.position.z = -((finishT - now) / 1000) * speed; goal.current.visible = finishT - now < AHEAD_MS * 2.5; }
-    if (start.current) { start.current.position.z = dist - 1.2; start.current.visible = dist < 30; }
+    // 출발 아치: 혼자 달리기는 강아지 바로 앞(출발하며 통과), 함께 달리기는 강아지들 바로 뒤(출발선 소개 때 배경)
+    if (start.current) { start.current.position.z = dist + (game.multi ? 0.7 : -1.2); start.current.visible = dist < 30; }
     if (petals.current) {
       const t = clock.elapsedTime;
       petalData.forEach((p, i) => {
@@ -284,9 +332,9 @@ function CherryWalk({ game, xs }: { game: PlayGame; xs: number[] }) {
           <Instanced game={game} parts={dashes} count={18} spacing={2.2} xOf={(i) => (i % 2 ? 0.5 : -0.5) * LANE_W} />
         </group>
       ))}
-      {/* 박자선 (모든 트랙을 가로지름) */}
+      {/* 박자선 (내 트랙) */}
       {Array.from({ length: 16 }, (_, i) => (
-        <mesh key={i} ref={(m) => { beats.current[i] = m; }} geometry={geo.box(edge * 2 + span, 0.006, 0.05)} position={[midX, 0, 0]} visible={false}>
+        <mesh key={i} ref={(m) => { beats.current[i] = m; }} geometry={geo.box(edge * 2, 0.006, 0.05)} position={[0, 0, 0]} visible={false}>
           <meshBasicMaterial color="#ffffff" transparent opacity={0.5} toneMapped={false} />
         </mesh>
       ))}
@@ -302,18 +350,24 @@ function CherryWalk({ game, xs }: { game: PlayGame; xs: number[] }) {
         <meshBasicMaterial color="#fac9d5" side={THREE.DoubleSide} toneMapped={false} />
       </instancedMesh>
       {/* 출발·골인 아치: 트랙마다 하나씩 */}
-      <group ref={start}>{xs.map((x) => <group key={x} position={[x, 0, 0]}><Arch /></group>)}</group>
+      <group ref={start}>{game.multi ? <StartGate xs={xs} /> : xs.map((x) => <group key={x} position={[x, 0, 0]}><Arch /></group>)}</group>
       <group ref={goal} visible={false}>{xs.map((x) => <group key={x} position={[x, 0, 0]}><Arch goal /></group>)}</group>
     </group>
   );
 }
 
-/** 한 트랙의 장애물 (모든 트랙이 같은 기준 비트맵 · 판정은 그 트랙 주인 기준) */
-function Obstacles({ game, x = 0, live }: { game: PlayGame; x?: number; live?: () => RunResult | null }) {
+/**
+ * 한 트랙의 장애물 (모든 트랙이 같은 기준 비트맵 · 판정은 그 트랙 주인 기준)
+ * 장애물은 언제나 '음악 시각'으로 강아지에게 다가온다 — 거리 경쟁으로 강아지가 앞서거나 뒤처지면(z) 그 트랙의 장애물도 같이 옮겨져
+ * 판정 박자는 그대로이고, 페이스 때문에 장애물이 빨라지거나 느려지지 않는다.
+ */
+function Obstacles({ game, r }: { game: PlayGame; r: Racer }) {
   const obs = useRef<(THREE.Group | null)[]>([]);
+  const root = useRef<THREE.Group>(null);
   useFrame(() => {
-    const now = game.player.now();
-    const res = live ? live() : game.live;
+    const now = r.view;
+    const res = r.live;
+    if (root.current) root.current.position.z = r.z;
     const done = new Map(res?.events.map((e) => [e.id, e]) ?? []);
     game.chart.obstacles.forEach((o, i) => {
       const g = obs.current[i];
@@ -327,7 +381,7 @@ function Obstacles({ game, x = 0, live }: { game: PlayGame; x?: number; live?: (
       g.scale.setScalar(ev && ev.grade !== 'miss' && dt < 0 ? Math.max(0.01, 1 + dt / 380) : 1);
     });
   });
-  return <group position={[x, 0, 0]}>{game.chart.obstacles.map((o, i) => <group key={o.id} ref={(g) => { obs.current[i] = g; }} visible={false}><ObstacleModel o={o} /></group>)}</group>;
+  return <group ref={root} position={[r.x, 0, 0]}>{game.chart.obstacles.map((o, i) => <group key={o.id} ref={(g) => { obs.current[i] = g; }} visible={false}><ObstacleModel o={o} /></group>)}</group>;
 }
 
 // ---------------------------------------------------------------- 출발 전 응원하는 보호자
@@ -352,7 +406,8 @@ function Cheer({ game, human }: { game: PlayGame; human: HumanAvatar }) {
   );
 }
 
-// ---------------------------------------------------------------- 내 강아지 (달리기·점프·숙이기·비틀거림)
+
+// ---------------------------------------------------------------- 강아지 자세 (판정 결과 → 레인·점프·숙이기)
 const JUMP_CROUCH = 70; // 도약 전 살짝 몸 낮추기 (ms)
 const JUMP_H = 0.55;
 /** 판정 결과(받아들여진 입력)로 지금 레인·점프·숙이기 자세 계산 — 내 강아지와 함께 달리는 강아지가 같은 규칙 */
@@ -375,66 +430,293 @@ function poseAt(now: number, live: RunResult | null) {
   if (dk !== undefined) { const k = (now - dk) / DUCK_MS; slide = k < 0.25 ? smooth01(k / 0.25) : k < 0.75 ? 1 : smooth01((1 - k) / 0.25); }
   return { lane, jy, crouch, air, slide, j };
 }
-function Runner({ game, avatar, tracks = 1, nickname }: { game: PlayGame; avatar: DogAvatar; tracks?: number; nickname?: string }) {
-  const g = useRef<THREE.Group>(null);
-  const shadow = useRef<THREE.Mesh>(null);
-  const d = useRef(newDogDriver());
-  const st = useRef({ x: 0, tilt: 0, lastNow: 0 });
-  const scale = DOG_SCALE[avatar.size];
+const laneAt = (live: RunResult, t: number) => { let l: Lane = 0; for (const x of live.lanes) { if (x.t <= t) l = x.lane; else break; } return l; };
+/** 그 시각까지 마지막으로 받아들여진 조작 (뛰기·숙이기·레인 이동) */
+function lastAction(live: RunResult | null, v: number) {
+  if (!live) return -1e9;
+  let t = -1e9;
+  const scan = (list: number[]) => { for (let i = list.length - 1; i >= 0; i--) if (list[i] <= v) { t = Math.max(t, list[i]); break; } };
+  scan(live.jumps); scan(live.ducks);
+  for (let i = live.lanes.length - 1; i >= 0; i--) if (live.lanes[i].t <= v) { t = Math.max(t, live.lanes[i].t); break; }
+  return t;
+}
+
+// ---------------------------------------------------------------- 거리 경쟁 · 삐끗 · 추월 (플레이어마다 독립 상태)
+/** 다른 참가자 트랙은 이만큼 늦게 그림 — 입력이 네트워크로 도착하기 전에 자세가 튀지 않게 (판정·순위는 서버 기준) */
+const RIVAL_DELAY_MS = 300;
+/** 화면에 보이는 앞뒤 간격 (실제 거리 차이를 부드럽게 줄여서): 앞은 최대 약 7m, 뒤는 약 2.6m — 멀어져도 사라지지 않게 */
+const AHEAD_SPREAD = 7;
+const BEHIND_SPREAD = 2.6;
+const compress = (d: number) => (d >= 0 ? AHEAD_SPREAD * Math.tanh(d / AHEAD_SPREAD) : -BEHIND_SPREAD * Math.tanh(-d / BEHIND_SPREAD));
+/** 삐끗 길이·들어오는 시간 (ms) */
+const TRIP_MS = 480;
+const TRIP_IN = 90;
+/** 추월 판정 여유 (m) — 나란히 달릴 때 알림이 깜빡이지 않게 */
+const OVERTAKE_HYST = 0.6;
+
+interface Trip { at: number; kind: number; side: number }
+export interface Racer {
+  id: number; me: boolean;
+  /** 트랙 중심 x */
+  x: number;
+  /** 이 트랙을 그리는 음악 시각 (나: 지금, 다른 사람: 지금 − RIVAL_DELAY_MS) */
+  view: number;
+  live: RunResult | null;
+  sim: PaceSim | null;
+  /** 달린 거리 (m) · 페이스 · 연속 MISS */
+  dist: number; pace: number; missStreak: number;
+  /** 화면 앞뒤 위치 (부드럽게 따라감) · 레인 x (부드럽게) */
+  z: number; lx: number;
+  trips: Trip[]; tripSeen: Set<number>;
+  wagUntil: number; sparkUntil: number; missAt: number;
+  seen: number; lastGrade: Grade | null; gradeAt: number;
+  rank: number;
+  gone: boolean;
+  /** 화면 밖에 있을 때 가장자리 표시 위치 (px) */
+  edge: { x: number; y: number; side: 'left' | 'right' | 'bottom' } | null;
+}
+export interface Race {
+  racers: Racer[];
+  byId: Map<number, Racer>;
+  me: Racer;
+  /** 순위 순서 (id) */
+  order: number[];
+  ahead: Map<string, boolean>;
+  banner: { text: string; at: number; good: boolean } | null;
+}
+function createRace(game: PlayGame): Race {
+  const racers: Racer[] = trackLayout(game).map((t) => ({
+    id: t.id, me: t.me, x: t.x, view: -1e9, live: null,
+    // 페이스는 함께 달리기에서만 (혼자 달리기는 점수 경쟁 그대로)
+    sim: game.multi ? new PaceSim(game.chart, game.course.speed, game.chart.difficulty) : null,
+    dist: 0, pace: 1, missStreak: 0, z: 0, lx: 0, trips: [], tripSeen: new Set(), wagUntil: 0, sparkUntil: 0, missAt: -1e9,
+    seen: 0, lastGrade: null, gradeAt: -1e9, rank: 1, gone: false, edge: null,
+  }));
+  return { racers, byId: new Map(racers.map((r) => [r.id, r])), me: racers.find((r) => r.me)!, order: racers.map((r) => r.id), ahead: new Map(), banner: null };
+}
+const playerOf = (game: PlayGame, id: number) => game.multi?.players.find((p) => p.id === id);
+const dogNameOf = (game: PlayGame, id: number) => playerOf(game, id)?.dogName ?? '친구';
+
+/**
+ * 장애물을 지나는 순간(박자 + 40ms) 피하지 못한 상태면 바로 '삐끗' 시작.
+ * 아직 GOOD 범위 안에서 늦게 조작하면 그 조작이 삐끗을 끊고 바로 반응한다 (최종 판정은 judgeRun).
+ * 같은 장애물에서는 한 번만.
+ */
+function detectTrips(chart: Chart, r: Racer) {
+  const live = r.live;
+  if (!live) return;
+  const v = r.view;
+  for (const o of chart.obstacles) {
+    if (o.t + 40 > v) break;
+    if (o.t + 600 < v || r.tripSeen.has(o.id)) continue;
+    r.tripSeen.add(o.id);
+    let kind = -1, side = 1;
+    if (o.need === 'jump' || o.need === 'duck') {
+      const list = o.need === 'jump' ? live.jumps : live.ducks;
+      if (!list.some((x) => x <= v && Math.abs(x - o.t) <= JUDGE.good)) kind = o.need === 'jump' ? 0 : 1;
+    } else {
+      const lane = laneAt(live, o.t);
+      if (o.blocked.includes(lane)) { kind = 2; side = lane > 0 ? -1 : 1; }
+    }
+    if (kind >= 0) { r.trips.push({ at: o.t + 40, kind, side }); if (r.trips.length > 3) r.trips.shift(); }
+  }
+}
+/** 삐끗 세기 (겹쳐도 더해지지 않고 가장 센 것 하나) — 다음 조작이 들어오면 회복 단계를 끊음 */
+function tripLevel(r: Racer, v: number) {
+  const act = lastAction(r.live, v);
+  let k = 0, kind = 0, side = 1, t = 0;
+  for (const tr of r.trips) {
+    const e = v - tr.at;
+    if (e < 0 || e > TRIP_MS) continue;
+    let lvl = e < TRIP_IN ? smooth01(e / TRIP_IN) : smooth01((TRIP_MS - e) / (TRIP_MS - TRIP_IN));
+    if (act > tr.at) lvl *= 1 - smooth01((v - act) / 90);
+    if (lvl > k) { k = lvl; kind = tr.kind; side = tr.side; t = e; }
+  }
+  return { k, kind, side, t };
+}
+
+/** 매 프레임: 판정(다른 사람은 받은 입력으로 재현) → 삐끗 → 페이스·거리 → 순위·추월 → 화면 앞뒤 위치 */
+function RaceDriver({ game }: { game: PlayGame }) {
   const { camera, size } = useThree();
+  const v3 = useMemo(() => new THREE.Vector3(), []);
   useFrame((_, rawDt) => {
     const dt = Math.min(rawDt, 0.05);
+    const race = game.race!;
     const now = game.player.now();
-    const live = game.live;
+    const scene = sceneNow(game);
+    const end = game.chart.duration;
+    const perf = performance.now();
+    const fin = game.results ? new Map(game.results.map((x) => [x.id, x])) : null;
+    for (const r of race.racers) {
+      if (r.me) { r.view = scene; r.live = game.live; }
+      else { r.view = scene - RIVAL_DELAY_MS; r.live = judgeRun(game.chart, multiLive.inputs[r.id] ?? [], Math.min(r.view, end + 500)); }
+      detectTrips(game.chart, r);
+      if (r.live && r.live.events.length > r.seen) {
+        const e = r.live.events[r.live.events.length - 1];
+        r.seen = r.live.events.length; r.lastGrade = e.grade; r.gradeAt = perf;
+        if (e.grade === 'miss' && !e.pass) r.missAt = perf;
+      }
+      if (r.sim && r.live) {
+        const st = r.sim.advance(r.live.events, Math.min(r.view, end)).state;
+        r.pace = st.pace; r.missStreak = st.missStreak;
+        // 다른 사람은 늦게 그린 만큼 지금 페이스로 이어서 계산 (부드러운 보간)
+        r.dist = r.sim.distAt(Math.max(0, Math.min(now, end)));
+      }
+      const srv = multiLive.standings.find((x) => x.id === r.id);
+      r.gone = !r.me && !!srv && (srv.left || !srv.connected);
+      if (srv?.left) r.dist = srv.distance; // 나간 사람은 서버가 멈춘 거리
+      const f = fin?.get(r.id);
+      if (f) r.dist = f.distance; // 최종 결과가 오면 서버가 확정한 거리로
+    }
+    if (!game.multi) return;
+    // 순위: 거리 → 정확도 → 점수 (나간 사람은 아래)
+    const key = (r: Racer) => ({ distance: r.dist, accuracy: r.live?.accuracy ?? 0, score: r.live?.score ?? 0 });
+    const sorted = [...race.racers].sort((a, b) => Number(a.gone) - Number(b.gone) || byDistance(key(a), key(b)) || a.id - b.id);
+    sorted.forEach((r, i) => { r.rank = fin?.get(r.id)?.rank ?? i + 1; });
+    race.order = sorted.map((r) => r.id);
+    // 추월: 두 강아지 사이 앞뒤가 바뀌면 (여유 OVERTAKE_HYST) — 앞지른 강아지는 꼬리 흔들기 + 반짝
+    if (now > 1500 && now < end) {
+      for (const a of race.racers) for (const b of race.racers) {
+        if (a.id >= b.id || a.gone || b.gone) continue;
+        const k = `${a.id}:${b.id}`;
+        const diff = a.dist - b.dist;
+        const prev = race.ahead.get(k);
+        const cur = diff > OVERTAKE_HYST ? true : diff < -OVERTAKE_HYST ? false : prev;
+        if (cur === undefined) continue;
+        if (prev !== undefined && cur !== prev) {
+          const win = cur ? a : b, lose = cur ? b : a;
+          win.wagUntil = perf + 1300; win.sparkUntil = perf + 900;
+          if (win.me) race.banner = { text: `🐾 ${dogNameOf(game, lose.id)} 추월!`, at: perf, good: true };
+          else if (lose.me) race.banner = { text: `💨 ${dogNameOf(game, win.id)}에게 추월당했어요`, at: perf, good: false };
+        }
+        race.ahead.set(k, cur);
+      }
+    }
+    // 화면 앞뒤 위치: 달리는 중에는 내 강아지 기준(나는 항상 가운데), 끝나면 1위 기준으로 최종 거리 순서대로
+    const finale = game.finaleAt !== undefined;
+    const lead = Math.max(...race.racers.map((r) => r.dist));
+    const kz = 1 - Math.exp(-dt / (finale ? 0.5 : 0.3));
+    for (const r of race.racers) {
+      const target = finale ? AHEAD_SPREAD * Math.tanh((lead - r.dist) / AHEAD_SPREAD) : r.me ? 0 : -compress(r.dist - race.me.dist);
+      r.z += (target - r.z) * kz;
+      // 화면 밖(뒤쪽·옆)에 있는 친구는 가장자리에 표시
+      r.edge = null;
+      if (!r.me && !finale && now > 0) {
+        v3.set(r.x + r.lx, 0.45, r.z).project(camera);
+        const behind = v3.z > 1;
+        if (behind || Math.abs(v3.x) > 0.98 || v3.y < -0.98) {
+          const side: 'left' | 'right' | 'bottom' = behind || v3.y < -0.98 ? (Math.abs(v3.x) > 0.6 || behind ? (r.x >= race.me.x ? 'right' : 'left') : 'bottom') : v3.x > 0 ? 'right' : 'left';
+          const px = side === 'left' ? 6 : side === 'right' ? size.width - 6 : (Math.max(-0.9, Math.min(0.9, v3.x)) + 1) / 2 * size.width;
+          const py = side === 'bottom' ? size.height - 6 : (1 - (Math.max(-0.5, Math.min(0.7, behind ? -0.5 : v3.y)) + 1) / 2) * size.height;
+          r.edge = { x: px, y: py, side };
+        }
+      }
+    }
+  }, -1);
+  return null;
+}
+
+/** 연속 성공·추월 때 강아지 주변에 작게 반짝이는 별 (가벼운 효과) */
+function Sparkle({ r }: { r: Racer }) {
+  const g = useRef<THREE.Group>(null);
+  useFrame(({ clock }) => {
+    if (!g.current) return;
+    const on = (r.live?.combo ?? 0) >= 10 || performance.now() < r.sparkUntil;
+    g.current.visible = on;
+    if (!on) return;
+    const t = clock.elapsedTime;
+    g.current.children.forEach((c, i) => {
+      const a = t * 2.2 + (i / g.current!.children.length) * Math.PI * 2;
+      c.position.set(Math.cos(a) * 0.42, 0.55 + Math.sin(t * 3 + i) * 0.12, 0.25 + Math.sin(a) * 0.18);
+      c.rotation.set(t * 3 + i, t * 2, 0);
+      const k = 0.6 + 0.4 * Math.sin(t * 6 + i * 1.7);
+      c.scale.setScalar(0.05 * k);
+    });
+  });
+  return (
+    <group ref={g} visible={false}>
+      {[0, 1, 2, 3, 4].map((i) => (
+        <mesh key={i} geometry={geo.ico(1, 0)}>
+          <meshBasicMaterial color={i % 2 ? '#fff3b0' : '#ffffff'} transparent opacity={0.9} toneMapped={false} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+/** 달리는 강아지 하나 (나 · 함께 달리는 친구 공통): 레인·점프·숙이기·삐끗·귀·꼬리, 이름표, 머리 위 MISS·순위 */
+function RaceDog({ game, r, avatar, label, color }: { game: PlayGame; r: Racer; avatar: DogAvatar; label: string; color: string }) {
+  const g = useRef<THREE.Group>(null);
+  const shadow = useRef<THREE.Mesh>(null);
+  const tag = useRef<HTMLDivElement>(null);
+  const top = useRef<HTMLDivElement>(null);
+  const d = useRef(newDogDriver());
+  const st = useRef({ tilt: 0 });
+  const scale = DOG_SCALE[avatar.size];
+  useFrame((_, rawDt) => {
+    const dt = Math.min(rawDt, 0.05);
+    const v = r.view;
+    const perf = performance.now();
+    const { lane, jy, crouch, air, slide, j } = poseAt(v, r.live);
+    const prevX = r.lx;
+    r.lx += (lane * LANE_W - r.lx) * Math.min(1, dt * (r.me ? 12 : 10)); // 레인 이동은 부드럽게 (지연 보정)
     const drv = d.current;
-    const s = st.current;
-    // 레인 (부드럽게 옮겨 감) · 점프·숙이기 자세
-    const { lane, jy, crouch, air, slide, j } = poseAt(now, live);
-    const prevX = s.x;
-    s.x += (lane * LANE_W - s.x) * Math.min(1, dt * 12);
-    const stumbleK = now - game.stumbleAt;
-    const stumble = stumbleK >= 0 && stumbleK < 520 ? Math.sin((stumbleK / 520) * Math.PI) : 0;
     drv.crouch += (crouch - drv.crouch) * Math.min(1, dt * 30);
     drv.air += (air - drv.air) * Math.min(1, dt * 20);
     drv.slide += (slide - drv.slide) * Math.min(1, dt * 25);
-    const running = now >= 0 && !game.ended;
-    drv.anim = game.ended ? DogAnim.Greet : running ? DogAnim.Run : DogAnim.Stand;
-    // 다리 빠르기: 실제 달리는 속도로 계산하되 최대 MAX_GAIT_HZ로 제한, 공중·미끄러질 땐 천천히
+    // 삐끗 (블렌딩된 세기) · 귀 처짐 (실수가 이어지면 살짝 처진 채) · 추월 꼬리 흔들기
+    const tr = tripLevel(r, v);
+    drv.trip = tr.k; drv.tripKind = tr.kind; drv.tripSide = tr.side; drv.tripT = tr.t;
+    const earT = tr.k > 0.05 ? 1 : r.missStreak > 0 ? 0.5 : 0;
+    drv.earDown += (earT - drv.earDown) * Math.min(1, dt * (earT > drv.earDown ? 12 : 2.5));
+    drv.wagUntil = r.wagUntil;
+    const finale = game.finaleAt !== undefined;
+    const spd = sceneSpeed(game);
+    const running = v >= 0 && spd > 0.2 && !(game.ended && !game.multi);
+    const final = game.results?.find((x) => x.id === r.id);
+    drv.anim = running ? DogAnim.Run : (final?.rank === 1 || (!game.multi && game.ended)) ? DogAnim.Greet : DogAnim.Stand;
+    if (finale && final?.rank && final.rank > 1) drv.wagUntil = Math.max(drv.wagUntil, perf + 300); // 다른 강아지도 완주했다고 꼬리 살랑
     if (!game.paused && running) {
-      const hz = Math.min(MAX_GAIT_HZ, game.course.speed / (DOG_STEP.run * scale * 2));
-      drv.phase += dt * hz * Math.PI * 2 * (1 - drv.air * 0.7) * (1 - drv.slide * 0.8) * (1 - stumble * 0.5);
+      // 다리 빠르기: 페이스가 빠르면 조금 더 빠르게 (최대 MAX_GAIT_HZ의 110% — 허우적거리지 않게), 공중·숙이기·삐끗 땐 천천히
+      const pf = Math.min(1, Math.max(0, (r.pace - 0.8) / 0.4));
+      const hz = Math.min(MAX_GAIT_HZ * (0.9 + 0.2 * pf), (game.course.speed * r.pace * spd) / (DOG_STEP.run * scale * 2));
+      drv.phase += dt * hz * Math.PI * 2 * (1 - drv.air * 0.7) * (1 - drv.slide * 0.8) * (1 - drv.trip * 0.45);
     }
     if (g.current) {
-      g.current.position.set(s.x, jy, 0);
-      s.tilt += ((-(s.x - prevX) / Math.max(dt, 1e-3)) * 0.05 - s.tilt) * Math.min(1, dt * 10);
-      // 비틀거림: 좌우로 살짝 흔들림 (카메라는 그대로)
-      g.current.rotation.set(-air * 0.12 * (jy > 0 && now - (j ?? 0) < JUMP_MS / 2 ? 1 : -1), Math.PI + Math.sin(stumbleK / 60) * 0.18 * stumble, s.tilt + Math.sin(stumbleK / 45) * 0.12 * stumble);
+      g.current.position.set(r.x + r.lx, jy, r.z);
+      st.current.tilt += ((-(r.lx - prevX) / Math.max(dt, 1e-3)) * 0.05 - st.current.tilt) * Math.min(1, dt * 10);
+      g.current.rotation.set(-air * 0.12 * (jy > 0 && v - (j ?? 0) < JUMP_MS / 2 ? 1 : -1), Math.PI, st.current.tilt);
     }
-    if (shadow.current) { shadow.current.position.x = s.x; shadow.current.scale.setScalar(1 - jy * 0.5); }
-    // 카메라: 강아지 뒤에서 일정한 높이로 따라감 (점프·착지·비틀거림에 흔들리지 않음, 레인 이동만 부드럽게)
-    const portrait = size.height > size.width;
-    const cam = camera as THREE.PerspectiveCamera;
-    // 참가자 수에 따라 구도를 정해 둠 (달리는 중에는 바뀌지 않음 → 줌인·줌아웃 없음)
-    //  - 혼자: 기존 구도 / 2명: 옆 트랙이 보이게 조금 높고 넓게 / 3~4명: 양옆 트랙까지
-    //  - 세로 화면(모바일): 내 트랙을 크게, 옆 트랙은 가장자리로 조금만 (순위판으로 보완)
-    const n = portrait ? Math.min(tracks, 2) : tracks;
-    const fov = portrait ? (n > 1 ? 58 : 56) : n >= 4 ? 62 : n === 3 ? 58 : n === 2 ? 52 : 48;
-    if (cam.fov !== fov) { cam.fov = fov; cam.updateProjectionMatrix(); }
-    if (portrait) { cam.position.set(s.x * 0.45, n > 1 ? 2.45 : 2.25, n > 1 ? 3.75 : 3.55); cam.lookAt(s.x * 0.6, 0.5, -6); }
-    else if (n === 1) { cam.position.set(s.x * 0.45, 2.2, 3.9); cam.lookAt(s.x * 0.6, 0.45, -7); }
-    else if (n === 2) { cam.position.set(s.x * 0.4 + 1.1, 3.0, 5.3); cam.lookAt(s.x * 0.5 + 1.4, 0.3, -9); }
-    else if (n === 3) { cam.position.set(s.x * 0.3, 3.9, 6.9); cam.lookAt(s.x * 0.35, 0.2, -10); }
-    else { cam.position.set(s.x * 0.25 + TRACK_PITCH / 2, 4.9, 8.8); cam.lookAt(s.x * 0.3 + TRACK_PITCH / 2, 0.2, -11); }
+    if (shadow.current) { shadow.current.position.set(r.x + r.lx, 0.02, r.z); shadow.current.scale.setScalar(1 - jy * 0.5); }
+    // 발밑 이름표 (다른 사람: 방금 판정 → 잠깐, 평소엔 콤보)
+    if (tag.current && !r.me) {
+      const pop = finale ? '' : r.lastGrade && perf - r.gradeAt < 650 ? `<b style="color:${GRADE_COLOR[r.lastGrade]}">${GRADE_LABEL[r.lastGrade]}</b>` : r.live && r.live.combo > 1 ? `${r.live.combo}콤보` : '';
+      const html = `<span style="background:${color}" class="rounded-full px-1.5 text-white">${label}</span>${pop ? ` ${pop}` : ''}`;
+      if (tag.current.dataset.v !== html) { tag.current.dataset.v = html; tag.current.innerHTML = html; }
+    }
+    // 머리 위: 내 MISS (작게, 잠깐) · 마무리 연출의 순위 배지
+    if (top.current) {
+      let html = '';
+      if (final?.rank) html = `<span class="rounded-full px-2 py-0.5 text-white" style="background:${final.rank === 1 ? '#f6b73c' : '#a58d80'}">${['🥇', '🥈', '🥉', '🏅'][final.rank - 1]} ${final.rank}위 · ${final.distance.toFixed(1)}m</span>`;
+      else if (finale && game.results) html = `<span class="rounded-full px-2 py-0.5 bg-white/80 text-cocoa-soft">${final?.reason ?? ''}</span>`;
+      else if (r.me && perf - r.missAt < 600) html = `<span style="color:#8a7a70;opacity:${(1 - (perf - r.missAt) / 600).toFixed(2)};text-shadow:0 0 3px #fff,0 0 3px #fff">MISS</span>`;
+      if (top.current.dataset.v !== html) { top.current.dataset.v = html; top.current.innerHTML = html; }
+    }
   });
   return (
     <>
       <group ref={g}>
-        <Dog avatar={avatar} driver={d} />
-        {nickname && (
-          <Html position={[0, 0.02, -0.55]} center zIndexRange={[4, 0]} style={{ pointerEvents: 'none' }}>
-            <div className="rounded-full bg-[#f39a7b] text-white px-2 py-0.5 text-[11px] font-display whitespace-nowrap shadow">나 · {nickname}</div>
-          </Html>
-        )}
+        <Dog avatar={avatar} driver={d} earBones />
+        <Sparkle r={r} />
+        {/* 이름표는 발밑 뒤쪽(카메라 쪽)에: 강아지 위에 띄우면 앞의 장애물을 가림 */}
+        <Html position={[0, 0.02, -0.55]} center zIndexRange={[4, 0]} style={{ pointerEvents: 'none' }}>
+          {r.me
+            ? <div className="rounded-full bg-[#f39a7b] text-white px-2 py-0.5 text-[11px] font-display whitespace-nowrap shadow" data-testid="my-tag">나 · {label}</div>
+            : <div ref={tag} className="rounded-full bg-white/85 px-1 py-0.5 text-[10px] font-display whitespace-nowrap shadow" data-testid={`rival-${r.id}`} />}
+        </Html>
+        <Html position={[0, 0.95 * scale, 0]} center zIndexRange={[5, 0]} style={{ pointerEvents: 'none' }}>
+          <div ref={top} className="font-display text-[12px] whitespace-nowrap drop-shadow-[0_1px_0_#fff]" data-testid={r.me ? 'my-top' : `top-${r.id}`} />
+        </Html>
       </group>
       <mesh ref={shadow} geometry={geo.circle(0.32 * scale, 16)} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
         <meshBasicMaterial color="#4a3b2a" transparent opacity={0.14} depthWrite={false} />
@@ -442,62 +724,90 @@ function Runner({ game, avatar, tracks = 1, nickname }: { game: PlayGame; avatar
     </>
   );
 }
+const RIVAL_COLORS = ['#8fb5e8', '#b9a6e6', '#7fb07a', '#f6a94a'];
 
-// ---------------------------------------------------------------- 함께 달리는 강아지 (자기 트랙에서 · 서로 충돌 없음)
-/** 다른 참가자의 판정 결과 (프레임마다 한 번 계산해 장애물·강아지·이름표가 같이 씀) */
-const rivalLive: Record<number, RunResult> = {};
-function RivalJudge({ game }: { game: PlayGame }) {
+// ---------------------------------------------------------------- 카메라
+// 혼자 달리기: 내 강아지 뒤에서 일정한 높이로 따라감 (점프·착지·삐끗에 흔들리지 않음, 레인 이동만 부드럽게)
+// 함께 달리기 (PC·모바일 같은 규칙):
+//   출발 전 → 출발선의 강아지들을 앞쪽 비스듬히에서 한 번에 보여 주며 소개 (약 2.6초)
+//   카운트다운 → 옆으로 돌아 내 강아지 뒤로 (부드러운 곡선, 강아지를 뚫고 지나가지 않게)
+//   달리는 중 → 내 강아지 중심 (내 강아지는 화면 아래 가운데, 장애물이 잘 보이게). 전체 트랙을 계속 보여 주지 않음
+//   끝 → 다시 전체 보기로, 최종 거리 순서대로 선 강아지들과 순위 발표
+type Pose = { P: THREE.Vector3; L: THREE.Vector3; fov: number };
+const mkPose = (): Pose => ({ P: new THREE.Vector3(), L: new THREE.Vector3(), fov: 50 });
+/** 모든 강아지가 화면에 들어오는 '앞쪽 비스듬히' 전체 보기 (세로 화면은 더 옆에서 줄을 따라 보게) */
+function overviewPose(race: Race, aspect: number, drift: number, out: Pose) {
+  const xs = race.racers.map((r) => r.x + r.lx), zs = race.racers.map((r) => r.z);
+  const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cz = (Math.min(...zs) + Math.max(...zs)) / 2;
+  const portrait = aspect < 1;
+  out.fov = portrait ? 54 : 44;
+  const yaw = (portrait ? 0.95 : 0.3) + drift, pitch = portrait ? 0.3 : 0.3;
+  const D = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+  const F = D.clone().negate();
+  const R = new THREE.Vector3().crossVectors(F, new THREE.Vector3(0, 1, 0)).normalize();
+  const U = new THREE.Vector3().crossVectors(R, F);
+  const tanV = Math.tan((out.fov / 2) * Math.PI / 180) * 0.72, tanH = tanV * aspect;
+  const T = new THREE.Vector3(cx, 0.45, cz);
+  let dist = 3.2;
+  const rel = new THREE.Vector3();
+  for (let i = 0; i < xs.length; i++) for (const h of [0, 1.1]) {
+    rel.set(xs[i] - cx, h - 0.45, zs[i] - cz);
+    const x = rel.dot(R), y = rel.dot(U), z = rel.dot(F);
+    dist = Math.max(dist, Math.abs(x) / tanH - z + 0.6, Math.abs(y) / tanV - z + 0.6);
+  }
+  out.L.copy(T);
+  out.P.copy(T).addScaledVector(D, dist);
+  return out;
+}
+/**
+ * 두 구도 사이: 위치는 높이 넘어가는 곡선 — 강아지 앞(얼굴 쪽)과 뒤(달리는 시점)를 오갈 때
+ * 꼭대기(apex)가 출발 게이트·강아지들 위를 지나 무엇도 뚫고 지나가지 않게. 보는 곳·화각은 부드럽게.
+ */
+function blendPose(a: Pose, b: Pose, k: number, out: Pose, apexZ?: number) {
+  const apex = new THREE.Vector3((a.P.x + b.P.x) / 2 + 1.5, Math.max(a.P.y, b.P.y) + 3.4, apexZ ?? (a.P.z + b.P.z) / 2);
+  // 곡선이 k=0.5에서 꼭대기를 지나도록 조절점 계산
+  const ctrl = apex.clone().multiplyScalar(2).addScaledVector(a.P, -0.5).addScaledVector(b.P, -0.5);
+  const u = 1 - k;
+  out.P.set(0, 0, 0).addScaledVector(a.P, u * u).addScaledVector(ctrl, 2 * u * k).addScaledVector(b.P, k * k);
+  out.L.copy(a.L).lerp(b.L, k);
+  out.fov = a.fov + (b.fov - a.fov) * k;
+  return out;
+}
+function CameraRig({ game }: { game: PlayGame }) {
+  const { camera, size } = useThree();
+  const poses = useMemo(() => ({ play: mkPose(), ov: mkPose(), out: mkPose() }), []);
   useFrame(() => {
-    const now = game.player.now();
-    for (const p of game.multi?.players ?? []) if (p.id !== game.multi!.myId) rivalLive[p.id] = judgeRun(game.chart, multiLive.inputs[p.id] ?? [], now);
+    const race = game.race!;
+    const me = race.me;
+    const cam = camera as THREE.PerspectiveCamera;
+    const portrait = size.height > size.width;
+    const sx = me.lx, mz = me.z;
+    const play = poses.play;
+    // 내 강아지 중심 구도 (세로 화면: 내 트랙을 크게 / PC: 같은 구도에 화각만 조금 넓게 — 옆 트랙은 가장자리에 일부만)
+    if (portrait) { play.fov = 56; play.P.set(sx * 0.45, 2.25, 3.55 + mz); play.L.set(sx * 0.6, 0.5, -6 + mz); }
+    else if (!game.multi) { play.fov = 48; play.P.set(sx * 0.45, 2.2, 3.9); play.L.set(sx * 0.6, 0.45, -7); }
+    else { play.fov = 52; play.P.set(sx * 0.45, 2.3, 4.1 + mz); play.L.set(sx * 0.6, 0.45, -7 + mz); }
+    let pose = play;
+    if (game.multi) {
+      const now = game.player.now();
+      const introK = smooth01((now + MR_COUNTDOWN_MS) / 1800);
+      const finK = game.finaleAt !== undefined ? smooth01((performance.now() - game.finaleAt) / 1600) : 0;
+      const aspect = size.width / Math.max(1, size.height);
+      if (introK < 1) {
+        // 소개하는 동안 아주 천천히 옆으로 흐르듯
+        const drift = Math.max(-0.12, Math.min(0, (now + MR_COUNTDOWN_MS) / 1000 * 0.05));
+        pose = blendPose(overviewPose(race, aspect, drift, poses.ov), play, introK, poses.out, 0.7);
+      } else if (finK > 0) pose = blendPose(play, overviewPose(race, aspect, 0, poses.ov), finK, poses.out);
+    }
+    if (SIDE_CAM) { pose = poses.out; pose.fov = 34; pose.P.set(me.x + me.lx + 2.1, 0.75, me.z - 0.9); pose.L.set(me.x + me.lx, 0.3, me.z - 0.05); }
+    if (Math.abs(cam.fov - pose.fov) > 0.01) { cam.fov = pose.fov; cam.updateProjectionMatrix(); }
+    cam.position.copy(pose.P);
+    cam.lookAt(pose.L);
   });
   return null;
 }
-/**
- * 다른 참가자의 입력 기록을 같은 판정 규칙으로 재현해 그 사람 트랙에서 레인·점프·숙이기를 보여 준다.
- * 트랙이 따로라 내 강아지·장애물과 겹치지 않는다.
- */
-function Rival({ game, p, color, x }: { game: PlayGame; p: MRPlayer; color: string; x: number }) {
-  const g = useRef<THREE.Group>(null);
-  const tag = useRef<HTMLDivElement>(null);
-  const d = useRef(newDogDriver());
-  const st = useRef({ x: 0, seen: 0, popAt: -1e9, pop: '' as Grade | '' });
-  const scale = DOG_SCALE[p.dog.size];
-  useFrame((_, rawDt) => {
-    const dt = Math.min(rawDt, 0.05);
-    const now = game.player.now();
-    const r = rivalLive[p.id] ?? null;
-    const { lane, jy, crouch, air, slide } = poseAt(now, r);
-    const s = st.current;
-    s.x += (lane * LANE_W - s.x) * Math.min(1, dt * 10); // 네트워크 지연을 감추는 부드러운 보간
-    const drv = d.current;
-    drv.crouch += (crouch - drv.crouch) * Math.min(1, dt * 30);
-    drv.air += (air - drv.air) * Math.min(1, dt * 20);
-    drv.slide += (slide - drv.slide) * Math.min(1, dt * 25);
-    const running = now >= 0 && !game.ended;
-    drv.anim = running ? DogAnim.Run : DogAnim.Stand;
-    if (running) drv.phase += dt * Math.min(MAX_GAIT_HZ, game.course.speed / (DOG_STEP.run * scale * 2)) * Math.PI * 2 * (1 - drv.air * 0.7) * (1 - drv.slide * 0.8);
-    if (g.current) { g.current.position.set(x + s.x, jy, 0); g.current.rotation.set(0, Math.PI, 0); }
-    // 이름표: 닉네임 · 점수 · 콤보 · 방금 판정 (화면 갱신 없이 글자만 바꿈)
-    if (r && r.events.length > s.seen) { s.seen = r.events.length; s.pop = r.events[r.events.length - 1].grade; s.popAt = now; }
-    if (tag.current) {
-      const pop = s.pop && now - s.popAt < 650 ? `<b style="color:${GRADE_COLOR[s.pop]}">${GRADE_LABEL[s.pop]}</b>` : `${(r?.score ?? 0).toLocaleString()}${r && r.combo > 1 ? ` · ${r.combo}콤보` : ''}`;
-      if (tag.current.dataset.v !== pop) { tag.current.dataset.v = pop; tag.current.innerHTML = `<span style="background:${color}" class="rounded-full px-1.5 text-white">${p.nickname}</span> ${pop}`; }
-    }
-  });
-  return (
-    <group ref={g}>
-      <Dog avatar={p.dog} driver={d} />
-      {/* 이름표는 발밑 뒤쪽(카메라 쪽)에: 강아지 위에 띄우면 앞의 장애물을 가림 */}
-      <Html position={[0, 0.02, -0.55]} center zIndexRange={[4, 0]} style={{ pointerEvents: 'none' }}>
-        <div ref={tag} className="rounded-full bg-white/85 px-1 py-0.5 text-[10px] font-display whitespace-nowrap shadow" data-testid={`rival-${p.id}`} />
-      </Html>
-    </group>
-  );
-}
-const RIVAL_COLORS = ['#8fb5e8', '#b9a6e6', '#7fb07a', '#f6a94a'];
 
-/** 매 프레임 판정 계산 (서버와 같은 judgeRun) → 새 판정에 효과음·비틀거림 */
+/** 매 프레임 내 판정 계산 (서버와 같은 judgeRun) → 새 판정에 효과음 */
 function Judge({ game, onEnd }: { game: PlayGame; onEnd: () => void }) {
   const seen = useRef(0);
   useFrame(() => {
@@ -511,10 +821,9 @@ function Judge({ game, onEnd }: { game: PlayGame; onEnd: () => void }) {
       seen.current = r.events.length;
       game.lastEvent = { e, at: performance.now(), points: r.score - prevScore };
       if (game.sfx) game.player.blip(e.grade);
-      if (e.grade === 'miss' && !e.pass) game.stumbleAt = game.chart.obstacles[e.id].t + 60;
     }
     if (now >= game.chart.duration) { game.ended = true; onEnd(); }
-  });
+  }, -2);
   return null;
 }
 
@@ -524,7 +833,8 @@ export function RunnerPlay({ game, avatar, human, best, onEnd, onQuit, onRetry }
 }) {
   const [, force] = useState(0);
   const [paused, setPaused] = useState(false);
-  const tracks = useMemo(() => trackLayout(game), [game]);
+  if (!game.race) game.race = createRace(game);
+  const race = game.race;
   const touch = isTouchDevice();
   // 자동 화면 테스트(mungle.e2e)에서만: 진행 중인 게임 상태를 노출해 박자에 맞춘 입력을 검증
   useEffect(() => {
@@ -571,10 +881,15 @@ export function RunnerPlay({ game, avatar, human, best, onEnd, onQuit, onRetry }
 
   const now = game.player.now();
   const r = game.live;
+  const me = race.me;
   const playEnd = game.chart.duration - 1600;
   const prog = Math.max(0, Math.min(1, now / playEnd));
-  const ev = game.lastEvent && performance.now() - game.lastEvent.at < 560 ? game.lastEvent : null;
-  const countdown = now < 0 ? Math.ceil(-now / 1000) : 0;
+  const ev = game.lastEvent && game.lastEvent.e.grade !== 'miss' && performance.now() - game.lastEvent.at < 560 ? game.lastEvent : null;
+  const intro = !!game.multi && now < -MR_COUNTDOWN_MS;
+  const countdown = now < 0 && !intro ? Math.ceil(-now / 1000) : 0;
+  const finale = game.finaleAt !== undefined;
+  const banner = race.banner && performance.now() - race.banner.at < 1600 ? race.banner : null;
+  const myName = game.multi?.players.find((p) => p.id === game.multi!.myId)?.nickname ?? '';
   // 모바일 조작 버튼: 한 줄 4개, 화면 너비에 맞춰 같은 크기 (멀티터치: pointerdown 즉시 실행)
   const Btn = ({ a, label, icon }: { a: RunnerAction; label: string; icon: string }) => (
     <button aria-label={label} data-testid={`rb-${a}`}
@@ -593,53 +908,79 @@ export function RunnerPlay({ game, avatar, human, best, onEnd, onQuit, onRetry }
         <color attach="background" args={['#fde4ea']} />
         <fog attach="fog" args={['#fde4ea', 20, 52]} />
         <Lighting indoor={false} shadows={!touch} />
-        <CherryWalk game={game} xs={tracks.map((t) => t.x)} />
-        {game.multi && <RivalJudge game={game} />}
-        {tracks.map((t) => t.me ? <Obstacles key={t.id} game={game} x={t.x} /> : <Obstacles key={t.id} game={game} x={t.x} live={() => rivalLive[t.id] ?? null} />)}
-        {human && <Cheer game={game} human={human} />}
-        {tracks.filter((t) => !t.me).map((t, i) => { const p = game.multi!.players.find((x) => x.id === t.id); return p ? <Rival key={t.id} game={game} p={p} x={t.x} color={RIVAL_COLORS[i % RIVAL_COLORS.length]} /> : null; })}
-        <Runner game={game} avatar={avatar} tracks={tracks.length} nickname={game.multi ? game.multi.players.find((p) => p.id === game.multi!.myId)?.nickname : undefined} />
         <Judge game={game} onEnd={onEnd} />
+        <RaceDriver game={game} />
+        <CherryWalk game={game} xs={race.racers.map((t) => t.x)} />
+        {race.racers.map((t) => <Obstacles key={t.id} game={game} r={t} />)}
+        {human && !game.multi && <Cheer game={game} human={human} />}
+        {race.racers.map((t, i) => {
+          if (t.me) return <RaceDog key={t.id} game={game} r={t} avatar={avatar} label={myName} color="#f39a7b" />;
+          const p = playerOf(game, t.id);
+          return p ? <RaceDog key={t.id} game={game} r={t} avatar={p.dog} label={p.nickname} color={RIVAL_COLORS[(i - 1) % RIVAL_COLORS.length]} /> : null;
+        })}
+        <CameraRig game={game} />
       </Canvas>
+      {/* 화면 밖(뒤쪽·옆 트랙)에 있는 친구 표시: 사라지지 않게 가장자리에 이름과 거리 차이 */}
+      {game.multi && !finale && race.racers.filter((x) => x.edge).map((x) => {
+        const gap = x.dist - me.dist;
+        return (
+          <div key={x.id} className="absolute pointer-events-none rounded-full bg-white/85 shadow px-1.5 py-0.5 text-[10px] font-display whitespace-nowrap" data-testid={`edge-${x.id}`}
+            style={{ left: x.edge!.x, top: x.edge!.y, transform: `translate(${x.edge!.side === 'left' ? '0' : x.edge!.side === 'right' ? '-100%' : '-50%'}, ${x.edge!.side === 'bottom' ? '-100%' : '-50%'})` }}>
+            {x.edge!.side === 'left' ? '◀ ' : ''}{dogNameOf(game, x.id)} {Math.abs(gap) < 0.05 ? <span className="text-cocoa-soft">나란히</span> : <span className={gap > 0 ? 'text-[#e2604f]' : 'text-[#6d84a3]'}>{gap > 0 ? '+' : ''}{gap.toFixed(1)}m</span>}{x.edge!.side === 'right' ? ' ▶' : x.edge!.side === 'bottom' ? ' ▼' : ''}
+          </div>
+        );
+      })}
+      {intro && <IntroOverlay game={game} />}
+      {finale && <FinaleOverlay game={game} />}
       </div>
-      {/* 상단: 일시정지 · 곡 제목 · 진행 바 · 남은 시간 / 콤보 · 점수 */}
-      <div className="absolute inset-x-0 top-0 px-3 pt-[calc(10px+var(--safe-t,0px))] pointer-events-none">
-        <div className="flex items-center gap-2">
-          {game.multi ? (
-            <button className="w-11 h-11 rounded-full bg-[#b9a6e6] text-white shadow pointer-events-auto text-lg shrink-0" aria-label="나가기" data-testid="mr-quit"
-              onClick={() => { if (confirm('지금 나가면 이번 판 순위와 보상을 받을 수 없어요. 나갈까요?')) onQuit(); }}>✕</button>
-          ) : (
-            <button className="w-11 h-11 rounded-full bg-[#b9a6e6] text-white shadow pointer-events-auto text-lg shrink-0" onClick={() => void togglePause()} aria-label="일시정지">⏸</button>
-          )}
-          <div className="flex-1 min-w-0">
-            <div className="font-display text-sm text-cocoa truncate">🎵 {game.course.title} - {game.course.composer}</div>
-            <div className="h-2 rounded-full bg-white/70 overflow-hidden mt-1"><div className="h-full bg-[#f39a7b]" style={{ width: `${prog * 100}%` }} /></div>
+      {/* 상단: 나가기/일시정지 · 곡 제목 · 진행 바 · 남은 시간 / 콤보·페이스 · 점수·순위 */}
+      {!intro && !finale && (
+        <div className="absolute inset-x-0 top-0 px-3 pt-[calc(10px+var(--safe-t,0px))] pointer-events-none">
+          <div className="flex items-center gap-2">
+            {game.multi ? (
+              <button className="w-11 h-11 rounded-full bg-[#b9a6e6] text-white shadow pointer-events-auto text-lg shrink-0" aria-label="나가기" data-testid="mr-quit"
+                onClick={() => { if (confirm('지금 나가면 이번 판 순위와 보상을 받을 수 없어요. 나갈까요?')) onQuit(); }}>✕</button>
+            ) : (
+              <button className="w-11 h-11 rounded-full bg-[#b9a6e6] text-white shadow pointer-events-auto text-lg shrink-0" onClick={() => void togglePause()} aria-label="일시정지">⏸</button>
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="font-display text-sm text-cocoa truncate">🎵 {game.course.title} - {game.course.composer} · {DIFFICULTY_LABEL[game.chart.difficulty]}</div>
+              <div className="h-2 rounded-full bg-white/70 overflow-hidden mt-1"><div className="h-full bg-[#f39a7b]" style={{ width: `${prog * 100}%` }} /></div>
+            </div>
+            <div className="rounded-full bg-[#5a4033aa] text-white text-xs px-2.5 py-1 tabular-nums shrink-0" data-testid="runner-time">{mmss(Math.max(0, now))} / {mmss(playEnd)}</div>
           </div>
-          <div className="rounded-full bg-[#5a4033aa] text-white text-xs px-2.5 py-1 tabular-nums shrink-0" data-testid="runner-time">{mmss(Math.max(0, now))} / {mmss(playEnd)}</div>
+          <div className="flex items-start justify-between mt-2 gap-2">
+            <div className="leading-none">
+              <div className="font-display text-[13px] text-[#e2604f] tracking-wide drop-shadow-[0_1px_0_#fff]">COMBO</div>
+              <div className="font-display text-4xl text-[#f6a94a] drop-shadow-[0_2px_0_#fff] tabular-nums">{r?.combo ?? 0}</div>
+              {game.multi && <PaceMeter pace={me.pace} />}
+            </div>
+            <div className="text-right flex flex-col items-end">
+              <div className="rounded-full bg-[#5a403399] text-white font-display text-xl px-3 py-0.5 tabular-nums" data-testid="runner-score">{(r?.score ?? 0).toLocaleString()}</div>
+              {game.multi ? <LiveRanking game={game} compact={touch} /> : <div className="text-[11px] text-cocoa-soft mt-0.5">내 최고 {best !== null ? best.toLocaleString() : '—'}</div>}
+            </div>
+          </div>
+          {game.multi && now > 0 && <GapChip game={game} />}
         </div>
-        <div className="flex items-start justify-between mt-2">
-          <div className="leading-none">
-            <div className="font-display text-[13px] text-[#e2604f] tracking-wide drop-shadow-[0_1px_0_#fff]">COMBO</div>
-            <div className="font-display text-4xl text-[#f6a94a] drop-shadow-[0_2px_0_#fff] tabular-nums">{r?.combo ?? 0}</div>
-          </div>
-          <div className="text-right">
-            <div className="rounded-full bg-[#5a403399] text-white font-display text-xl px-3 py-0.5 tabular-nums" data-testid="runner-score">{(r?.score ?? 0).toLocaleString()}</div>
-            {game.multi ? <LiveRanking game={game} /> : <div className="text-[11px] text-cocoa-soft mt-0.5">내 최고 {best !== null ? best.toLocaleString() : '—'}</div>}
-          </div>
-        </div>
-      </div>
-      {/* 판정: 잠깐 떴다가 사라짐 (화면 위쪽, 작게) */}
-      {ev && (
+      )}
+      {/* 판정: 잠깐 떴다가 사라짐 (화면 위쪽, 작게 — MISS는 강아지 머리 위에 작게) */}
+      {ev && !finale && (
         <div key={game.lastEvent!.at} className="absolute left-1/2 top-[22%] -translate-x-1/2 text-center pointer-events-none judge-pop" data-testid="runner-judge">
           <div className="font-display text-3xl md:text-4xl drop-shadow-[0_2px_0_#fff]" style={{ color: GRADE_COLOR[ev.e.grade] }}>{GRADE_LABEL[ev.e.grade]}</div>
           {ev.points > 0 && <div className="font-display text-lg text-[#f6a94a] drop-shadow-[0_1px_0_#fff]">+{ev.points}</div>}
-          {ev.e.pass && <div className="text-[11px] text-cocoa-soft">박자에 맞춰 움직여야 점수가 나요</div>}
         </div>
+      )}
+      {game.lastEvent?.e.pass && performance.now() - game.lastEvent.at < 900 && !finale && (
+        <div className="absolute left-1/2 top-[22%] -translate-x-1/2 text-[11px] text-cocoa-soft pointer-events-none panel !rounded-full px-3 py-1">박자에 맞춰 움직여야 점수가 나요</div>
+      )}
+      {/* 추월 알림 */}
+      {banner && !finale && (
+        <div key={banner.at} className={`absolute left-1/2 top-[30%] -translate-x-1/2 rounded-full px-4 py-1.5 font-display text-base whitespace-nowrap pointer-events-none pop shadow ${banner.good ? 'bg-[#f39a7b] text-white' : 'bg-white/90 text-[#6d84a3]'}`} data-testid="mr-banner">{banner.text}</div>
       )}
       {countdown > 0 && !paused && (
         <div className="absolute left-1/2 top-[30%] -translate-x-1/2 text-center pointer-events-none">
-          <div key={countdown} className="font-display text-6xl text-white drop-shadow-[0_3px_0_#f39a7b] pop">{countdown}</div>
-          <div className="panel !rounded-2xl px-4 py-2 mt-2 text-sm">빛나는 띠가 강아지에 닿는 <b>박자</b>에 맞춰 조작!</div>
+          <div key={countdown} className="font-display text-6xl text-white drop-shadow-[0_3px_0_#f39a7b] pop" data-testid="runner-countdown">{countdown}</div>
+          <div className="panel !rounded-2xl px-4 py-2 mt-2 text-sm whitespace-nowrap">빛나는 띠가 강아지에 닿는 <b>박자</b>에 맞춰 조작!</div>
         </div>
       )}
       {/* 조작: 모바일은 한 줄 4버튼 (← 뛰기 숙이기 →), PC는 하단 안내 */}
@@ -649,7 +990,7 @@ export function RunnerPlay({ game, avatar, human, best, onEnd, onQuit, onRetry }
             <Btn a="L" label="왼쪽" icon="←" /><Btn a="R" label="오른쪽" icon="→" /><Btn a="J" label="뛰기" icon="↑" /><Btn a="D" label="숙이기" icon="↓" />
           </div>
         </div>
-      ) : (
+      ) : !intro && !finale && (
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2 name-tag !text-xs !px-3 !py-1.5 opacity-90 whitespace-nowrap">← → / A D 레인 이동 · ↑ / Space 뛰기 · ↓ / Ctrl 숙이기{game.multi ? ' · 함께 달리기는 멈출 수 없어요' : ' · Esc 일시정지'}</div>
       )}
       {paused && (
@@ -668,28 +1009,101 @@ export function RunnerPlay({ game, avatar, human, best, onEnd, onQuit, onRetry }
   );
 }
 
-/** 함께 달리기 실시간 순위 (서버 순위판 + 내 점수는 내 화면 값으로 바로 반영) */
-function LiveRanking({ game }: { game: PlayGame }) {
-  const m = game.multi!;
-  const rows = m.players.map((p) => {
-    const st = multiLive.standings.find((x) => x.id === p.id);
-    const score = p.id === m.myId ? game.live?.score ?? 0 : st?.score ?? 0;
-    const live = p.id === m.myId ? game.live : rivalLive[p.id] ?? null;
-    const lane = live ? poseAt(game.player.now(), live).lane : 0;
-    return { p, score, combo: p.id === m.myId ? game.live?.combo ?? 0 : live?.combo ?? 0, lane, gone: st ? st.left || !st.connected : !p.connected };
-  }).sort((a, b) => b.score - a.score);
+/** 페이스 표시 (100% = 기본 빠르기) */
+function PaceMeter({ pace }: { pace: number }) {
+  const pct = Math.round(pace * 100);
+  const col = pct >= 104 ? '#e2604f' : pct <= 94 ? '#6d84a3' : '#a58d80';
   return (
-    <div className="mt-1 rounded-2xl bg-white/85 px-2 py-1 text-left min-w-[150px]" data-testid="mr-live">
-      {rows.map((r, i) => (
-        <div key={r.p.id} className={`flex items-center gap-1 text-[11px] leading-5 ${r.p.id === m.myId ? 'font-display text-[#e2604f]' : 'text-cocoa'} ${r.gone ? 'opacity-50' : ''}`}>
-          <span className="w-4 text-center">{i + 1}</span>
-          <span className="flex-1 truncate max-w-[64px]">{r.p.nickname}</span>
-          {/* 그 사람 트랙의 레인 위치 (모바일에서 옆 트랙이 작게 보일 때 보완) */}
-          <span className="flex gap-[2px]" aria-hidden>{[-1, 0, 1].map((l) => <i key={l} className={`block w-1.5 h-1.5 rounded-full ${r.lane === l ? 'bg-[#f39a7b]' : 'bg-[#ead8c8]'}`} />)}</span>
-          <span className="tabular-nums w-11 text-right">{r.score.toLocaleString()}</span>
-          <span className="tabular-nums w-7 text-right text-[10px] text-cocoa-soft">{r.combo > 1 ? `×${r.combo}` : ''}</span>
+    <div className="mt-1 rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-display tabular-nums whitespace-nowrap" style={{ color: col }} data-testid="mr-pace">
+      🐾 페이스 {pct}%{pct >= 104 ? ' ▲' : pct <= 94 ? ' ▼' : ''}
+    </div>
+  );
+}
+
+/** 앞 친구까지 거리 / 선두면 2위와 차이 */
+function GapChip({ game }: { game: PlayGame }) {
+  const race = game.race!;
+  const me = race.me;
+  const idx = race.order.indexOf(me.id);
+  const ahead = idx > 0 ? race.byId.get(race.order[idx - 1])! : null;
+  const behind = idx >= 0 && idx < race.order.length - 1 ? race.byId.get(race.order[idx + 1])! : null;
+  return (
+    <div className="mt-1.5 flex justify-center">
+      <div className="rounded-full bg-white/85 shadow px-3 py-0.5 text-[12px] font-display whitespace-nowrap" data-testid="mr-gap">
+        {ahead && ahead.dist - me.dist < 0.05 ? <>🐾 나란히 달리는 중 · 🐶{dogNameOf(game, ahead.id)}</>
+          : ahead ? <>앞의 🐶{dogNameOf(game, ahead.id)}까지 <b className="text-[#6d84a3]">{Math.max(0, ahead.dist - me.dist).toFixed(1)}m</b></>
+          : behind && me.dist - behind.dist < 0.05 ? <>🐾 나란히 달리는 중 · 🐶{dogNameOf(game, behind.id)}</>
+          : behind ? <>🥇 선두! 2위와 <b className="text-[#e2604f]">+{Math.max(0, me.dist - behind.dist).toFixed(1)}m</b></> : '🥇 선두!'}
+      </div>
+    </div>
+  );
+}
+
+/** 함께 달리기 실시간 순위 (달린 거리 순 · 같으면 정확도 → 점수) — 모바일은 작고 간결하게 */
+function LiveRanking({ game, compact }: { game: PlayGame; compact: boolean }) {
+  const race = game.race!;
+  const m = game.multi!;
+  return (
+    <div className={`mt-1 rounded-2xl bg-white/85 px-2 py-1 text-left ${compact ? 'min-w-[128px]' : 'min-w-[210px]'}`} data-testid="mr-live">
+      {race.order.map((id) => {
+        const x = race.byId.get(id)!;
+        const p = m.players.find((q) => q.id === id);
+        const mine = id === m.myId;
+        return (
+          <div key={id} className={`flex items-center gap-1 text-[11px] leading-5 ${mine ? 'font-display text-[#e2604f]' : 'text-cocoa'} ${x.gone ? 'opacity-50' : ''}`} data-testid={`mr-row-${id}`}>
+            <span className="w-4 text-center">{x.rank}</span>
+            <span className={`flex-1 truncate ${compact ? 'max-w-[56px]' : 'max-w-[110px]'}`}>{compact ? p?.dogName : <>{p?.nickname} <span className="text-cocoa-soft">· 🐶{p?.dogName}</span></>}</span>
+            <span className="tabular-nums w-12 text-right" data-testid={`mr-dist-${id}`}>{x.dist.toFixed(compact ? 0 : 1)}m</span>
+            <span className="tabular-nums w-7 text-right text-[10px] text-cocoa-soft">{(x.live?.combo ?? 0) > 1 ? `×${x.live!.combo}` : ''}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** 출발 전 참가자 소개 (출발선의 강아지들을 한 번에 보여 주는 동안) */
+function IntroOverlay({ game }: { game: PlayGame }) {
+  const race = game.race!;
+  const order = [...race.racers].sort((a, b) => a.x - b.x);
+  return (
+    <>
+      <div className="absolute inset-x-0 top-0 pt-[calc(14px+var(--safe-t,0px))] px-3 text-center pointer-events-none">
+        <div className="inline-block panel !rounded-full px-4 py-1.5 font-display text-sm pop">🐾 함께 달리기 · {game.course.title} · {DIFFICULTY_LABEL[game.chart.difficulty]}</div>
+        <div className="font-display text-xl text-white drop-shadow-[0_2px_0_#f39a7b] mt-2">오늘의 선수들!</div>
+      </div>
+      <div className="absolute inset-x-0 bottom-3 px-3 flex justify-center gap-1.5 flex-wrap pointer-events-none" data-testid="mr-intro">
+        {order.map((r, i) => {
+          const p = playerOf(game, r.id);
+          return (
+            <div key={r.id} className={`panel !rounded-2xl px-2.5 py-1.5 text-center pop ${r.me ? 'ring-2 ring-[#f39a7b]' : ''}`} style={{ animationDelay: `${i * 120}ms` }}>
+              <div className="font-display text-sm leading-tight">🐶 {p?.dogName}</div>
+              <div className="text-[11px] text-cocoa-soft leading-tight">{p?.nickname}{r.me ? ' (나)' : ''}</div>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+/** 끝: 완주 → 서버가 확정한 순위 발표 (강아지들은 최종 거리 순서대로 서 있음) */
+function FinaleOverlay({ game }: { game: PlayGame }) {
+  const res = game.results;
+  const ranked = res?.filter((x) => x.rank).sort((a, b) => a.rank! - b.rank!) ?? [];
+  return (
+    <div className="absolute inset-x-0 top-0 pt-[calc(14px+var(--safe-t,0px))] px-3 text-center pointer-events-none" data-testid="mr-finale">
+      <div className="inline-block font-display text-2xl text-white bg-[#f39a7b] rounded-full px-6 py-1 shadow-[0_3px_0_#d9705f] pop">🏁 완주!</div>
+      {!res && <div className="text-sm text-cocoa mt-2 panel !rounded-full inline-block px-3 py-1 ml-2">기록을 확인하는 중…</div>}
+      {res && (
+        <div className="mt-2 flex justify-center gap-1.5 flex-wrap">
+          {ranked.map((x, i) => (
+            <div key={x.id} className={`panel !rounded-2xl px-2.5 py-1 pop ${x.id === game.multi?.myId ? 'ring-2 ring-[#f39a7b]' : ''}`} style={{ animationDelay: `${i * 260}ms` }}>
+              <span className="font-display">{['🥇', '🥈', '🥉', '🏅'][x.rank! - 1]} {x.dogName}</span> <span className="text-[11px] text-cocoa-soft tabular-nums">{x.distance.toFixed(1)}m</span>
+            </div>
+          ))}
         </div>
-      ))}
+      )}
     </div>
   );
 }

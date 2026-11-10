@@ -7,8 +7,8 @@ import type { Grade, RunnerAction, RunnerDifficulty } from './runner';
 export const MR_MAX = 4;
 /** 출발 카운트다운 (초) */
 export const MR_COUNTDOWN_MS = 3000;
-/** 시작 신호가 모든 기기에 닿을 여유 (카운트다운 앞에 붙음) */
-export const MR_LEAD_MS = 900;
+/** 시작 신호 → 카운트다운 전: 참가자 소개(출발선 전체 보기) 시간. 시작 신호가 모든 기기에 닿을 여유도 겸함 */
+export const MR_LEAD_MS = 2600;
 /** 순위 보상 (1~4위) — 하루 보상 횟수는 혼자 달리기와 합쳐서 3번 */
 export const MR_REWARD = [100, 70, 50, 40] as const;
 /** 정상 완주 기준: 끝까지 함께 있고, 장애물의 20% 이상을 통과 (자리만 지키는 보상 수집 방지) */
@@ -44,14 +44,16 @@ export interface MRRoom {
   startAt: number | null;
   players: MRPlayer[];
 }
-/** 달리는 중 순위판 (서버가 입력 기록으로 계산) */
-export interface MRStanding { id: number; score: number; combo: number; maxCombo: number; judged: number; connected: boolean; left: boolean }
+/** 달리는 중 순위판 (서버가 입력 기록으로 계산 — 순위는 달린 거리 → 정확도 → 점수) */
+export interface MRStanding { id: number; rank: number; distance: number; pace: number; score: number; accuracy: number; combo: number; maxCombo: number; judged: number; connected: boolean; left: boolean }
 export interface MRResult {
   id: number;
   nickname: string;
   dogName: string;
-  /** 정상 완주자 순위 (1부터), 완주 못 하면 null */
+  /** 정상 완주자 순위 (1부터), 완주 못 하면 null — 달린 거리 → 정확도 → 점수 순 */
   rank: number | null;
+  /** 음악이 끝날 때까지 달린 거리 (m, 서버가 입력 기록으로 다시 계산) */
+  distance: number;
   score: number;
   accuracy: number;
   maxCombo: number;
@@ -63,3 +65,8 @@ export interface MRResult {
   coin: number;
 }
 export interface MRInputMsg { id: number; t: number; a: RunnerAction }
+/** 거리 표시·비교 단위 (0.1m) — 같은 거리면 정확도 → 점수로 순위 */
+export const roundDist = (m: number) => Math.round(m * 10) / 10;
+/** 순위 비교: 거리 → 정확도 → 점수 */
+export const byDistance = (a: { distance: number; accuracy: number; score: number }, b: { distance: number; accuracy: number; score: number }) =>
+  roundDist(b.distance) - roundDist(a.distance) || b.accuracy - a.accuracy || b.score - a.score;

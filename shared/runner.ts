@@ -4,6 +4,8 @@
 // 음원: 원곡(작곡)은 저작권 보호기간이 끝난 퍼블릭 도메인 작품이고, 연주는 외부 녹음을 쓰지 않고
 // 아래 악보 데이터로 브라우저에서 직접 합성한다(멍글마을 자체 편곡). 그래서 음원과 비트 타임라인이 항상 일치한다.
 
+import { SONG_DEFS } from './songs';
+
 export const RUNNER_GAME_VERSION = 1;
 
 export type Lane = -1 | 0 | 1;
@@ -21,7 +23,7 @@ export interface CourseInfo {
   difficulty: number;
   course: string;
   theme: string;
-  /** 연주 데이터가 있는 곡만 플레이 가능 (나머지는 '음원 준비 중') */
+  /** 연주 데이터(악보)와 장애물 패턴이 모두 있는 곡만 true */
   available: boolean;
   patternVersion: number;
   /** 달리는 속도 (m/s) */
@@ -30,10 +32,10 @@ export interface CourseInfo {
 
 export const COURSES: CourseInfo[] = [
   { id: 'elise', order: 1, title: '엘리제를 위하여', composer: '베토벤', difficulty: 1, course: '벚꽃 산책길', theme: 'cherry', available: true, patternVersion: 1, speed: 4.6 },
-  { id: 'danube', order: 2, title: '아름답고 푸른 도나우', composer: '요한 슈트라우스 2세', difficulty: 2, course: '구름 정원', theme: 'cloud', available: false, patternVersion: 0, speed: 8 },
-  { id: 'turkish', order: 3, title: '터키 행진곡', composer: '모차르트', difficulty: 3, course: '장난감 마을', theme: 'toy', available: false, patternVersion: 0, speed: 9 },
-  { id: 'revolutionary', order: 4, title: '혁명 연습곡', composer: '쇼팽', difficulty: 4, course: '별빛 숲길', theme: 'star', available: false, patternVersion: 0, speed: 10 },
-  { id: 'summer', order: 5, title: '사계 중 여름 3악장', composer: '비발디', difficulty: 5, course: '폭풍 질주', theme: 'storm', available: false, patternVersion: 0, speed: 11 },
+  { id: 'danube', order: 2, title: '아름답고 푸른 도나우', composer: '요한 슈트라우스 2세', difficulty: 2, course: '구름 정원', theme: 'cloud', available: true, patternVersion: 1, speed: 4.6 },
+  { id: 'turkish', order: 3, title: '터키 행진곡', composer: '모차르트', difficulty: 3, course: '장난감 마을', theme: 'toy', available: true, patternVersion: 1, speed: 5.0 },
+  { id: 'revolutionary', order: 4, title: '혁명 연습곡', composer: '쇼팽', difficulty: 4, course: '별빛 숲길', theme: 'star', available: true, patternVersion: 1, speed: 5.3 },
+  { id: 'summer', order: 5, title: '사계 중 여름 3악장', composer: '비발디', difficulty: 5, course: '폭풍 질주', theme: 'storm', available: true, patternVersion: 1, speed: 5.5 },
 ];
 export const COURSE_BY_ID = new Map(COURSES.map((c) => [c.id, c]));
 
@@ -87,9 +89,27 @@ const ELISE_PLAN: BarPlan[] = [
 const ELISE_SIXTEENTH = 0.22;
 
 export interface SongNote { t: number; dur: number; midi: number; vel: number; hand: number; bar: number; pos: number; part: number }
-export interface Song { courseId: string; notes: SongNote[]; bars: { t: number; name: string; len: number; vel: number; part: number }[]; beats: number[]; duration: number }
+export interface Song { courseId: string; notes: SongNote[]; bars: { t: number; name: string; len: number; vel: number; part: number }[]; beats: number[]; duration: number; /** 한 마디 16분음표 칸 수 */ barLen: number }
 
 export function buildSong(courseId: string): Song | null {
+  const def = SONG_DEFS[courseId];
+  if (def) {
+    // 다른 곡: 같은 방식 (마디 계획 × 템포 배율)으로 악보 → 시각
+    const notes: SongNote[] = [];
+    const bars: Song['bars'] = [];
+    const beats: number[] = [];
+    let t = 0.6;
+    def.plan.forEach(([name, k, vel, part], bi) => {
+      const s = def.sixteenth * k;
+      bars.push({ t, name, len: s * def.barLen, vel, part });
+      for (let b = 0; b < def.barLen; b += def.beatLen) beats.push(t + b * s);
+      for (const [pos, midi, len, hand] of def.bars[name]) {
+        notes.push({ t: t + pos * s, dur: len * s, midi, vel: vel * (hand ? 0.6 : 1) * (pos === 0 ? 1.08 : 1), hand, bar: bi, pos, part });
+      }
+      t += s * def.barLen;
+    });
+    return { courseId, notes, bars, beats, duration: t + 1.6, barLen: def.barLen };
+  }
   if (courseId !== 'elise') return null;
   const notes: SongNote[] = [];
   const bars: Song['bars'] = [];
@@ -104,7 +124,7 @@ export function buildSong(courseId: string): Song | null {
     }
     t += s * 6;
   });
-  return { courseId, notes, bars, beats, duration: t + 1.6 };
+  return { courseId, notes, bars, beats, duration: t + 1.6, barLen: 6 };
 }
 
 // ---------------------------------------------------------------- 장애물 패턴 (곡별 데이터)
@@ -123,7 +143,7 @@ export interface Obstacle {
   bar: number;
   pos: number;
 }
-export interface Chart { courseId: string; patternVersion: number; obstacles: Obstacle[]; duration: number; maxScore: number; bpm: number }
+export interface Chart { courseId: string; difficulty: RunnerDifficulty; patternVersion: number; obstacles: Obstacle[]; duration: number; maxScore: number; bpm: number }
 
 const ALL: Lane[] = [-1, 0, 1];
 const LANE_CODE: Record<string, Lane> = { L: -1, C: 0, R: 1 };
@@ -158,21 +178,82 @@ const ELISE_PATTERN: PatternRow[] = [
 /** 기본 템포: 3/8박자 점4분음표 기준 BPM (마디마다 ELISE_PLAN 배율로 변함) */
 export const ELISE_BPM = Math.round(60 / (ELISE_SIXTEENTH * 3));
 
-/** 패턴 표 → 판정 시각이 붙은 장애물 목록 */
-export type RunnerDifficulty = 'easy' | 'normal';
-export const DIFFICULTY_LABEL: Record<RunnerDifficulty, string> = { easy: '쉬움', normal: '보통' };
+/** 난이도: EASY(마디 첫 박 위주·조금 느리게) · NORMAL(기본) · HARD(박 사이 장애물 추가·조금 빠르게) */
+export type RunnerDifficulty = 'easy' | 'normal' | 'hard';
+export const DIFFICULTIES: RunnerDifficulty[] = ['easy', 'normal', 'hard'];
+export const DIFFICULTY_LABEL: Record<RunnerDifficulty, string> = { easy: 'EASY', normal: 'NORMAL', hard: 'HARD' };
+export const DIFFICULTY_DESC: Record<RunnerDifficulty, string> = { easy: '마디 첫 박만 · 느리게', normal: '기본 패턴', hard: '박 사이 장애물 추가 · 빠르게' };
+/** 난이도별 달리는 속도 배율 (화면에서 장애물이 다가오는 빠르기 — 판정 시각은 음악 기준 그대로) */
+export const DIFFICULTY_SPEED: Record<RunnerDifficulty, number> = { easy: 0.9, normal: 1, hard: 1.14 };
+export const isDifficulty = (v: unknown): v is RunnerDifficulty => v === 'easy' || v === 'normal' || v === 'hard';
+/** 곡·난이도별 기본 달리기 속도 (m/s) — 장애물이 다가오는 속도이자 거리 경쟁의 기본 페이스 */
+export const courseSpeed = (courseId: string, d: RunnerDifficulty) => (COURSE_BY_ID.get(courseId)?.speed ?? 4.6) * DIFFICULTY_SPEED[d];
+/** 랭킹·최고 기록 구분: NORMAL은 곡 id 그대로(기존 기록 유지), EASY/HARD는 'elise.hard' 처럼 */
+export const rankKey = (courseId: string, d: RunnerDifficulty) => (d === 'normal' ? courseId : `${courseId}.${d}`);
+export function parseRankKey(key: string): { courseId: string; difficulty: RunnerDifficulty } | null {
+  const [c, d] = key.split('.');
+  const difficulty = d === undefined ? 'normal' : d;
+  if (!COURSE_BY_ID.get(c)?.available || !isDifficulty(difficulty) || (d !== undefined && d === 'normal')) return null;
+  return { courseId: c, difficulty };
+}
+export const ALL_RANK_KEYS = COURSES.filter((c) => c.available).flatMap((c) => DIFFICULTIES.map((d) => rankKey(c.id, d)));
+
+/** 엘리제 HARD: 마디 가운데(칸 3)에 점프·숙이기 추가 */
+const ELISE_HARD_EXTRA: PatternRow[] = [
+  [3, 3, 'D'], [5, 3, 'D'], [7, 3, 'D'], [21, 3, 'D'], [11, 3, 'D'], [13, 3, 'D'], [15, 3, 'D'], [17, 3, 'D'],
+  [25, 3, 'D'], [29, 3, 'D'], [33, 3, 'J'], [35, 3, 'D'], [37, 3, 'D'], [39, 3, 'D'],
+];
+
 /**
- * difficulty 'easy': 마디 첫 박(16분음표 칸 0) 장애물만 — 박과 박 사이 장애물이 빠져 여유로움 (함께 달리기용).
- * 랭킹·싱글플레이는 'normal' 그대로.
+ * 패턴 문자열 → 패턴 표. 화분·울타리 레인은 '지금 있어야 할 레인'을 따라가며 정한다:
+ *  화분 = 지금 레인을 막음(가운데면 좌우 아무 쪽, 가장자리면 가운데로) / 울타리 = 바로 옆 레인 하나만 열림
  */
+export function resolveLanes(tokens: string[], mid: number): PatternRow[] {
+  const rows: PatternRow[] = [];
+  let cur: Lane = 0, fenceSide: Lane = 1;
+  const code = (l: Lane) => (l === -1 ? 'L' : l === 1 ? 'R' : 'C');
+  tokens.forEach((tok, bar) => {
+    [...tok].forEach((k, i) => {
+      if (k === '.') return;
+      const pos = i === 0 ? 0 : mid;
+      if (k === 'J' || k === 'D') { rows.push([bar, pos, k]); return; }
+      if (k === 'P') {
+        // 막힌 레인 = 지금 레인. 가운데에서는 오른쪽으로 피한다고 보고(validateChart와 같은 규칙), 가장자리에서는 가운데로
+        rows.push([bar, pos, 'P', code(cur), cur === 0 ? 'S' : cur === -1 ? 'R' : 'L']);
+        cur = cur === 0 ? 1 : 0;
+        return;
+      }
+      if (k === 'F') {
+        // 열린 레인 = 지금 레인 바로 옆 (가운데면 좌우를 번갈아)
+        const open: Lane = cur === 0 ? fenceSide : 0;
+        if (cur === 0) fenceSide = (fenceSide === 1 ? -1 : 1) as Lane;
+        rows.push([bar, pos, 'F', code(open), open > cur ? 'R' : 'L']);
+        cur = open;
+      }
+    });
+  });
+  return rows;
+}
+
+/** 패턴 표 → 판정 시각이 붙은 장애물 목록 */
 export function buildChart(courseId: string, difficulty: RunnerDifficulty = 'normal'): Chart | null {
   const song = buildSong(courseId);
   const info = COURSE_BY_ID.get(courseId);
   if (!song || !info?.available) return null;
-  const rows = difficulty === 'easy' ? ELISE_PATTERN.filter((r) => r[1] === 0) : ELISE_PATTERN;
+  let rows: PatternRow[];
+  if (courseId === 'elise') {
+    // 엘리제: 손으로 정한 패턴 표 (EASY는 마디 첫 박만, HARD는 가운데 칸 추가)
+    rows = difficulty === 'easy' ? ELISE_PATTERN.filter((r) => r[1] === 0)
+      : difficulty === 'hard' ? [...ELISE_PATTERN, ...ELISE_HARD_EXTRA].sort((a, b) => a[0] - b[0] || a[1] - b[1]) : ELISE_PATTERN;
+  } else {
+    const def = SONG_DEFS[courseId];
+    const toks = (difficulty === 'hard' ? def.hard : def.normal).trim().split(/\s+/);
+    // EASY: 마디 첫 글자만 (가운데 칸 장애물 없음) + 4마디 프레이즈의 마지막 마디는 쉬어 감
+    rows = resolveLanes(difficulty === 'easy' ? toks.map((t, i) => (i % 4 === 3 ? '.' : t[0])) : toks, def.mid);
+  }
   const obs: Obstacle[] = rows.map(([bar, pos, k, lane, dir], id) => {
     const b = song.bars[bar];
-    const t = Math.round((b.t + (b.len / 6) * pos) * 1000);
+    const t = Math.round((b.t + (b.len / song.barLen) * pos) * 1000);
     if (k === 'J') return { id, t, kind: 'log', blocked: ALL, safe: [], need: 'jump', bar, pos };
     if (k === 'D') return { id, t, kind: 'ribbon', blocked: ALL, safe: [], need: 'duck', bar, pos };
     const l = LANE_CODE[lane ?? 'C'];
@@ -183,7 +264,10 @@ export function buildChart(courseId: string, difficulty: RunnerDifficulty = 'nor
   // 최대 점수: 모두 PERFECT로 이어 간 경우
   let max = 0;
   obs.forEach((_, i) => { max += Math.round(GRADE_POINTS.perfect * comboMultiplier(i)); });
-  return { courseId, patternVersion: info.patternVersion, obstacles: obs, duration: Math.round(song.duration * 1000), maxScore: max, bpm: ELISE_BPM };
+  return {
+    courseId, difficulty, patternVersion: info.patternVersion, obstacles: obs, duration: Math.round(song.duration * 1000), maxScore: max,
+    bpm: courseId === 'elise' ? ELISE_BPM : SONG_DEFS[courseId].bpm,
+  };
 }
 
 /**

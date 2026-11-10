@@ -17,17 +17,31 @@ export interface DogDriver {
   crouch: number;
   air: number;
   slide: number;
+  /**
+   * 멍글런너 '삐끗' (0~1, 부드럽게 들어왔다 빠짐) — 장애물에 부딪혔을 때 짧게 휘청이는 동작
+   * tripKind 0: 뛰기 실패(앞발이 걸려 몸이 앞으로 쏠림) · 1: 숙이기 실패(고개 움츠림·도리도리) · 2: 옆 충돌(옆으로 기우뚱)
+   */
+  trip: number;
+  tripKind: number;
+  /** 삐끗이 시작된 뒤 지난 시간 (ms) — 흔들림이 점점 잦아들게 */
+  tripT: number;
+  /** 옆 충돌 때 기우는 방향 (-1 / 1) */
+  tripSide: number;
+  /** 귀 처짐 (0~1, 실수했을 때 살짝) — 귀 관절이 있는 강아지만 */
+  earDown: number;
+  /** 달리면서 꼬리를 세게 흔드는 시간 (추월 성공 등, performance.now 기준 ms) */
+  wagUntil: number;
 }
-export const newDogDriver = (): DogDriver => ({ anim: DogAnim.Stand, phase: 0, look: 0, happyUntil: 0, crouch: 0, air: 0, slide: 0 });
+export const newDogDriver = (): DogDriver => ({ anim: DogAnim.Stand, phase: 0, look: 0, happyUntil: 0, crouch: 0, air: 0, slide: 0, trip: 0, tripKind: 0, tripT: 0, tripSide: 1, earDown: 0, wagUntil: 0 });
 
 export const DOG_SCALE = { small: 0.82, medium: 1, large: 1.2 } as const;
 /** 한 걸음(반 주기)당 이동 거리 (scale 1 기준) */
 export const DOG_STEP = { walk: 0.19, run: 0.42 };
 
-export function Dog({ avatar, driver, anchorRef }: { avatar: DogAvatar; driver: MutableRefObject<DogDriver>; anchorRef?: MutableRefObject<THREE.Object3D | null> }) {
+export function Dog({ avatar, driver, anchorRef, earBones }: { avatar: DogAvatar; driver: MutableRefObject<DogDriver>; anchorRef?: MutableRefObject<THREE.Object3D | null>; earBones?: boolean }) {
   const key = JSON.stringify(avatar);
-  const rig = useMemo(() => createDog(avatar), [key]); // eslint-disable-line react-hooks/exhaustive-deps
-  const sm = useRef({ move: 0, run: 0, sit: 0, greet: 0, lie: 0, poop: 0, happy: 0, sleep: 0 });
+  const rig = useMemo(() => createDog(avatar, { earBones }), [key, earBones]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sm = useRef({ move: 0, run: 0, sit: 0, greet: 0, lie: 0, poop: 0, happy: 0, sleep: 0, wag: 0 });
 
   useLayoutEffect(() => {
     if (anchorRef) anchorRef.current = rig.anchor;
@@ -46,6 +60,7 @@ export function Dog({ avatar, driver, anchorRef }: { avatar: DogAvatar; driver: 
     s.sleep += ((d.anim === DogAnim.Sleep ? 1 : 0) - s.sleep) * (1 - Math.exp(-dt * 3));
     s.poop += ((d.anim === DogAnim.Poop ? 1 : 0) - s.poop) * (1 - Math.exp(-dt * 6));
     s.happy += ((performance.now() < d.happyUntil ? 1 : 0) - s.happy) * (1 - Math.exp(-dt * 6));
+    s.wag += ((performance.now() < d.wagUntil ? 1 : 0) - s.wag) * (1 - Math.exp(-dt * 8));
 
     const p = d.phase;
     const walkAmp = 0.65 * s.move * (1 - s.run);
@@ -96,6 +111,8 @@ export function Dog({ avatar, driver, anchorRef }: { avatar: DogAvatar; driver: 
     // 달릴 때 꼬리는 발걸음에 맞춰 아주 살짝만
     rig.tail.rotation.y = (Math.sin(t * wag) * (0.35 + Math.max(s.greet, s.happy) * 0.35) * (1 - s.run * 0.75) + Math.sin(p) * 0.12 * s.run) * (1 - s.poop);
     rig.tail.rotation.x = s.poop * 0.6;
+    // 신나서 꼬리 흔들기 (달리는 중에도 보이게 크고 빠르게, 짧게)
+    if (s.wag > 0.01) { rig.tail.rotation.y += Math.sin(t * 22) * 0.5 * s.wag; rig.tail.rotation.x -= 0.25 * s.wag; }
     rig.tongue.visible = (s.run > 0.4 || s.greet > 0.4 || s.happy > 0.5) && s.sleep < 0.3;
     // 잠자기: 엎드린 채 몸을 살짝 옆으로 말고, 고개를 꼬리 쪽으로 돌려 내려놓고, 꼬리는 몸에 붙임 (천천히 숨쉬기)
     if (s.sleep > 0.01) {
@@ -130,6 +147,47 @@ export function Dog({ avatar, driver, anchorRef }: { avatar: DogAvatar; driver: 
       br.rotation.x = THREE.MathUtils.lerp(br.rotation.x, 1.05, d.slide);
       rig.head.rotation.x += d.slide * 0.12;
       rig.tail.rotation.x = THREE.MathUtils.lerp(rig.tail.rotation.x, -0.3, d.slide);
+    }
+    // 멍글런너 삐끗: 짧게(0.3~0.6초) 휘청였다가 다시 달리기 자세로 (관절을 과하게 꺾지 않음)
+    fl.rotation.z = 0; fr.rotation.z = 0;
+    if (d.trip > 0.001) {
+      const k = d.trip, e = d.tripT / 1000;
+      const settle = Math.max(0, 1 - e / 0.5);
+      const wob = Math.sin(e * 26) * settle; // 빠르게 잦아드는 흔들림
+      if (d.tripKind === 0) {
+        // 뛰기 실패: 앞발이 걸려 몸이 앞으로 쏠리고, 앞발이 엇갈리며 헛디딤 (놀라서 고개는 살짝 듦)
+        rig.body.rotation.x += 0.26 * k;
+        rig.body.position.y -= 0.025 * k;
+        fl.rotation.x = THREE.MathUtils.lerp(fl.rotation.x, 0.5 + wob * 0.35, k);
+        fr.rotation.x = THREE.MathUtils.lerp(fr.rotation.x, 0.15 - wob * 0.35, k);
+        bl.rotation.x = THREE.MathUtils.lerp(bl.rotation.x, -0.3, k * 0.7);
+        br.rotation.x = THREE.MathUtils.lerp(br.rotation.x, -0.15, k * 0.7);
+        rig.head.rotation.x -= 0.14 * k;
+      } else if (d.tripKind === 1) {
+        // 숙이기 실패: 고개를 움츠리고 몸이 살짝 낮아졌다 흔들리고, 고개를 작게 도리도리
+        rig.head.rotation.x += 0.32 * k;
+        rig.head.rotation.y += Math.sin(e * 30) * 0.26 * k * Math.min(1, e / 0.12) * settle;
+        rig.body.position.y -= 0.04 * k;
+        rig.body.rotation.z += wob * 0.1 * k;
+        fl.rotation.x = THREE.MathUtils.lerp(fl.rotation.x, 0.1, k * 0.6);
+        fr.rotation.x = THREE.MathUtils.lerp(fr.rotation.x, 0.1, k * 0.6);
+      } else {
+        // 옆 충돌: 몸이 옆으로 기우뚱, 다리가 엇박자로 버팀
+        rig.body.rotation.z += d.tripSide * 0.22 * k + wob * 0.05 * k;
+        rig.body.position.y -= 0.015 * k;
+        fl.rotation.z = d.tripSide * 0.22 * k; fr.rotation.z = d.tripSide * 0.22 * k;
+        fl.rotation.x = THREE.MathUtils.lerp(fl.rotation.x, wob * 0.4, k * 0.8);
+        fr.rotation.x = THREE.MathUtils.lerp(fr.rotation.x, -wob * 0.4, k * 0.8);
+        rig.head.rotation.z -= d.tripSide * 0.12 * k;
+      }
+      rig.tail.rotation.x = THREE.MathUtils.lerp(rig.tail.rotation.x, -0.25, k);
+    }
+    // 귀: 달릴 때 살짝 들썩이고, 실수하면 뒤로 살짝 처짐 (귀 관절이 있을 때만)
+    for (let i = 0; i < rig.ears.length; i++) {
+      const ear = rig.ears[i], base = ear.userData.baseRot as [number, number, number];
+      const side = ear.name === 'earL' ? 1 : -1;
+      const flap = Math.sin(p * 2 + 0.8) * 0.07 * s.run;
+      ear.rotation.set(base[0] - 0.45 * d.earDown + flap, base[1], base[2] - side * 0.4 * d.earDown);
     }
     // 눈 감기: 쓰다듬기를 받을 때(기분 좋게) · 잠잘 때
     rig.lids.visible = s.happy > 0.5 || d.anim === DogAnim.Sleep;

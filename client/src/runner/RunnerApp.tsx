@@ -5,7 +5,8 @@ import type * as THREE from 'three';
 import { DogAnim, HumanAnim } from '@shared/protocol';
 import { GUEST_DOG, GUEST_HUMAN, type DogAvatar, type HumanAvatar } from '@shared/avatar';
 import {
-  COURSES, JUDGE, RUNNER_GAME_VERSION, buildChart, buildSong, judgeRun, type CourseInfo, type Grade, type RunResult,
+  COURSES, DIFFICULTIES, DIFFICULTY_DESC, DIFFICULTY_LABEL, JUDGE, RUNNER_GAME_VERSION, buildChart, buildSong, courseSpeed, isDifficulty, judgeRun, parseRankKey, rankKey,
+  type Chart, type CourseInfo, type Grade, type RunResult, type RunnerDifficulty,
 } from '@shared/runner';
 import { Dog, newDogDriver } from '../game/models/Dog';
 import { Human, newHumanDriver } from '../game/models/Human';
@@ -20,16 +21,26 @@ import { COUNTDOWN_S, GRADE_COLOR, GRADE_LABEL, RunnerPlay, type PlayGame } from
 import { MultiResultScreen, MultiScreen } from './MultiLobby';
 import { clearResults, joinRoom, leaveRoom, serverNow, useMulti, type StartSignal } from './multi';
 
-interface Bests { course: string; score: number; accuracy: number; maxCombo: number; rank: number; achievedAt: number }
+interface Bests { course: string; score: number; accuracy: number; maxCombo: number; points: number; rank: number; achievedAt: number }
 interface RankEntry { rank: number; userId: number; nickname: string; dogName: string; dogPhoto: string | null; coat: string; score: number; accuracy: number; maxCombo: number; points: number; course: string | null; achievedAt: number }
 interface Settings { calib: number; sfx: boolean; volume: number }
 const SETTINGS_KEY = 'mungle.runner.settings';
+const DIFF_KEY = 'mungle.runner.difficulty';
+function loadDifficulty(): RunnerDifficulty {
+  try { const d = localStorage.getItem(DIFF_KEY); return isDifficulty(d) ? d : 'normal'; } catch { return 'normal'; }
+}
+/** 미리 듣기 길이 (초) */
+const PREVIEW_LEN = 14;
+/** 곡별 재생 시간 (NORMAL 기준 — 난이도와 무관하게 같은 연주) */
+const DURATION: Record<string, number> = Object.fromEntries(COURSES.map((c) => [c.id, buildChart(c.id)?.duration ?? 0]));
 function loadSettings(): Settings {
   try { return { calib: 0, sfx: true, volume: 0.9, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') }; } catch { return { calib: 0, sfx: true, volume: 0.9 }; }
 }
 const stars = (n: number) => '★'.repeat(n) + '☆'.repeat(5 - n);
 const dateLabel = (ts: number) => { const d = new Date(ts); return `${d.getMonth() + 1}/${d.getDate()}`; };
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
+/** 마무리 연출: 서버 결과가 온 뒤 순위 발표를 보여 주는 시간 */
+const FINALE_SHOW_MS = 3600;
 const mmss = (ms: number) => { const s = Math.round(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
 /** 코스 썸네일 (코스 분위기 색 + 상징) */
@@ -85,6 +96,9 @@ export default function RunnerApp() {
   const mStart = useMulti((s) => s.start);
   const mResults = useMulti((s) => s.results);
   const [courseId, setCourseId] = useState('elise');
+  const [difficulty, setDifficulty] = useState<RunnerDifficulty>(loadDifficulty);
+  const [previewing, setPreviewing] = useState<string | null>(null);
+  const preview = useRef<{ p: MusicPlayer; timer: number } | null>(null);
   const [modal, setModal] = useState<'rank' | 'how' | 'settings' | 'reward' | null>(() => (get().runnerRank ? 'rank' : null));
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [bests, setBests] = useState<Bests[]>([]);
@@ -92,11 +106,12 @@ export default function RunnerApp() {
   const [audioErr, setAudioErr] = useState('');
   const [starting, setStarting] = useState(false);
   const [game, setGame] = useState<PlayGame | null>(null);
-  const [result, setResult] = useState<{ r: RunResult; inputs: PlayGame['inputs']; runId: string | null; course: CourseInfo; prevBest: number | null } | null>(null);
+  const [result, setResult] = useState<ResultData | null>(null);
   const course = COURSES.find((c) => c.id === courseId)!;
   const song = useMemo(() => buildSong(courseId), [courseId]);
-  const chart = useMemo(() => buildChart(courseId), [courseId]);
-  const myBest = bests.find((b) => b.course === courseId) ?? null;
+  const chart = useMemo(() => buildChart(courseId, difficulty), [courseId, difficulty]);
+  const myBest = bests.find((b) => b.course === rankKey(courseId, difficulty)) ?? null;
+  const bestOf = (id: string) => bests.find((b) => b.course === rankKey(id, difficulty)) ?? null;
 
   useEffect(() => { setMoveLocked(true, 'runner'); set({ runnerRank: false }); return () => setMoveLocked(false, 'runner'); }, []);
   // 친구 초대 카드에서 '참가' → 그 방으로
@@ -108,11 +123,16 @@ export default function RunnerApp() {
   }, [runnerJoin]);
   // ---------------- 함께 달리기: 서버가 정한 시작 시각에 맞춰 출발 / 결과 받기
   useEffect(() => { if (mStart && (!game?.multi || game.multi.round !== mStart.round)) void startMulti(mStart); }, [mStart]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 서버 최종 결과 → 플레이 화면에서 순위 발표 연출(최종 거리 순서로 선 강아지 · 1위 기쁨) 뒤 결과 화면으로
   useEffect(() => {
     if (!mResults || !game?.multi || mResults.round !== game.multi.round) return;
     game.ended = true;
+    game.results = mResults.results;
+    if (game.finaleAt === undefined) game.finaleAt = performance.now();
     window.setTimeout(() => game.player.stop(), 600);
-    setScreen('mresult');
+    if (screen !== 'play') { setScreen('mresult'); return; }
+    const id = window.setTimeout(() => setScreen((s) => (s === 'play' || s === 'mwait' ? 'mresult' : s)), FINALE_SHOW_MS);
+    return () => window.clearTimeout(id);
   }, [mResults]); // eslint-disable-line react-hooks/exhaustive-deps
   const loadSummary = () => { if (!practiceOnly) api<{ bests: Bests[] }>('/api/runner/summary').then((r) => setBests(r.bests)).catch(() => {}); };
   useEffect(loadSummary, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -123,6 +143,23 @@ export default function RunnerApp() {
     renderSong(song).then(setAudio).catch(() => setAudioErr('이 기기에서 음악을 만들지 못했어요.'));
   }, [song]);
   useEffect(() => { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* 저장 불가 */ } }, [settings]);
+  useEffect(() => { try { localStorage.setItem(DIFF_KEY, difficulty); } catch { /* 저장 불가 */ } }, [difficulty]);
+  // 미리 듣기: 곡을 바꾸거나 로비를 떠나면 멈춤
+  function stopPreview() {
+    if (preview.current) { window.clearTimeout(preview.current.timer); preview.current.p.close(); preview.current = null; }
+    setPreviewing(null);
+  }
+  useEffect(() => stopPreview, [courseId]);
+  useEffect(() => { if (screen !== 'lobby') stopPreview(); }, [screen]);
+  async function togglePreview() {
+    if (previewing) { stopPreview(); return; }
+    if (!audio) return;
+    stopPreview();
+    const p = new MusicPlayer(settings.volume);
+    preview.current = { p, timer: window.setTimeout(stopPreview, (PREVIEW_LEN + 0.3) * 1000) };
+    setPreviewing(courseId);
+    try { await p.preview(audio, 0, PREVIEW_LEN); } catch { stopPreview(); toast('이 기기에서 소리를 재생하지 못했어요.', 'error'); }
+  }
   useEffect(() => () => game?.player.close(), [game]);
 
   const exit = () => { game?.player.close(); set({ runner: false }); };
@@ -132,12 +169,13 @@ export default function RunnerApp() {
     setStarting(true);
     let runId: string | null = null;
     if (!practiceOnly) {
-      try { runId = (await api<{ runId: string }>('/api/runner/start', { body: { courseId } })).runId; }
+      try { runId = (await api<{ runId: string }>('/api/runner/start', { body: { courseId, difficulty } })).runId; }
       catch (e) { toast(`${(e as Error).message} 이번 판은 연습으로 진행해요.`, 'error'); }
     }
     // 버튼을 누른 순간 오디오를 켬 (모바일 자동 재생 제한). 출발 카운트다운 뒤에 음악 시작
     const player = new MusicPlayer(settings.volume);
-    const g: PlayGame = { chart, song, course, player, inputs: [], calib: settings.calib, sfx: settings.sfx, paused: false, ended: false, live: null, lastEvent: null, stumbleAt: -1e9 };
+    stopPreview();
+    const g: PlayGame = { chart, song, course: { ...course, speed: courseSpeed(course.id, difficulty) }, player, inputs: [], calib: settings.calib, sfx: settings.sfx, paused: false, ended: false, live: null, lastEvent: null };
     (g as PlayGame & { runId: string | null }).runId = runId;
     await player.play(audio, 0, COUNTDOWN_S);
     game?.player.close();
@@ -158,7 +196,7 @@ export default function RunnerApp() {
     const player = prepared.current ?? new MusicPlayer(settings.volume);
     prepared.current = null;
     const g: PlayGame = {
-      chart: ch, song: sg, course: c, player, inputs: [...(sig.myInputs ?? [])], calib: settings.calib, sfx: settings.sfx, paused: false, ended: false, live: null, lastEvent: null, stumbleAt: -1e9,
+      chart: ch, song: sg, course: { ...c, speed: courseSpeed(c.id, sig.difficulty) }, player, inputs: [...(sig.myInputs ?? [])], calib: settings.calib, sfx: settings.sfx, paused: false, ended: false, live: null, lastEvent: null,
       multi: { round: sig.round, myId: me.id, players: room.players },
     };
     // 서버 시작 시각까지 남은 시간만큼 기다렸다가 재생 (늦게 들어왔으면 그만큼 건너뛰고 재생)
@@ -172,10 +210,15 @@ export default function RunnerApp() {
 
   function finish() {
     if (!game) return;
-    // 함께 달리기: 서버 최종 판정을 기다림
-    if (game.multi) { setScreen(useMulti.getState().results?.round === game.multi.round ? 'mresult' : 'mwait'); return; }
+    // 함께 달리기: 플레이 화면에서 마무리 연출(전체 보기)을 하며 서버 최종 판정을 기다림 — 너무 늦으면 대기 화면
+    if (game.multi) {
+      game.finaleAt ??= performance.now();
+      const round = game.multi.round;
+      window.setTimeout(() => { if (useMulti.getState().results?.round !== round) setScreen((s) => (s === 'play' ? 'mwait' : s)); }, 9000);
+      return;
+    }
     const r = judgeRun(game.chart, game.inputs);
-    setResult({ r, inputs: [...game.inputs], runId: (game as PlayGame & { runId: string | null }).runId, course: game.course, prevBest: myBest?.score ?? null });
+    setResult({ r, inputs: [...game.inputs], runId: (game as PlayGame & { runId: string | null }).runId, course: game.course, chart: game.chart, prevBest: myBest?.score ?? null });
     window.setTimeout(() => { game.player.stop(); }, 1200);
     setScreen('result');
   }
@@ -208,36 +251,51 @@ export default function RunnerApp() {
                 <div className="font-display text-base text-cocoa drop-shadow-[0_1px_0_#fff]">{guest ? '방문자 강아지' : me.dogName}</div>
                 <div className="text-[11px] text-cocoa-soft">최고 {myBest ? myBest.score.toLocaleString() : '—'}{myBest ? ` · ${myBest.rank}위` : ''}</div>
               </div>
-              <div className="absolute right-2 top-2 rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-display">{sel + 1}코스 · {course.course}</div>
+              <div className="absolute right-2 top-2 rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-display">{sel + 1}코스 · {course.course} · {DIFFICULTY_LABEL[difficulty]}</div>
             </div>
             {/* 코스 목록 (세로) + 게임 시작 */}
             <div className="flex-1 min-h-0 flex flex-col md:max-w-[420px]">
               <div className="flex-1 min-h-0 overflow-y-auto scroll-soft space-y-1.5 pr-0.5" role="listbox" aria-label="코스 선택">
                 {COURSES.map((c, i) => {
                   const on = c.id === courseId;
-                  const b = bests.find((x) => x.course === c.id);
+                  const b = bestOf(c.id);
                   return (
-                    <button key={c.id} role="option" aria-selected={on} aria-disabled={!c.available} data-testid={`course-${c.id}`}
-                      className={`w-full flex items-center gap-2.5 rounded-2xl p-1.5 pr-3 text-left border-2 ${on ? 'border-[#f39a7b] bg-white shadow-sm' : 'border-transparent bg-white/70'} ${c.available ? '' : 'text-cocoa-soft'}`}
-                      onClick={() => (c.available ? setCourseId(c.id) : toast('이 곡은 저작권 문제가 없는 연주를 준비하고 있어요. 조금만 기다려 주세요!'))}>
-                      <span className="relative w-14 h-14 rounded-xl grid place-items-center text-2xl shrink-0" style={{ background: THUMB[c.theme].bg }}>
-                        {THUMB[c.theme].icon}
-                        {!c.available && <span className="absolute inset-0 rounded-xl bg-[#5a403355] grid place-items-center text-lg">🔒</span>}
-                      </span>
-                      <span className="flex-1 min-w-0 leading-tight">
-                        <span className="block text-[11px] text-cocoa-soft">{i + 1}. {c.course}</span>
-                        <span className="block font-display text-[15px] truncate">{c.composer} — {c.title}</span>
-                        <span className="block text-[11px] text-[#f2836b]">{stars(c.difficulty)}{!c.available ? <span className="text-cocoa-soft"> · 🎵 음원 준비 중</span> : b ? <span className="text-cocoa-soft"> · 최고 {b.score.toLocaleString()}</span> : null}</span>
-                      </span>
-                      {on && c.available && <span className="w-8 h-8 rounded-full bg-[#f39a7b] text-white grid place-items-center text-sm shrink-0">▶</span>}
-                    </button>
+                    <div key={c.id} role="option" aria-selected={on} data-testid={`course-${c.id}`}
+                      className={`rounded-2xl border-2 transition-colors ${on ? 'border-[#f39a7b] bg-white shadow-sm' : 'border-transparent bg-white/70'}`}>
+                      <button className="w-full flex items-center gap-2.5 p-1.5 pr-3 text-left" onClick={() => setCourseId(c.id)} aria-label={`${c.title} 선택`}>
+                        <span className="w-14 h-14 rounded-xl grid place-items-center text-2xl shrink-0" style={{ background: THUMB[c.theme].bg }}>{THUMB[c.theme].icon}</span>
+                        <span className="flex-1 min-w-0 leading-tight">
+                          <span className="block text-[11px] text-cocoa-soft">{i + 1}. {c.course}</span>
+                          <span className="block font-display text-[15px] truncate">{c.title}</span>
+                          <span className="block text-[11px] text-cocoa-soft truncate">{c.composer} · ⏱ {mmss(DURATION[c.id])} · <span className="text-[#f2836b]">{stars(c.difficulty)}</span></span>
+                        </span>
+                        <span className="shrink-0 text-right leading-tight">
+                          {b ? <><span className="block text-[10px] text-cocoa-soft">최고</span><span className="block font-display text-xs tabular-nums text-[#f2836b]">{b.score.toLocaleString()}</span></> : <span className="block text-[10px] text-cocoa-soft">기록 없음</span>}
+                        </span>
+                      </button>
+                      {on && (
+                        <div className="flex items-center gap-1.5 px-1.5 pb-1.5">
+                          <div className="flex-1 grid grid-cols-3 gap-0.5 bg-cream-2 rounded-full p-0.5" role="radiogroup" aria-label="난이도">
+                            {DIFFICULTIES.map((d) => (
+                              <button key={d} role="radio" aria-checked={difficulty === d} data-testid={`diff-${d}`}
+                                className={`rounded-full py-1.5 text-xs font-display ${difficulty === d ? 'bg-[#f39a7b] text-white shadow-sm' : 'text-cocoa-soft'}`}
+                                onClick={() => setDifficulty(d)}>{DIFFICULTY_LABEL[d]}</button>
+                            ))}
+                          </div>
+                          <button className="shrink-0 rounded-full bg-[#eef5fb] text-[#4b6a86] px-3 py-1.5 text-xs font-display disabled:opacity-50" data-testid="runner-preview"
+                            disabled={!audio && !previewing} onClick={() => void togglePreview()} aria-pressed={previewing === c.id}>
+                            {previewing === c.id ? '⏹ 그만 듣기' : !audio ? '🎹 준비 중' : '🎧 미리 듣기'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>
-              <div className="text-[11px] text-cocoa-soft text-center mt-1.5 shrink-0">{chart ? `${course.composer} · ${chart.bpm} BPM · 장애물 ${chart.obstacles.length}개 · ${mmss(chart.duration)}` : ''}</div>
+              <div className="text-[11px] text-cocoa-soft text-center mt-1.5 shrink-0" data-testid="runner-chart-info">{chart ? `${DIFFICULTY_LABEL[difficulty]} (${DIFFICULTY_DESC[difficulty]}) · ${chart.bpm} BPM · 장애물 ${chart.obstacles.length}개 · ${mmss(chart.duration)}` : ''}</div>
               <div className="grid grid-cols-2 gap-2 mt-1 shrink-0">
-                <button className="btn btn-coral py-3.5 text-lg shadow-[0_4px_0_#d9705f] leading-tight" data-testid="runner-start" disabled={!audio || starting || !course.available} onClick={() => void start()}>
-                  {!course.available ? '🎵 음원 준비 중' : audioErr || (!audio ? '🎹 준비 중…' : starting ? '출발 준비 중…' : <>🐶 혼자 달리기</>)}
+                <button className="btn btn-coral py-3.5 text-lg shadow-[0_4px_0_#d9705f] leading-tight" data-testid="runner-start" disabled={!audio || starting || !chart} onClick={() => void start()}>
+                  {audioErr || (!audio ? '🎹 연주 준비 중…' : starting ? '출발 준비 중…' : <>🐶 혼자 달리기</>)}
                 </button>
                 <button className="btn py-3.5 text-lg text-white bg-[#b9a6e6] shadow-[0_4px_0_#9b86cf] leading-tight disabled:opacity-60" data-testid="runner-multi" disabled={practiceOnly}
                   onClick={() => setScreen('multi')} title={practiceOnly ? '함께 달리기는 게임 서버에서 회원만 이용할 수 있어요' : '친구와 최대 4명 대결'}>
@@ -271,32 +329,33 @@ export default function RunnerApp() {
           onAgain={() => { clearResults(); game?.player.close(); setGame(null); setScreen('multi'); }}
           onLeave={() => { clearResults(); game?.player.close(); setGame(null); void leaveRoom(); setScreen('lobby'); }} />
       )}
-      {modal === 'rank' && <RankingModal courseId={courseId} onClose={() => setModal(null)} />}
+      {modal === 'rank' && <RankingModal courseId={courseId} difficulty={difficulty} onClose={() => setModal(null)} />}
       {modal === 'how' && <HowModal onClose={() => setModal(null)} />}
-      {modal === 'reward' && <RewardModal bests={bests} practiceOnly={practiceOnly} onClose={() => setModal(null)} />}
+      {modal === 'reward' && <RewardModal bests={bests} courseId={courseId} practiceOnly={practiceOnly} onClose={() => setModal(null)} />}
       {modal === 'settings' && <SettingsModal s={settings} onChange={setSettings} onClose={() => setModal(null)} />}
     </div>
   );
 }
 
 // ---------------------------------------------------------------- 결과
+interface ResultData { r: RunResult; inputs: PlayGame['inputs']; runId: string | null; course: CourseInfo; chart: Chart; prevBest: number | null }
 interface Saved { newBest: boolean; best: { score: number }; rank: number; prevRank: number | null; total: number; coin?: { amount: number } | null }
 function ResultScreen({ res, avatar, human, practiceOnly, onSaved, onRetry, onCourses, onExit, onRanking }: {
-  res: { r: RunResult; inputs: PlayGame['inputs']; runId: string | null; course: CourseInfo; prevBest: number | null }; avatar: DogAvatar; human: HumanAvatar; practiceOnly: boolean;
+  res: ResultData; avatar: DogAvatar; human: HumanAvatar; practiceOnly: boolean;
   onSaved: () => void; onRetry: () => void; onCourses: () => void; onExit: () => void; onRanking: () => void;
 }) {
-  const { r, course } = res;
+  const { r, course, chart } = res;
+  const key = rankKey(course.id, chart.difficulty);
   const [saved, setSaved] = useState<Saved | null>(null);
   const [state, setState] = useState<'idle' | 'saving' | 'error' | 'practice'>(res.runId ? 'idle' : 'practice');
   const [err, setErr] = useState('');
   const [top, setTop] = useState<RankEntry[]>([]);
-  const chart = useMemo(() => buildChart(course.id)!, [course.id]);
   async function save() {
     if (!res.runId) return;
     setState('saving'); setErr('');
     try {
       const s = await api<Saved & { result: { score: number } }>('/api/runner/finish', {
-        body: { runId: res.runId, courseId: course.id, gameVersion: RUNNER_GAME_VERSION, patternVersion: chart.patternVersion, inputs: res.inputs },
+        body: { runId: res.runId, courseId: course.id, difficulty: chart.difficulty, gameVersion: RUNNER_GAME_VERSION, patternVersion: chart.patternVersion, inputs: res.inputs },
       });
       setSaved(s); setState('idle'); onSaved();
     } catch (e) {
@@ -308,8 +367,8 @@ function ResultScreen({ res, avatar, human, practiceOnly, onSaved, onRetry, onCo
   useEffect(() => { void save(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (DEMO || state === 'saving' || practiceOnly) return;
-    api<{ entries: RankEntry[] }>(`/api/runner/ranking?scope=course&course=${course.id}&limit=3`).then((x) => setTop(x.entries)).catch(() => {});
-  }, [state, course.id, practiceOnly]);
+    api<{ entries: RankEntry[] }>(`/api/runner/ranking?scope=course&course=${key}&limit=3`).then((x) => setTop(x.entries)).catch(() => {});
+  }, [state, key, practiceOnly]);
   const up = saved && saved.prevRank !== null ? saved.prevRank - saved.rank : null;
   const best = saved ? saved.best.score : Math.max(r.score, res.prevBest ?? 0);
   return (
@@ -317,7 +376,7 @@ function ResultScreen({ res, avatar, human, practiceOnly, onSaved, onRetry, onCo
       <div className="max-w-[440px] mx-auto">
         <div className="text-center">
           <div className="inline-block font-display text-2xl text-white bg-[#f39a7b] rounded-full px-6 py-1 shadow-[0_3px_0_#d9705f]">🏁 완주!</div>
-          <div className="text-sm text-cocoa-soft mt-1">{course.course} · {course.composer} — {course.title}</div>
+          <div className="text-sm text-cocoa-soft mt-1">{course.course} · {course.composer} — {course.title} · <b className="font-display text-[#f2836b]">{DIFFICULTY_LABEL[chart.difficulty]}</b></div>
         </div>
         <div className="relative">
           <Stage avatar={avatar} human={human} happy className="w-full h-[170px]" />
@@ -352,7 +411,7 @@ function ResultScreen({ res, avatar, human, practiceOnly, onSaved, onRetry, onCo
             )}
             {saved && (
               <button className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#fde3d6] py-2" onClick={onRanking} data-testid="runner-rank">
-                🏆 코스 랭킹 <b className="font-display text-lg">{saved.rank}위</b>
+                🏆 {DIFFICULTY_LABEL[chart.difficulty]} 랭킹 <b className="font-display text-lg">{saved.rank}위</b>
                 {up !== null && up > 0 && <span className="text-[#e2604f] font-display">▲{up}</span>}
                 {up !== null && up < 0 && <span className="text-[#6d84a3] font-display">▼{-up}</span>}
                 {saved.prevRank === null && <span className="text-[11px] rounded-full bg-white px-2">첫 기록</span>}
@@ -418,10 +477,12 @@ function Podium({ list }: { list: RankEntry[] }) {
   );
 }
 
-function RankingModal({ courseId, onClose }: { courseId: string; onClose: () => void }) {
+function RankingModal({ courseId, difficulty, onClose }: { courseId: string; difficulty: RunnerDifficulty; onClose: () => void }) {
   type Tab = 'all' | 'weekly' | 'friends' | 'mine';
   const [tab, setTab] = useState<Tab>('all');
   const [cid, setCid] = useState(courseId);
+  const [diff, setDiff] = useState<RunnerDifficulty>(difficulty);
+  const key = rankKey(cid, diff);
   const [data, setData] = useState<{ entries: RankEntry[]; me: RankEntry | null; total: number; weekStart: number | null } | null>(null);
   const [err, setErr] = useState('');
   const meId = useStore((s) => s.me?.id);
@@ -431,9 +492,9 @@ function RankingModal({ courseId, onClose }: { courseId: string; onClose: () => 
     if (DEMO) { setErr('미리보기에서는 랭킹을 볼 수 없어요. (게임 서버에서 동작)'); return; }
     if (overall && tab === 'weekly') { setErr('주간 랭킹은 코스를 골라서 볼 수 있어요.'); return; }
     const scope = overall ? 'overall' : tab === 'weekly' ? 'weekly' : 'course';
-    const q = `scope=${scope}&course=${overall ? 'elise' : cid}&limit=50${tab === 'friends' ? '&friends=1' : ''}${tab === 'mine' ? '&around=1' : ''}`;
+    const q = `scope=${scope}&course=${overall ? 'elise' : key}&limit=50${tab === 'friends' ? '&friends=1' : ''}${tab === 'mine' ? '&around=1' : ''}`;
     api<typeof data>(`/api/runner/ranking?${q}`).then(setData).catch((e) => setErr((e as Error).message));
-  }, [tab, cid, overall]);
+  }, [tab, key, overall]);
   const tabs: [Tab, string][] = [['all', '전체'], ['weekly', '주간'], ['friends', '친구'], ['mine', '내 순위']];
   const list = data?.entries ?? [];
   const podium = tab !== 'mine' && list.length > 0;
@@ -448,10 +509,17 @@ function RankingModal({ courseId, onClose }: { courseId: string; onClose: () => 
       </div>
       <select className="w-full mt-2 rounded-xl border border-[#f1e2d2] bg-white px-3 py-2 text-sm" value={cid} onChange={(e) => setCid(e.target.value)} aria-label="코스 선택" data-testid="rank-course">
         {COURSES.filter((c) => c.available).map((c) => <option key={c.id} value={c.id}>{c.order}. {c.course} · {c.title}</option>)}
-        <option value="overall">모든 코스 합산 (포인트)</option>
+        <option value="overall">모든 코스·난이도 합산 (포인트)</option>
       </select>
+      {!overall && (
+        <div className="grid grid-cols-3 gap-1 mt-1.5 bg-cream-2 rounded-full p-0.5" role="radiogroup" aria-label="난이도">
+          {DIFFICULTIES.map((d) => (
+            <button key={d} role="radio" aria-checked={diff === d} data-testid={`rank-diff-${d}`} className={`rounded-full py-1 text-xs font-display ${diff === d ? 'bg-white shadow-sm text-[#e2604f]' : 'text-cocoa-soft'}`} onClick={() => setDiff(d)}>{DIFFICULTY_LABEL[d]}</button>
+          ))}
+        </div>
+      )}
       <p className="text-[11px] text-cocoa-soft mt-1.5">
-        {overall ? '코스마다 점수 체계가 달라, 코스별 최고 기록을 0~1000점으로 환산한 포인트의 합으로 순위를 매겨요.'
+        {overall ? '코스·난이도마다 점수 체계가 달라, 각 최고 기록을 0~1000점으로 환산한 포인트의 합으로 순위를 매겨요.'
           : tab === 'weekly' ? `이번 주 기록 (매주 월요일 00:00 한국 시간에 새로 시작${data?.weekStart ? ` · ${dateLabel(data.weekStart)}~` : ''})`
             : tab === 'mine' ? '내 순위 위아래 5명씩 보여 줘요.'
               : '서버가 입력 기록으로 다시 판정한 최고 기록 1개만 반영 · 같은 점수면 정확도 → 최고 콤보 → 먼저 기록한 순'}
@@ -475,17 +543,20 @@ function RankingModal({ courseId, onClose }: { courseId: string; onClose: () => 
   );
 }
 
-/** 보상: 내 최고 기록으로 계산한 배지 (서버에 저장된 기록 기준) */
-function RewardModal({ bests, practiceOnly, onClose }: { bests: Bests[]; practiceOnly: boolean; onClose: () => void }) {
-  const chart = useMemo(() => buildChart('elise')!, []);
-  const b = bests.find((x) => x.course === 'elise');
+/** 보상: 내 최고 기록(서버 검증 기록)으로 계산한 곡별 배지 — 난이도별 기록 중 가장 좋은 것으로 판단 */
+function RewardModal({ bests, courseId, practiceOnly, onClose }: { bests: Bests[]; courseId: string; practiceOnly: boolean; onClose: () => void }) {
+  const [cid, setCid] = useState(courseId);
+  const c = COURSES.find((x) => x.id === cid)!;
+  const mine = bests.map((b) => ({ b, k: parseRankKey(b.course) })).filter((x) => x.k?.courseId === cid);
+  const allCombo = mine.some(({ b, k }) => { const ch = buildChart(cid, k!.difficulty); return !!ch && b.maxCombo >= ch.obstacles.length; });
   const items: [string, string, boolean][] = [
-    ['🌸', '벚꽃 산책길 첫 완주', !!b],
-    ['⭐', `점수 ${Math.round(chart.maxScore * 0.5).toLocaleString()}점 넘기기`, !!b && b.score >= chart.maxScore * 0.5],
-    ['🌟', `점수 ${Math.round(chart.maxScore * 0.8).toLocaleString()}점 넘기기`, !!b && b.score >= chart.maxScore * 0.8],
-    ['🎯', '정확도 90% 이상', !!b && b.accuracy >= 0.9],
-    ['🔥', `${chart.obstacles.length}콤보 (올 콤보)`, !!b && b.maxCombo >= chart.obstacles.length],
-    ['🏆', '코스 랭킹 10위 안', !!b && b.rank <= 10],
+    [THUMB[c.theme].icon, `${c.course} 첫 완주`, mine.length > 0],
+    ['⭐', '만점의 50% 넘기기', mine.some(({ b }) => b.points >= 500)],
+    ['🌟', '만점의 80% 넘기기', mine.some(({ b }) => b.points >= 800)],
+    ['🎯', '정확도 90% 이상', mine.some(({ b }) => b.accuracy >= 0.9)],
+    ['🔥', '올 콤보', allCombo],
+    ['💪', 'HARD 완주', mine.some(({ k }) => k!.difficulty === 'hard')],
+    ['🏆', '랭킹 10위 안 (아무 난이도)', mine.some(({ b }) => b.rank <= 10)],
   ];
   return (
     <Modal onClose={onClose} className="max-w-[400px] p-5 text-sm">
@@ -494,6 +565,9 @@ function RewardModal({ bests, practiceOnly, onClose }: { bests: Bests[]; practic
         <button className="btn btn-ghost w-10 h-10" onClick={onClose} aria-label="닫기">✕</button>
       </div>
       {practiceOnly && <p className="rounded-xl bg-[#eef5fb] text-[#4b6a86] px-3 py-2 mb-2 text-xs">로그인한 회원의 공식 기록으로 배지를 받아요.</p>}
+      <select className="w-full mb-2 rounded-xl border border-[#f1e2d2] bg-white px-3 py-2 text-sm" value={cid} onChange={(e) => setCid(e.target.value)} aria-label="곡 선택">
+        {COURSES.map((x) => <option key={x.id} value={x.id}>{x.order}. {x.course} · {x.title}</option>)}
+      </select>
       <div className="grid grid-cols-2 gap-2" data-testid="runner-rewards">
         {items.map(([icon, label, ok]) => (
           <div key={label} className={`rounded-2xl p-3 text-center ${ok ? 'bg-[#fde3d6]' : 'bg-cream-2 opacity-60'}`}>
@@ -503,7 +577,7 @@ function RewardModal({ bests, practiceOnly, onClose }: { bests: Bests[]; practic
           </div>
         ))}
       </div>
-      <p className="text-[11px] text-cocoa-soft mt-2">다른 코스는 음원이 준비되면 배지가 추가돼요.</p>
+      <p className="text-[11px] text-cocoa-soft mt-2">점수는 난이도마다 만점이 달라 만점 대비 비율로 계산해요.</p>
     </Modal>
   );
 }
@@ -528,9 +602,12 @@ function HowModal({ onClose }: { onClose: () => void }) {
       </div>
       <div className="mt-2 rounded-xl bg-cream-2 px-3 py-2">
         판정: PERFECT ±{JUDGE.perfect}ms (100점) · GREAT ±{JUDGE.great}ms (70점) · GOOD ±{JUDGE.good}ms (40점) · MISS 0점<br />
-        콤보 10마다 점수 +10% (최대 +100%). 부딪히면 강아지가 비틀거리고 콤보가 초기화되지만 계속 달려요.
+        콤보 10마다 점수 +10% (최대 +100%). 부딪히면 강아지가 삐끗하고 콤보가 초기화되지만 계속 달려요.
       </div>
-      <p className="mt-2 rounded-xl bg-[#f1ecfa] px-3 py-2">🐾 <b>함께 달리기</b>: 최대 4명이 각자 자기 트랙(3레인)에서 같은 음악·같은 장애물로 달려요. 다른 트랙으로는 넘어갈 수 없고, 점수·콤보·순위가 실시간으로 보여요.</p>
+      <div className="mt-2 rounded-xl bg-cream-2 px-3 py-2">
+        ⭐ 난이도: <b>EASY</b> 마디 첫 박만 · 조금 느리게 / <b>NORMAL</b> 기본 패턴 / <b>HARD</b> 박 사이 장애물 추가 · 조금 빠르게. 장애물은 언제나 음악의 음표 위에 놓여요.
+      </div>
+      <p className="mt-2 rounded-xl bg-[#f1ecfa] px-3 py-2">🐾 <b>함께 달리기</b>: 최대 4명이 각자 자기 트랙(3레인)에서 같은 음악·같은 장애물로 달려요. PERFECT·GREAT를 받으면 강아지가 조금씩 빨라지고, MISS를 하면 잠깐 주춤해 실제로 거리가 벌어져요. 순위는 <b>달린 거리</b>로 정하고, 뒤처져도 연속 성공으로 다시 따라잡을 수 있어요.</p>
       <p className="mt-2 text-xs text-cocoa-soft">소리가 늦게 들리는 기기(블루투스 이어폰 등)는 설정의 ‘판정 보정’을 조절해 주세요. 일시정지했다가 이어 해도 음악과 장애물은 그대로 맞아요.</p>
     </Modal>
   );
