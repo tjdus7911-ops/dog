@@ -15,6 +15,7 @@ import { geo } from '../game/lowpoly';
 import { FurnitureModel } from '../game/Furniture';
 import { HomeRoom } from '../game/Interiors';
 import { setSpace } from '../game/space';
+import { onLayoutChanged } from '../game/furniture';
 import { joinPark } from '../net/socket';
 import { timeLabel } from './common';
 import { DEMO } from '../demo';
@@ -94,6 +95,7 @@ export function HomeEditor() {
       const r = await api<{ home: HomeView }>('/api/home/me/layout', { method: 'PUT', body: { layout: draft } });
       set({ home: r.home, homeEdit: false });
       setSpace('home', r.home.layout);
+      onLayoutChanged(r.home.layout);
       toast('집 꾸미기를 저장했어요 🏠');
     } catch (e) { toast((e as Error).message, 'error'); } finally { setSaving(false); }
   }

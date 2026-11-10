@@ -215,6 +215,14 @@ function buildHuman(a: HumanAvatar, bald = false): THREE.Group {
     // 얇고 자연스러운 눈썹 (살짝 둥근 아치)
     part(head, shape.torus(0.048, 0.0052, 1.05, 6, 16), brow, onSurface(HC, HR, s * 0.34, FACE.browPitch, 1.0), [1, 0.5, 1], [0, s * 0.34, Math.PI / 2 - 0.52]);
   }
+  // 감은 눈 (잠자기): 눈을 살색으로 덮고 아래로 둥근 속눈썹 선 — 평소에는 숨김 (rig.lids)
+  const lids = bone(head, 'lids');
+  for (const s of [-1, 1]) {
+    const yaw = s * FACE.eyeYaw, pitch = FACE.eyePitch;
+    // 눈(두께 0.012)보다 조금 두꺼운 납작한 눈꺼풀 + 그 위에 감은 눈 선
+    part(lids, shape.ball(16, 12), a.skin, onSurface(HC, HR, yaw, pitch, 0.998), [0.04, 0.05, 0.017], [-pitch, yaw, 0]);
+    part(lids, shape.torus(0.028, 0.006, Math.PI * 0.8, 6, 14), '#3a2a24', onSurface(HC, HR, yaw, pitch - 0.01, 1.058), 1, [-pitch, yaw, Math.PI + Math.PI * 0.1]);
+  }
   // 코 (아주 작게)
   part(head, shape.ball(12, 10), shade(a.skin, -0.05), onSurface(HC, HR, 0, -0.2, 0.995), [0.012, 0.009, 0.009]);
   // 입: 부드러운 미소 선
@@ -374,11 +382,13 @@ export interface HumanRig {
   armL: THREE.Object3D;
   armR: THREE.Object3D;
   hand: THREE.Object3D;
+  /** 감은 눈 (잠자기) */
+  lids: THREE.Object3D;
 }
 
 /** bald: 레퍼런스 비교용 민머리 (게임에서는 사용하지 않음) */
 export function createHuman(a: HumanAvatar, bald = false): HumanRig {
   const root = cache(JSON.stringify(a) + (bald ? ':bald' : ''), () => buildHuman(a, bald));
   const g = (n: string) => root.getObjectByName(n)!;
-  return { root, body: g('body'), torso: g('torso'), head: g('head'), legL: g('legL'), legR: g('legR'), armL: g('armL'), armR: g('armR'), hand: g('hand') };
+  return { root, body: g('body'), torso: g('torso'), head: g('head'), legL: g('legL'), legR: g('legR'), armL: g('armL'), armR: g('armR'), hand: g('hand'), lids: g('lids') };
 }

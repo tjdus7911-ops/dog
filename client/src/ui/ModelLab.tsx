@@ -17,7 +17,7 @@ const corgi: DogAvatar = { ...BREED_PRESETS[q.get('breed') ?? 'corgi'].dog, harn
 // 동작 확인: act=pet|scoop|toss (사람) · dog=poop|happy (강아지) · bag=1 (배변봉투) · low=0~1 (쓰다듬는 높이)
 const ACT = q.get('act');
 const DOGACT = q.get('dog');
-const HUMAN_ANIM: Record<string, number> = { pet: HumanAnim.Pet, scoop: HumanAnim.Scoop, toss: HumanAnim.Toss };
+const HUMAN_ANIM: Record<string, number> = { pet: HumanAnim.Pet, scoop: HumanAnim.Scoop, toss: HumanAnim.Toss, lie: HumanAnim.Lie, sleep: HumanAnim.Sleep, sit: HumanAnim.Sit };
 
 function Cam() {
   const { camera } = useThree();
@@ -38,6 +38,7 @@ function Cam() {
 
 function Actors() {
   const hd = useRef(newHumanDriver()), dd = useRef(newDogDriver());
+  const hg = useRef<any>(null);
   hd.current.leash = false;
   const walk = q.has('walk');
   hd.current.bag = q.has('bag');
@@ -45,8 +46,9 @@ function Actors() {
   const lastHeart = useRef(0);
   useFrame((_, dt) => {
     hd.current.anim = ACT ? HUMAN_ANIM[ACT] ?? 0 : walk ? HumanAnim.Walk : HumanAnim.Idle; hd.current.phase += walk ? dt * 7 : 0;
-    dd.current.anim = DOGACT === 'poop' ? DogAnim.Poop : walk ? DogAnim.Walk : DogAnim.Stand; dd.current.phase += walk ? dt * 11 : 0;
+    dd.current.anim = DOGACT === 'poop' ? DogAnim.Poop : DOGACT === 'sleep' ? DogAnim.Sleep : DOGACT === 'lie' ? DogAnim.Lie : walk ? DogAnim.Walk : DogAnim.Stand; dd.current.phase += walk ? dt * 11 : 0;
     if (q.has('bin')) binOpenAt.set('lab', performance.now() - 500);
+    if (q.has('lids')) { const r = (g: { traverse: (f: (o: { name: string; visible: boolean }) => void) => void } | null) => g?.traverse((o) => { if (o.name === 'lids') o.visible = true; }); r(hg.current); }
     if (DOGACT === 'happy') {
       dd.current.happyUntil = performance.now() + 1000;
       if (performance.now() - lastHeart.current > 700) { lastHeart.current = performance.now(); hearts.push({ x: 0.45, y: 0.5, z: 0, t0: performance.now(), dx: 0.08 }); }
@@ -54,7 +56,7 @@ function Actors() {
   });
   return (
     <>
-      {WHO !== 'dog' && <group position={[WHO === 'both' ? -0.3 : 0, 0, 0]} rotation={[0, ACT === 'pet' && WHO === 'both' ? Math.PI / 2 : 0, 0]}><Human avatar={human} driver={hd} /></group>}
+      {WHO !== 'dog' && <group ref={hg} position={[WHO === 'both' ? -0.3 : 0, 0, 0]} rotation={[0, ACT === 'pet' && WHO === 'both' ? Math.PI / 2 : 0, 0]}><Human avatar={human} driver={hd} /></group>}
       {WHO !== 'human' && <group position={[WHO === 'both' ? (ACT === 'pet' ? 0.32 : 0.45) : 0, 0, 0]} rotation={[0, WHO === 'dog' ? 0 : ACT === 'pet' ? -Math.PI / 2 : -0.3, 0]}><Dog avatar={corgi} driver={dd} /></group>}
       {q.has('bin') && <Bin id="lab" x={0.42} z={0.35} rot={-Math.PI / 2} />}
       <Hearts />

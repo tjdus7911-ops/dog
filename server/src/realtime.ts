@@ -11,6 +11,22 @@ import {
 import { APARTMENT_ENTRANCE, BIN_BY_ID, CAFE_ENTRANCE, SHOP_ENTRANCE, SEAT_BY_ID, SEAT_REACH, WORLD_RADIUS, spawnPoint } from '../../shared/world';
 import { PLACES, SPAWNS, homeSpaceId, insideSpace, parseSpace, type SpaceKind } from '../../shared/spaces';
 import { canVisit } from './access';
+import { furnitureSpots, type FurnAction, type PlacedItem } from '../../shared/home';
+
+/** 집 가구 배치 캐시 (앉기·눕기 자세 검증용) — 배치가 저장되면 비움 */
+const layoutCache = new Map<number, { layout: PlacedItem[]; at: number }>();
+function homeLayout(ownerId: number) {
+  const c = layoutCache.get(ownerId);
+  if (c && Date.now() - c.at < 5000) return c.layout;
+  const layout = repo.getHome(ownerId).layout;
+  layoutCache.set(ownerId, { layout, at: Date.now() });
+  return layout;
+}
+/** 집 안에서 해당 동작을 할 수 있는 가구 자리 근처인지 */
+function nearFurniture(ownerId: number | undefined, x: number, z: number, kinds: FurnAction[]) {
+  if (!ownerId) return false;
+  return furnitureSpots(homeLayout(ownerId)).some((p) => p.actions.some((a) => kinds.includes(a)) && p.human.some((h) => Math.hypot(h.x - x, h.z - z) < 0.45));
+}
 
 const CAPACITY = Number(process.env.MUNGLE_PARK_CAPACITY ?? 30);
 const HOME_CAPACITY = 10;
@@ -316,7 +332,9 @@ export function setupRealtime(io: Server) {
       if (seat && Math.hypot(x - seat.x, z - seat.z) > 1.2) releaseSeat(room, userId);
       const seated = !!seat && room.seats.get(seat.id) === userId;
       let anim = ha >= 0 && ha <= HUMAN_ANIM_MAX ? ha | 0 : 0;
-      if (anim === HumanAnim.Sit && !seated) anim = 0;
+      // 앉기: 벤치 좌석 또는 집 소파 자리 / 눕기·잠자기: 집 침대 자리에서만 인정
+      if (anim === HumanAnim.Sit && !seated && !(room.kind === 'home' && nearFurniture(room.ownerId, x, z, ['sit']))) anim = 0;
+      if ((anim === HumanAnim.Lie || anim === HumanAnim.Sleep) && !(room.kind === 'home' && nearFurniture(room.ownerId, x, z, ['lie', 'sleep']))) anim = 0;
       let danim = da >= 0 && da <= DOG_ANIM_MAX ? da | 0 : 0;
       // 배변 자세는 서버가 시작한 이벤트 동안에만 인정 (버튼만 눌러 배변 상태를 만들 수 없음)
       if (danim === 7 && !p.pooping) danim = 0;
@@ -624,7 +642,7 @@ export function setupRealtime(io: Server) {
     /** 특정 사용자에게 실시간 알림 (방문 신청·이웃 신청 등) */
     notify(userId: number, event: string, payload: unknown) { sessions.get(userId)?.socket.emit(event, payload); },
     /** 집 꾸미기가 바뀌면 그 집에 있는 사람들에게 알림 */
-    homeUpdated(ownerId: number) { io.to(homeSpaceId(ownerId)).emit('home:updated', { ownerId }); },
+    homeUpdated(ownerId: number) { layoutCache.delete(ownerId); io.to(homeSpaceId(ownerId)).emit('home:updated', { ownerId }); },
     /** 방문 권한이 사라진 사람은 집에서 내보냄 (공개 범위 변경·차단 등) */
     recheckHome(ownerId: number) {
       const room = rooms.get(homeSpaceId(ownerId));

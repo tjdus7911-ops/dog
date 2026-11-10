@@ -21,6 +21,8 @@ export interface FurnitureType {
   shop?: boolean;
   /** 애견샵 소개 문구 */
   desc?: string;
+  /** 애견샵 분류 */
+  category?: 'bed' | 'decor';
 }
 
 /** 입주 선물로 받는 기본 가구 세트 */
@@ -41,8 +43,14 @@ export const FURNITURE: FurnitureType[] = [
   { id: 'toybox', label: '장난감 상자', icon: '🧸', count: 1, r: 0.4, shop: true, desc: '공·인형이 가득한 상자' },
   { id: 'cushion', label: '하트 방석', icon: '💗', count: 2, r: 0.4, shop: true, desc: '푹신한 하트 모양 방석' },
   { id: 'treatjar', label: '간식 항아리', icon: '🍪', count: 1, r: 0.25, shop: true, desc: '뼈다귀 쿠키가 든 유리 항아리' },
+  // ---- 애견샵 '침대' (사람 침대는 눕기·잠자기, 강아지 쿠션 침대는 쉬기·잠자기) ----
+  { id: 'bed_cream', label: '크림색 싱글 침대', icon: '🛏️', count: 1, r: 0.95, shop: true, category: 'bed', desc: '포근한 크림색 이불의 싱글 침대' },
+  { id: 'bed_pink', label: '핑크색 침대', icon: '🩷', count: 1, r: 0.95, shop: true, category: 'bed', desc: '하트 베개가 있는 파스텔 핑크 침대' },
+  { id: 'bed_sky', label: '하늘색 침대', icon: '🩵', count: 1, r: 0.95, shop: true, category: 'bed', desc: '구름 무늬 하늘색 침대' },
+  { id: 'bed_wood', label: '원목 프레임 침대', icon: '🪵', count: 1, r: 0.95, shop: true, category: 'bed', desc: '따뜻한 원목 헤드보드 침대' },
+  { id: 'dog_cushion', label: '강아지 전용 쿠션 침대', icon: '🐾', count: 1, r: 0.5, shop: true, category: 'bed', desc: '몸을 둥글게 말고 자기 좋은 도넛 쿠션' },
 ];
-export const SHOP_ITEMS = FURNITURE.filter((f) => f.shop).map(({ id, label, icon, desc }) => ({ id, label, icon, desc: desc ?? '' }));
+export const SHOP_ITEMS = FURNITURE.filter((f) => f.shop).map(({ id, label, icon, desc, category }) => ({ id, label, icon, desc: desc ?? '', category: category ?? 'decor' }));
 export const FURNITURE_BY_ID = new Map(FURNITURE.map((f) => [f.id, f]));
 
 /** 방 크기 (바닥 중심 기준 반폭) */
@@ -160,3 +168,65 @@ export interface HomeView {
 }
 
 export const GUESTBOOK_MAX_LEN = 100;
+
+// ---------------------------------------------------------------- 가구 상호작용 (공통)
+/**
+ * 가구마다 할 수 있는 일과 사람·강아지 자리를 데이터로 정의한다. 새 가구는 여기에 한 줄 추가하면 된다.
+ * 좌표는 가구 기준(회전 0일 때 가구 앞쪽이 +z), y는 바닥에서의 높이.
+ */
+export type FurnAction = 'sit' | 'lie' | 'sleep' | 'dogRest' | 'dogSleep' | 'view';
+export interface InteractSpot { x: number; z: number; y: number; rot: number }
+export interface FurnInteract {
+  actions: FurnAction[];
+  /** 사람 자리 (여러 개면 비어 있는 곳부터) */
+  human: InteractSpot[];
+  /** 강아지 자리 (사람과 함께일 때 / 강아지 혼자 쉴 때) */
+  dog: InteractSpot[];
+  /** 다가가서 서는 곳 (일어날 때도 이 자리로) — 여러 곳이면 방 안쪽·가까운 곳 */
+  approach: { x: number; z: number }[];
+}
+const BED: FurnInteract = {
+  actions: ['lie', 'sleep'],
+  // 발끝이 침대 아래쪽, 머리는 베개(-z) 쪽 — 매트리스 윗면 높이
+  human: [{ x: 0, z: 0.6, y: 0.46, rot: 0 }],
+  dog: [{ x: 0.9, z: 0.55, y: 0, rot: -Math.PI / 2 }],
+  approach: [{ x: 1.15, z: 0.2 }, { x: -1.15, z: 0.2 }, { x: 0, z: 1.35 }],
+};
+export const FURNITURE_INTERACT: Record<string, FurnInteract> = {
+  sofa: {
+    actions: ['sit'],
+    human: [{ x: -0.42, z: 0.06, y: 0.51, rot: 0 }, { x: 0.42, z: 0.06, y: 0.51, rot: 0 }],
+    // 빈 자리가 있으면 소파 위, 없으면 소파 옆 바닥
+    dog: [{ x: 0.42, z: 0.12, y: 0.51, rot: 0 }, { x: -0.42, z: 0.12, y: 0.51, rot: 0 }, { x: 1.2, z: 0.45, y: 0, rot: -0.4 }],
+    approach: [{ x: 0, z: 0.95 }],
+  },
+  bed_cream: BED, bed_pink: BED, bed_sky: BED, bed_wood: BED,
+  dogbed: { actions: ['dogRest', 'dogSleep'], human: [], dog: [{ x: 0, z: 0, y: 0.17, rot: Math.PI }], approach: [{ x: 0, z: 1.05 }, { x: 0, z: -1.05 }, { x: 1.05, z: 0 }, { x: -1.05, z: 0 }] },
+  dog_cushion: { actions: ['dogRest', 'dogSleep'], human: [], dog: [{ x: 0, z: 0, y: 0.16, rot: Math.PI }], approach: [{ x: 0, z: 0.95 }, { x: 0, z: -0.95 }, { x: 0.95, z: 0 }, { x: -0.95, z: 0 }] },
+  frame: { actions: ['view'], human: [], dog: [], approach: [{ x: 0, z: 0.9 }] },
+  // 테이블: 앞으로 상호작용을 붙일 자리 (지금은 없음)
+  table: { actions: [], human: [], dog: [], approach: [{ x: 0, z: 0.9 }] },
+};
+
+/** 가구 기준 좌표 → 방 좌표 */
+export function toWorld(item: Pick<PlacedItem, 'x' | 'z' | 'rot'>, s: { x: number; z: number; y?: number; rot?: number }): InteractSpot {
+  const a = item.rot * (Math.PI / 2);
+  const c = Math.cos(a), sn = Math.sin(a);
+  return { x: item.x + s.x * c + s.z * sn, z: item.z - s.x * sn + s.z * c, y: s.y ?? 0, rot: (s.rot ?? 0) + a };
+}
+export interface PlacedInteract { key: string; type: string; actions: FurnAction[]; human: InteractSpot[]; dog: InteractSpot[]; approach: InteractSpot[] }
+/** 배치된 가구의 상호작용 자리 (방 좌표) */
+export function furnitureSpots(layout: PlacedItem[]): PlacedInteract[] {
+  return layout.filter((i) => FURNITURE_INTERACT[i.type]?.actions.length).map((i) => {
+    const f = FURNITURE_INTERACT[i.type];
+    return { key: itemKey(i), type: i.type, actions: f.actions, human: f.human.map((s) => toWorld(i, s)), dog: f.dog.map((s) => toWorld(i, s)), approach: f.approach.map((a) => toWorld(i, a)).filter((a, k) => k === 0 || (Math.abs(a.x) < ROOM_HALF_W - 0.35 && Math.abs(a.z) < ROOM_HALF_D - 0.35)) };
+  });
+}
+/** 앉거나 누운 캐릭터의 높이: 가구 자리 근처면 그 자리 높이 (다른 사람 화면에서도 같은 높이로 보이게) */
+export function spotHeight(layout: PlacedItem[], x: number, z: number, who: 'human' | 'dog', kinds?: FurnAction[]) {
+  for (const p of furnitureSpots(layout)) {
+    if (kinds && !p.actions.some((a) => kinds.includes(a))) continue;
+    for (const s of who === 'human' ? p.human : p.dog) if (Math.hypot(s.x - x, s.z - z) < 0.3) return s.y;
+  }
+  return 0;
+}

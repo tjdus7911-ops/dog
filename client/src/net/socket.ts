@@ -11,6 +11,7 @@ import { cam } from '../game/CameraRig';
 import { PLACES, SPAWNS, homeSpaceId } from '@shared/spaces';
 import { APARTMENT_ENTRANCE, BIN_BY_ID, CAFE_ENTRANCE, SHOP_ENTRANCE } from '@shared/world';
 import { ACTION_MS, PET_LOW, binOpenAt, petLow, playPet } from '../game/fx';
+import { onLayoutChanged, resetFurniture } from '../game/furniture';
 import { DOG_SCALE } from '../game/models/Dog';
 import type { MeetupMessage } from '@shared/community';
 import type { HomeView } from '@shared/home';
@@ -252,7 +253,8 @@ function enterSpace(park: ParkInfo, spawn: NetState) {
   setSpace(park.kind);
   const moved = get().park?.id !== park.id;
   local.action = null; local.poopStart = 0; local.petHold = null;
-  set({ park, players: {}, poops: {}, dogMenu: null, chat: [], chatUnread: 0, bubbles: {}, seats: {}, seated: null, benchMenu: null, home: null, homeEdit: false, lobbyPanel: park.kind === 'lobby', shopOpen: false, ...(moved ? { community: null } : {}) });
+  resetFurniture();
+  set({ park, players: {}, poops: {}, dogMenu: null, furnMenu: null, chat: [], chatUnread: 0, bubbles: {}, seats: {}, seated: null, benchMenu: null, home: null, homeEdit: false, lobbyPanel: park.kind === 'lobby', shopOpen: false, ...(moved ? { community: null } : {}) });
   if (park.kind === 'home' && park.ownerId) void loadHome(park.ownerId);
 }
 
@@ -278,6 +280,7 @@ export async function loadHome(ownerId: number) {
     if (get().park?.ownerId !== ownerId) return;
     set({ home: r.home });
     setSpace('home', r.home.layout);
+    onLayoutChanged(r.home.layout);
   } catch (e) { toast((e as Error).message, 'error'); }
 }
 

@@ -2,7 +2,6 @@
 export const input = {
   keys: new Set<string>(),
   joy: { x: 0, y: 0, active: false },
-  runToggle: false,
   /** 점프 요청 (스페이스 키 / 점프 버튼) — 다음 프레임에 처리 */
   jump: false,
   /** 이동 입력 잠금 — 모바일에서 채팅창이 열려 있는 동안 (채팅 열림 상태 하나로 UI·입력을 함께 제어) */
@@ -42,6 +41,9 @@ export function installKeyboard() {
   window.addEventListener('blur', () => input.keys.clear());
 }
 
+/** 조이스틱을 이만큼 이상 밀면 달리기 */
+export const JOY_RUN = 0.9;
+
 /** 이동 입력 벡터 (x: 오른쪽, y: 앞쪽), 달리기 여부 */
 export function readMove(): { x: number; y: number; run: boolean } {
   if (input.locked) return { x: 0, y: 0, run: false };
@@ -53,11 +55,12 @@ export function readMove(): { x: number; y: number; run: boolean } {
     if (k.has('KeyD') || k.has('ArrowRight')) x += 1;
     if (k.has('KeyA') || k.has('ArrowLeft')) x -= 1;
   } else k.clear();
+  // PC: Shift를 누른 채 이동하면 달리기
   let run = k.has('ShiftLeft') || k.has('ShiftRight');
   if (input.joy.active) {
+    // 모바일: 조이스틱을 살짝 밀면 걷기, 끝까지 밀면 달리기 (키보드가 붙은 태블릿은 Shift도 동작)
     x = input.joy.x; y = input.joy.y;
-    // 조이스틱을 끝까지 밀거나 달리기 버튼이 켜져 있으면 달리기
-    run = run || input.runToggle || Math.hypot(x, y) > 0.92;
+    run = run || Math.hypot(x, y) > JOY_RUN;
   }
   const len = Math.hypot(x, y);
   if (len > 1) { x /= len; y /= len; }

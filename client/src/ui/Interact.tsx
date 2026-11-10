@@ -4,7 +4,7 @@
 // - DogProfileSheet: 강아지 프로필 (모바일 하단 시트 / PC 오른쪽 패널) · DogProfileEditor
 // - PhotoViewer: 사진 크게 보기 (광장 스크린·액자·강아지 사진첩 공통)
 // - JoinPrompt: 둘러보기 방문자가 주민 전용 기능을 눌렀을 때 가입 안내
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BIG_SCREEN, BINS, PHOTO_ZONE } from '@shared/world';
 import { BIN_REACH, DOG_PHOTO_MAX, DOG_TRAITS, PET_REACH, POOP_REACH, type DogProfileSettings, type DogProfileView } from '@shared/protocol';
 import type { ScreenSlide } from '@shared/screen';
@@ -12,7 +12,9 @@ import { get, set, toast, useStore } from '../store';
 import { local } from '../game/local';
 import { isTouchDevice, setMoveLocked } from '../game/input';
 import { screenNow } from '../game/fx';
-import { rendered } from '../net/remote';
+import { cam } from '../game/CameraRig';
+import { ACTION_LABEL, stopDogTask, stopFurniture, applyFurniture } from '../game/furniture';
+import { FURNITURE_BY_ID, FURNITURE_INTERACT, itemKey, type FurnAction } from '@shared/home';
 import { disposeBag, dogPos, friendAction, joinPark, openDm, openProfile, petDog, pickupPoop } from '../net/socket';
 import { api } from '../lib/api';
 import { resizeImage } from '../lib/image';
@@ -28,7 +30,7 @@ interface Act { key: string; icon: string; label: string; run: () => void }
 
 /** 모달·프로필이 열려 있는지 (열려 있으면 이동 UI를 숨긴다) */
 export function useOverlayOpen() {
-  return useStore((s) => !!(s.viewer || s.dogMenu !== null || s.dogEdit || s.joinPrompt || (s.dogSheet !== null && isTouchDevice())));
+  return useStore((s) => !!(s.viewer || s.dogEdit || s.joinPrompt || (s.dogSheet !== null && isTouchDevice())));
 }
 const isGuest = () => get().me?.role === 'guest';
 
@@ -85,22 +87,6 @@ function nearActions(): Act[] {
       acts.push({ key: 'screen', icon: '📺', label: '자세히 보기', run: () => openScreenSlide(screenNow.get()) });
     }
   }
-  // 다른 강아지가 바로 옆에 있으면 쓰다듬기
-  let best: { id: number; d: number } | null = null;
-  rendered.forEach((r, id) => {
-    const d = Math.hypot(r.dx - local.x, r.dz - local.z);
-    if (d < 1.6 && (!best || d < best.d) && st.players[id]) best = { id, d };
-  });
-  const other = best as { id: number; d: number } | null;
-  if (other) {
-    const name = st.players[other.id]?.dogName ?? '강아지';
-    acts.push({ key: `pet-${other.id}`, icon: '❤️', label: `${name} 쓰다듬기`, run: () => approachAndPet(other.id) });
-  }
-  // 멈춰 서 있고 내 강아지가 곁에 있으면 내 강아지 쓰다듬기
-  const idle = local.humanAnim === 0 && local.jumpY === 0;
-  if (idle && !isGuest() && Math.hypot(local.dogX - local.x, local.dogZ - local.z) < 1.5) {
-    acts.push({ key: 'pet-me', icon: '❤️', label: '쓰다듬기', run: () => void petDog(st.me!.id) });
-  }
   return acts;
 }
 
@@ -149,45 +135,142 @@ export function InteractBar() {
   );
 }
 
-// ---------- 강아지 메뉴 ----------
+// ---------- 강아지·가구 옆에 뜨는 작은 액션 메뉴 ----------
+/**
+ * 3D 대상 위에 붙어 다니는 작은 메뉴. 화면 밖으로 잘리지 않게, 모바일에서는 위쪽 줄·아래 조작 버튼 영역을 피해서 놓는다.
+ * anchor()가 null을 돌려주면(대상이 사라짐·멀어짐) onLost를 부른다.
+ */
+function FloatingMenu({ anchor, onLost, children, label }: { anchor: () => { x: number; y: number; z: number } | null; onLost: () => void; children: React.ReactNode; label: string }) {
+  const el = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const a = anchor();
+      const box = el.current;
+      if (!box) return;
+      if (!a) { onLost(); return; }
+      const [px, py, vis] = cam.project(a.x, a.y, a.z);
+      const touch = isTouchDevice();
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const w = box.offsetWidth, h = box.offsetHeight;
+      const top = touch ? 116 : 76, bottom = touch ? 236 : 96;
+      let left = Math.min(Math.max(8, px - w / 2), vw - w - 8);
+      let y = py - h - 16; // 기본: 대상 머리 위
+      if (y < top) y = py + 28; // 위가 좁으면 아래
+      y = Math.min(Math.max(top, y), vh - bottom - h);
+      if (!vis) { left = (vw - w) / 2; y = top; }
+      box.style.transform = `translate(${Math.round(left)}px, ${Math.round(y)}px)`;
+      box.style.opacity = '1';
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [anchor, onLost]);
+  return (
+    <div ref={el} role="dialog" aria-label={label} className="fixed left-0 top-0 z-30 panel !rounded-2xl px-2.5 py-2 pop" style={{ opacity: 0, maxWidth: 'min(86vw, 280px)' }} data-testid="float-menu">
+      {children}
+    </div>
+  );
+}
+
+/** 강아지를 눌렀을 때: 이름 + [♡ 쓰다듬기] [정보 보기] — 쓰다듬기는 여기서만 (중복 버튼 없음) */
 export function DogMenu() {
   const id = useStore((s) => s.dogMenu);
   const me = useStore((s) => s.me);
   const p = useStore((s) => (id !== null ? s.players[id] : undefined));
-  const friends = useStore((s) => s.friends.some((f) => f.profile.id === id));
-  const outgoing = useStore((s) => s.outgoing.some((o) => o.id === id));
+  const [canPet, setCanPet] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const isMe = id !== null && id === me?.id;
+  // 메뉴는 한 번에 하나만: 강아지 메뉴를 열면 가구 메뉴는 닫음
+  useEffect(() => { if (id !== null && get().furnMenu) set({ furnMenu: null }); }, [id]);
+  // 보호자의 쓰다듬기 허용 설정을 미리 확인
+  useEffect(() => {
+    setCanPet(null);
+    if (id === null || isMe || DEMO) { setCanPet(true); return; }
+    api<{ dog: DogProfileView }>(`/api/dogs/${id}`).then((r) => setCanPet(r.dog.canPet)).catch(() => setCanPet(true));
+  }, [id, isMe]);
+  // 쓰다듬는 중(다가가기 포함)에는 버튼 잠금 → 끝나면 메뉴로 복귀
+  useEffect(() => {
+    const t = window.setInterval(() => setBusy(!!local.action || approach !== null), 120);
+    return () => window.clearInterval(t);
+  }, []);
+  const anchor = useCallback(() => {
+    if (id === null) return null;
+    const pos = dogPos(id);
+    if (!pos) return null;
+    if (Math.hypot(pos.x - local.x, pos.z - local.z) > 7) return null; // 멀어지면 닫힘
+    return { x: pos.x, y: 0.95, z: pos.z };
+  }, [id]);
+  const close = useCallback(() => set({ dogMenu: null }), []);
   if (id === null || !me) return null;
-  const isMe = id === me.id;
   const dogName = isMe ? me.dogName : p?.dogName ?? '강아지';
-  const close = () => set({ dogMenu: null });
-  const item = (icon: string, label: string, run: () => void, testid?: string) => (
-    <button className="btn btn-ghost min-h-[50px] px-4 justify-start text-left border border-[#f1e2d2] text-base" data-testid={testid} onClick={() => { close(); run(); }}>
-      <span className="mr-2 text-lg">{icon}</span>{label}
-    </button>
-  );
+  const petBlocked = canPet === false;
   return (
-    <div className="fixed inset-0 z-40 flex items-end md:items-center justify-center bg-[#5a403322]" onPointerDown={(e) => e.target === e.currentTarget && close()}>
-      <div className="panel pop w-full md:w-[320px] p-4 rounded-b-none md:rounded-b-[22px] pb-[calc(16px+var(--safe-b))] md:pb-4" role="dialog" aria-label={`${dogName} 메뉴`}>
-        <div className="flex items-center gap-2 mb-3">
-          <span className="text-2xl">🐶</span>
-          <div className="flex-1">
-            <div className="font-display text-xl leading-none">{dogName}</div>
-            {!isMe && p && <div className="text-xs text-cocoa-soft mt-1">보호자 {p.nickname}{p.guest ? ' · 둘러보기 방문자' : ''}</div>}
-          </div>
-          <button className="btn btn-ghost w-10 h-10" onClick={close} aria-label="닫기">✕</button>
-        </div>
-        <div className="grid gap-2">
-          {item('🐾', '강아지 정보', () => set({ dogSheet: id }), 'dog-info')}
-          {item('❤️', '쓰다듬기', () => (isMe ? void petDog(id) : approachAndPet(id)), 'dog-pet')}
-          {!isMe && item('👤', '보호자 프로필', () => void openProfile(id))}
-          {!isMe && !p?.guest && (friends
-            ? item('💬', '채팅하기', () => p && void openDm(p))
-            : outgoing ? <div className="text-sm text-cocoa-soft text-center py-2">🤝 친구 신청을 보냈어요</div>
-              : item('🤝', '친구 신청', () => (isGuest() ? set({ joinPrompt: true }) : void friendAction('friend:request', id))))}
-          {isMe && item('✏️', '우리 강아지 프로필 꾸미기', () => (isGuest() ? set({ joinPrompt: true }) : set({ dogEdit: true })))}
-        </div>
+    <FloatingMenu anchor={anchor} onLost={close} label={`${dogName} 메뉴`}>
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <span className="font-display text-[15px] leading-none flex-1 truncate">🐶 {dogName}</span>
+        <button className="w-7 h-7 rounded-full text-cocoa-soft hover:bg-cream-2 text-sm" onClick={close} aria-label="메뉴 닫기">✕</button>
       </div>
-    </div>
+      <div className="flex gap-1.5">
+        <button className="btn btn-coral px-3 min-h-[38px] text-sm whitespace-nowrap" data-testid="dog-pet" disabled={busy || petBlocked || canPet === null}
+          title={petBlocked ? '보호자가 쓰다듬기를 허용하지 않았어요' : undefined}
+          onClick={() => (isGuest() ? set({ joinPrompt: true }) : isMe ? void petDog(id) : approachAndPet(id))}>
+          {busy ? '쓰다듬는 중…' : petBlocked ? '🔒 쓰다듬기' : '♡ 쓰다듬기'}
+        </button>
+        <button className="btn btn-ghost px-3 min-h-[38px] text-sm whitespace-nowrap border border-[#f1e2d2]" data-testid="dog-info" onClick={() => set({ dogSheet: id, dogMenu: null })}>정보 보기</button>
+      </div>
+      {petBlocked && <div className="text-[11px] text-cocoa-soft mt-1">보호자가 쓰다듬기를 허용하지 않았어요</div>}
+    </FloatingMenu>
+  );
+}
+
+/** 가구를 눌렀을 때: 그 가구로 할 수 있는 일 (소파 앉기 · 침대 눕기/잠자기 · 강아지 침대 쉬기/잠자기) */
+export function FurnitureMenu() {
+  const key = useStore((s) => s.furnMenu);
+  const home = useStore((s) => s.home);
+  const use = useStore((s) => s.furnUse);
+  const dogTask = useStore((s) => s.dogTaskKey);
+  const item = key ? home?.layout.find((i) => itemKey(i) === key) : undefined;
+  useEffect(() => { if (key && get().dogMenu !== null) set({ dogMenu: null }); }, [key]);
+  const anchor = useCallback(() => {
+    if (!item) return null;
+    if (Math.hypot(item.x - local.x, item.z - local.z) > 6) return null;
+    return { x: item.x, y: 1.15, z: item.z };
+  }, [item]);
+  const close = useCallback(() => set({ furnMenu: null }), []);
+  if (!key || !item) return null;
+  const info = FURNITURE_INTERACT[item.type];
+  const f = FURNITURE_BY_ID.get(item.type);
+  if (!info) return null;
+  const mine = use?.key === key;
+  const dogHere = dogTask === key;
+  const act = (a: FurnAction) => { applyFurniture(key, a); };
+  return (
+    <FloatingMenu anchor={anchor} onLost={close} label={`${f?.label ?? '가구'} 메뉴`}>
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <span className="font-display text-[15px] leading-none flex-1 truncate">{f?.icon} {f?.label}</span>
+        <button className="w-7 h-7 rounded-full text-cocoa-soft hover:bg-cream-2 text-sm" onClick={close} aria-label="메뉴 닫기">✕</button>
+      </div>
+      <div className="flex flex-wrap gap-1.5" data-testid="furn-actions">
+        {mine ? (
+          <>
+            {info.actions.filter((a) => a !== use!.action && (a === 'lie' || a === 'sleep')).map((a) => (
+              <button key={a} className="btn btn-coral px-3 min-h-[38px] text-sm whitespace-nowrap" onClick={() => act(a)}>{ACTION_LABEL[a]}</button>
+            ))}
+            <button className="btn btn-ghost px-3 min-h-[38px] text-sm whitespace-nowrap border border-[#f1e2d2]" onClick={() => { stopFurniture(); close(); }}>🧍 일어나기</button>
+          </>
+        ) : dogHere ? (
+          <>
+            {info.actions.filter((a) => a === 'dogRest' || a === 'dogSleep').map((a) => (
+              <button key={a} className="btn btn-coral px-3 min-h-[38px] text-sm whitespace-nowrap" onClick={() => act(a)}>{ACTION_LABEL[a]}</button>
+            ))}
+            <button className="btn btn-ghost px-3 min-h-[38px] text-sm whitespace-nowrap border border-[#f1e2d2]" onClick={() => { stopDogTask(); close(); }}>🐾 강아지 부르기</button>
+          </>
+        ) : info.actions.map((a) => (
+          <button key={a} className="btn btn-coral px-3 min-h-[38px] text-sm whitespace-nowrap" onClick={() => { act(a); if (a === 'view') close(); }}>{ACTION_LABEL[a]}</button>
+        ))}
+      </div>
+    </FloatingMenu>
   );
 }
 
@@ -545,6 +628,7 @@ export function InteractionOverlays() {
   return (
     <>
       <DogMenu />
+      <FurnitureMenu />
       <DogProfileSheet />
       <DogProfileEditor />
       <PhotoViewer />

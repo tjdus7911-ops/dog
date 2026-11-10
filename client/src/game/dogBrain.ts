@@ -55,7 +55,7 @@ export class DogBrain {
    * @param rest 보호자가 벤치에 앉았을 때 강아지가 기다릴 자리 (없으면 평소 산책)
    */
   update(dt: number, ox: number, oz: number, orot: number, ospeed: number, others: [number, number, number][], sitCommand: boolean, scale: number,
-    rest: { x: number; z: number; rot: number } | null = null) {
+    rest: { x: number; z: number; rot: number; mode?: 'sit' | 'rest' | 'sleep' } | null = null) {
     this.time += dt;
     const ownerMoving = ospeed > 0.2;
     const ownerRunning = ospeed > WALK_SPEED * 1.25;
@@ -84,7 +84,12 @@ export class DogBrain {
         this.rot = turnToward(this.rot, rest.rot, dt * 3);
         this.restTime += dt;
       }
-      this.anim = this.speed > 0.15 ? DogAnim.Walk : this.restTime < 3.5 ? DogAnim.Sit : DogAnim.Lie;
+      // 자리 종류: 벤치·소파(앉았다가 엎드림) / 쉬기(바로 엎드림) / 잠자기(엎드렸다가 몸을 말고 잠듦)
+      const mode = rest.mode ?? 'sit';
+      this.anim = this.speed > 0.15 ? DogAnim.Walk
+        : mode === 'sleep' ? (this.restTime < 1.2 ? DogAnim.Lie : DogAnim.Sleep)
+        : mode === 'rest' ? (this.restTime < 0.6 ? DogAnim.Sit : DogAnim.Lie)
+        : this.restTime < 3.5 ? DogAnim.Sit : DogAnim.Lie;
       const lookTarget = this.anim === DogAnim.Walk ? 0 : Math.sin(this.time * 0.7) * 0.6;
       this.look += (lookTarget - this.look) * Math.min(1, dt * 3);
       return;

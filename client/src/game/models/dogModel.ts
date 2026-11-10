@@ -152,6 +152,12 @@ function buildDog(a: DogAvatar): THREE.Group {
     part(head, shape.ball(), WHITE, [eye[0] - 0.006, eye[1] - 0.012, eye[2] + 0.013], 0.0045);
     part(head, shape.ball(), PINK, onSurface(HC, hr, s * 0.72, -0.24, 0.975), [0.034, 0.022, 0.01], [0, s * 0.72, 0]);
   }
+  // 감은 눈 (쓰다듬기 반응·잠자기): 털색으로 눈을 덮고 둥근 선 — 평소에는 숨김
+  const lids = bone(head, 'lids');
+  for (const s of [-1, 1]) {
+    part(lids, shape.ball(14, 10), coat, onSurface(HC, hr, s * 0.42, 0.06, 0.975), [0.036, 0.042, 0.021], [0, s * 0.42, 0]);
+    part(lids, shape.torus(0.024, 0.005, Math.PI * 0.8, 6, 14), EYE, onSurface(HC, hr, s * 0.42, 0.05, 1.085), 1, [0, s * 0.42, Math.PI + Math.PI * 0.1]);
+  }
   // 귀
   for (const s of [-1, 1]) {
     const earColor = a.pattern === 'patch' && s > 0 ? sec : a.pattern === 'saddle' || a.breed === 'beagle' ? sec : coat;
@@ -303,6 +309,13 @@ function buildCorgi(a: DogAvatar): THREE.Group {
     part(eg, shape.ball(20, 16), EYE, [0, 0, 0], [0.026, 0.03, 0.012], [-pitch, 0, 0], { gloss: true });
     part(head, shape.ball(10, 8), WHITE, onSurface([0, 0, 0], hr, yaw + s * 0.035, pitch + 0.07, 1.035), [0.0085, 0.009, 0.004], [0, yaw, 0]);
   }
+  // 감은 눈 (쓰다듬기 반응·잠자기)
+  const lids = bone(head, 'lids');
+  for (const s of [-1, 1]) {
+    const yaw = s * 0.4, pitch = 0.1;
+    part(lids, shape.ball(14, 10), mix(coat, coatTop, 0.25).getStyle(), onSurface([0, 0, 0], hr, yaw, pitch, 1.0), [0.03, 0.034, 0.016], [-pitch, yaw, 0]);
+    part(lids, shape.torus(0.02, 0.0048, Math.PI * 0.8, 6, 14), EYE, onSurface([0, 0, 0], hr, yaw, pitch - 0.01, 1.1), 1, [-pitch, yaw, Math.PI + Math.PI * 0.1]);
+  }
   // 귀: 크게 쫑긋 선 둥근 삼각형 (두께·오목함 있음) + 안쪽 분홍 털
   for (const s of [-1, 1]) {
     // 귀: 적당한 크기의 둥근 삼각형, 머리 위 옆에서 살짝 바깥으로 기울어짐
@@ -327,6 +340,8 @@ export interface DogRig {
   tongue: THREE.Object3D;
   legs: THREE.Object3D[];
   anchor: THREE.Object3D;
+  /** 감은 눈 */
+  lids: THREE.Object3D;
   /** 다리 길이에 따른 몸 기본 높이 */
   baseY: number;
 }
@@ -336,7 +351,7 @@ export function createDog(a: DogAvatar): DogRig {
   const g = (n: string) => root.getObjectByName(n)!;
   return {
     root, body: g('body'), head: g('head'), tail: g('tail'), tongue: g('tongue'),
-    legs: [g('legFL'), g('legFR'), g('legBL'), g('legBR')], anchor: g('anchor'),
+    legs: [g('legFL'), g('legFR'), g('legBL'), g('legBR')], anchor: g('anchor'), lids: g('lids'),
     baseY: Number(root.userData.baseY) || 0,
   };
 }

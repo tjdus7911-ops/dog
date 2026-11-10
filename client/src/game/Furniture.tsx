@@ -142,6 +142,42 @@ export function PhotoFrame({ photo, style = 'wood', fit, scale = 1, onOpen }: {
   );
 }
 
+/** 침대 4종: 크림 · 핑크(하트 베개) · 하늘색(구름 이불) · 원목 헤드보드 — 베개는 -z, 매트리스 윗면 높이 0.46 */
+const BED_LOOK: Record<string, { frame: string; head: string; quilt: string; quilt2: string; pillow: string }> = {
+  bed_cream: { frame: '#f3e2c8', head: '#f7ead6', quilt: '#fff6e8', quilt2: '#f3dcc0', pillow: '#ffffff' },
+  bed_pink: { frame: '#f7c9b4', head: '#f4a6b8', quilt: '#f9c7d4', quilt2: '#f4a6b8', pillow: '#fff1f5' },
+  bed_sky: { frame: '#d6ecf6', head: '#a9d6ee', quilt: '#bfe3f7', quilt2: '#ffffff', pillow: '#ffffff' },
+  bed_wood: { frame: '#b98559', head: '#9a6b44', quilt: '#a9cfa0', quilt2: '#c7e2bf', pillow: '#fff6e8' },
+};
+function Bed({ kind }: { kind: string }) {
+  const L = BED_LOOK[kind] ?? BED_LOOK.bed_cream;
+  return (
+    <group>
+      <mesh geometry={geo.box(1.12, 0.26, 1.98)} material={mat(L.frame)} position={[0, 0.15, 0]} />
+      {[[-0.5, -0.9], [0.5, -0.9], [-0.5, 0.9], [0.5, 0.9]].map(([x, z], i) => <mesh key={i} geometry={geo.cyl(0.05, 0.04, 0.08, 6)} material={mat('#9a6b44')} position={[x, 0.04, z]} />)}
+      {/* 매트리스 · 헤드보드 · 발판 */}
+      <mesh geometry={geo.box(1.02, 0.16, 1.86)} material={mat('#fffaf2')} position={[0, 0.36, 0.02]} />
+      <mesh geometry={geo.box(1.16, 0.92, 0.12)} material={mat(L.head)} position={[0, 0.5, -0.98]} />
+      <mesh geometry={geo.cyl(0.58, 0.58, 0.12, 18, )} material={mat(L.head)} position={[0, 0.95, -0.98]} rotation={[Math.PI / 2, 0, 0]} scale={[1, 1, 0.42]} />
+      <mesh geometry={geo.box(1.16, 0.42, 0.1)} material={mat(L.head)} position={[0, 0.3, 0.98]} />
+      {/* 베개 (핑크 침대는 하트) */}
+      {kind === 'bed_pink' ? (
+        <group position={[0, 0.52, -0.68]} rotation={[-1.2, 0, 0]}>
+          <mesh geometry={geo.sphere(0.13, 12, 10)} material={mat(L.pillow)} position={[-0.09, 0.03, 0]} scale={[1, 1, 0.5]} />
+          <mesh geometry={geo.sphere(0.13, 12, 10)} material={mat(L.pillow)} position={[0.09, 0.03, 0]} scale={[1, 1, 0.5]} />
+          <mesh geometry={geo.cone(0.18, 0.2, 12)} material={mat(L.pillow)} position={[0, -0.1, 0]} rotation={[Math.PI, 0, 0]} scale={[1, 1, 0.5]} />
+        </group>
+      ) : <mesh geometry={geo.box(0.62, 0.1, 0.3)} material={mat(L.pillow)} position={[0, 0.49, -0.7]} />}
+      {/* 이불 (아래쪽 2/3) + 접힌 끝단 */}
+      <mesh geometry={geo.box(1.06, 0.07, 1.2)} material={mat(L.quilt)} position={[0, 0.47, 0.32]} />
+      <mesh geometry={geo.box(1.07, 0.08, 0.16)} material={mat(L.quilt2)} position={[0, 0.48, -0.22]} />
+      {kind === 'bed_sky' && [[-0.25, 0.2], [0.22, 0.55], [-0.15, 0.7]].map(([x, z], i) => (
+        <mesh key={i} geometry={geo.sphere(0.09, 10, 8)} material={mat('#ffffff')} position={[x, 0.505, z]} scale={[1.4, 0.25, 0.9]} />
+      ))}
+    </group>
+  );
+}
+
 /** 가구 한 개 (원점 = 바닥 중심) */
 export function FurnitureModel({ type, n, photo, item, onOpen }: { type: string; n: number; photo: string | null; item?: PlacedItem; onOpen?: (url: string) => void }) {
   switch (type) {
@@ -151,6 +187,18 @@ export function FurnitureModel({ type, n, photo, item, onOpen }: { type: string;
           <mesh geometry={geo.cyl(0.55, 0.6, 0.14, 14)} material={mat(C.coral)} position={[0, 0.07, 0]} />
           <mesh geometry={geo.torus(0.45, 0.13, Math.PI * 2, 6, 16)} material={mat(C.coralSoft)} position={[0, 0.2, 0]} rotation={[Math.PI / 2, 0, 0]} />
           <mesh geometry={geo.cyl(0.42, 0.42, 0.06, 14)} material={mat(C.cream)} position={[0, 0.17, 0]} />
+        </group>
+      );
+    case 'bed_cream': case 'bed_pink': case 'bed_sky': case 'bed_wood':
+      return <Bed kind={type} />;
+    case 'dog_cushion':
+      return (
+        <group>
+          {/* 도넛 모양 쿠션 침대: 몸을 둥글게 말고 자기 좋게 */}
+          <mesh geometry={geo.cyl(0.5, 0.52, 0.08, 20)} material={mat('#e9dcf5')} position={[0, 0.04, 0]} />
+          <mesh geometry={geo.torus(0.4, 0.13, Math.PI * 2, 8, 24)} material={mat('#cdb6ea')} position={[0, 0.17, 0]} rotation={[Math.PI / 2, 0, 0]} />
+          <mesh geometry={geo.cyl(0.36, 0.36, 0.09, 20)} material={mat('#fff6e8')} position={[0, 0.12, 0]} />
+          <mesh geometry={geo.sphere(0.06, 10, 8)} material={mat('#f4a6b8')} position={[0.3, 0.3, 0.2]} />
         </group>
       );
     case 'sofa':

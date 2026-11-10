@@ -19,6 +19,11 @@ export interface PairRefs {
   dogDriver: MutableRefObject<DogDriver>;
   /** 이름표 DOM (거리별 표시 제어용) */
   tag: MutableRefObject<HTMLDivElement | null>;
+  /** 잠잘 때 Zzz 표시 (사람 / 강아지) */
+  zzz: MutableRefObject<HTMLDivElement | null>;
+  dogZzz: MutableRefObject<HTMLDivElement | null>;
+  /** 발밑 그림자 (가구 위에 있으면 숨김) */
+  blob?: MutableRefObject<THREE.Mesh | null>;
 }
 
 export function AvatarPair({ profile, refs, isMe, onSelect, onSelectDog }: { profile: PublicProfile; refs: PairRefs; isMe?: boolean; onSelect?: () => void; onSelectDog?: () => void }) {
@@ -60,7 +65,7 @@ export function AvatarPair({ profile, refs, isMe, onSelect, onSelectDog }: { pro
     <>
       <group ref={refs.human}>
         <Human avatar={profile.human} driver={refs.humanDriver} handRef={hand} />
-        <mesh geometry={geo.circle(0.38, 10)} material={blobShadowMat} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.045, 0]} />
+        <mesh ref={refs.blob} geometry={geo.circle(0.38, 10)} material={blobShadowMat} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.045, 0]} />
         {/* 클릭 판정용 투명 캡슐 (작은 파츠 대신 넉넉한 영역) */}
         {clickable && (
           <mesh {...handlers} position={[0, 0.7, 0]}>
@@ -78,9 +83,15 @@ export function AvatarPair({ profile, refs, isMe, onSelect, onSelectDog }: { pro
             </div>
           </div>
         </Html>
+        <Html position={[0, 0.6, -1.0]} zIndexRange={[19, 9]} style={{ pointerEvents: 'none' }}>
+          <div ref={refs.zzz} className="zzz" style={{ display: 'none' }}>Z<span>z</span><span>z</span></div>
+        </Html>
       </group>
       <group ref={refs.dog}>
         <Dog avatar={profile.dog} driver={refs.dogDriver} anchorRef={anchor} />
+        <Html position={[0, 0.7 * dogScale, 0]} zIndexRange={[19, 9]} style={{ pointerEvents: 'none' }}>
+          <div ref={refs.dogZzz} className="zzz zzz-sm" style={{ display: 'none' }}>z<span>z</span></div>
+        </Html>
         <mesh geometry={geo.circle(0.3 * dogScale, 10)} material={blobShadowMat} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]} scale={[0.8, 1.3, 1]} />
         {(clickable || onSelectDog) && (
           <mesh {...dogHandlers} position={[0, 0.35 * dogScale, 0]}>

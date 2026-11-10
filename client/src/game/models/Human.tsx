@@ -51,7 +51,7 @@ export const SIT_LIFT = 0.17;
 export function Human({ avatar, driver, handRef }: { avatar: HumanAvatar; driver: MutableRefObject<HumanDriver>; handRef?: MutableRefObject<THREE.Object3D | null> }) {
   const key = JSON.stringify(avatar);
   const rig = useMemo(() => createHuman(avatar), [key]); // eslint-disable-line react-hooks/exhaustive-deps
-  const sm = useRef({ walk: 0, run: 0, wave: 0, air: 0, sit: 0, pet: 0, scoop: 0, toss: 0, tossT: 0 });
+  const sm = useRef({ walk: 0, run: 0, wave: 0, air: 0, sit: 0, pet: 0, scoop: 0, toss: 0, tossT: 0, lie: 0 });
   const bag = useMemo(makeBag, []);
 
   useLayoutEffect(() => {
@@ -80,6 +80,8 @@ export function Human({ avatar, driver, handRef }: { avatar: HumanAvatar; driver
     s.toss += ((d.anim === HumanAnim.Toss ? 1 : 0) - s.toss) * k2;
     s.tossT = d.anim === HumanAnim.Toss ? s.tossT + dt : 0;
     bag.visible = d.bag;
+    s.lie += ((d.anim === HumanAnim.Lie || d.anim === HumanAnim.Sleep ? 1 : 0) - s.lie) * (1 - Math.exp(-dt * 6));
+    rig.lids.visible = d.anim === HumanAnim.Sleep;
 
     const swing = Math.sin(d.phase);
     const legAmp = 0.6 + s.run * 0.3;
@@ -142,6 +144,21 @@ export function Human({ avatar, driver, handRef }: { avatar: HumanAvatar; driver
       rig.armL.rotation.x = THREE.MathUtils.lerp(rig.armL.rotation.x, arm, s.toss);
       rig.torso.rotation.x = THREE.MathUtils.lerp(rig.torso.rotation.x, 0.18, s.toss);
     }
+    // 침대에 눕기: 발을 기준으로 등을 대고 눕는다 (머리는 베개 쪽 -z), 팔은 몸 옆, 잠잘 때는 숨쉬기만
+    if (s.lie > 0.01) {
+      rig.root.rotation.x = -Math.PI / 2 * s.lie;
+      rig.root.position.y = THREE.MathUtils.lerp(rig.root.position.y, 0.13, s.lie);
+      rig.legL.rotation.x = THREE.MathUtils.lerp(rig.legL.rotation.x, 0, s.lie);
+      rig.legR.rotation.x = THREE.MathUtils.lerp(rig.legR.rotation.x, 0, s.lie);
+      rig.armL.rotation.x = THREE.MathUtils.lerp(rig.armL.rotation.x, 0.05, s.lie);
+      rig.armR.rotation.x = THREE.MathUtils.lerp(rig.armR.rotation.x, 0.05, s.lie);
+      rig.armL.rotation.z = THREE.MathUtils.lerp(rig.armL.rotation.z, 0.18, s.lie);
+      rig.armR.rotation.z = THREE.MathUtils.lerp(rig.armR.rotation.z, -0.18, s.lie);
+      rig.torso.rotation.x = THREE.MathUtils.lerp(rig.torso.rotation.x, 0, s.lie);
+      rig.body.position.y = Math.sin(t * (d.anim === HumanAnim.Sleep ? 1.3 : 2)) * 0.006;
+      rig.head.rotation.z = THREE.MathUtils.lerp(rig.head.rotation.z, d.anim === HumanAnim.Sleep ? 0.28 : 0.05, s.lie);
+      rig.head.rotation.x = THREE.MathUtils.lerp(rig.head.rotation.x, 0, s.lie);
+    } else rig.root.rotation.x = 0;
     if (s.air > 0.01) {
       rig.legL.rotation.x = THREE.MathUtils.lerp(rig.legL.rotation.x, -0.55, s.air);
       rig.legR.rotation.x = THREE.MathUtils.lerp(rig.legR.rotation.x, 0.35, s.air);

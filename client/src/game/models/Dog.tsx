@@ -23,7 +23,7 @@ export const DOG_STEP = { walk: 0.19, run: 0.4 };
 export function Dog({ avatar, driver, anchorRef }: { avatar: DogAvatar; driver: MutableRefObject<DogDriver>; anchorRef?: MutableRefObject<THREE.Object3D | null> }) {
   const key = JSON.stringify(avatar);
   const rig = useMemo(() => createDog(avatar), [key]); // eslint-disable-line react-hooks/exhaustive-deps
-  const sm = useRef({ move: 0, run: 0, sit: 0, greet: 0, lie: 0, poop: 0, happy: 0 });
+  const sm = useRef({ move: 0, run: 0, sit: 0, greet: 0, lie: 0, poop: 0, happy: 0, sleep: 0 });
 
   useLayoutEffect(() => {
     if (anchorRef) anchorRef.current = rig.anchor;
@@ -38,7 +38,8 @@ export function Dog({ avatar, driver, anchorRef }: { avatar: DogAvatar; driver: 
     s.run += ((d.anim === DogAnim.Run ? 1 : 0) - s.run) * k;
     s.sit += ((d.anim === DogAnim.Sit ? 1 : 0) - s.sit) * (1 - Math.exp(-dt * 6));
     s.greet += ((d.anim === DogAnim.Greet ? 1 : 0) - s.greet) * k;
-    s.lie += ((d.anim === DogAnim.Lie ? 1 : 0) - s.lie) * (1 - Math.exp(-dt * 4));
+    s.lie += ((d.anim === DogAnim.Lie || d.anim === DogAnim.Sleep ? 1 : 0) - s.lie) * (1 - Math.exp(-dt * 4));
+    s.sleep += ((d.anim === DogAnim.Sleep ? 1 : 0) - s.sleep) * (1 - Math.exp(-dt * 3));
     s.poop += ((d.anim === DogAnim.Poop ? 1 : 0) - s.poop) * (1 - Math.exp(-dt * 6));
     s.happy += ((performance.now() < d.happyUntil ? 1 : 0) - s.happy) * (1 - Math.exp(-dt * 6));
 
@@ -84,7 +85,20 @@ export function Dog({ avatar, driver, anchorRef }: { avatar: DogAvatar; driver: 
     const wag = 8 + s.greet * 14 + s.happy * 16 + s.run * 4 - s.lie * 3;
     rig.tail.rotation.y = Math.sin(t * wag) * (0.35 + Math.max(s.greet, s.happy) * 0.35) * (1 - s.poop);
     rig.tail.rotation.x = s.poop * 0.6;
-    rig.tongue.visible = s.run > 0.4 || s.greet > 0.4 || s.happy > 0.5;
+    rig.tongue.visible = (s.run > 0.4 || s.greet > 0.4 || s.happy > 0.5) && s.sleep < 0.3;
+    // 잠자기: 엎드린 채 몸을 살짝 옆으로 말고, 고개를 꼬리 쪽으로 돌려 내려놓고, 꼬리는 몸에 붙임 (천천히 숨쉬기)
+    if (s.sleep > 0.01) {
+      rig.body.rotation.z = s.sleep * 0.38;
+      rig.body.rotation.y = s.sleep * 0.22;
+      rig.body.position.y += Math.sin(t * 1.4) * 0.006 * s.sleep;
+      rig.head.rotation.y = THREE.MathUtils.lerp(rig.head.rotation.y, 0.95, s.sleep);
+      rig.head.rotation.x = THREE.MathUtils.lerp(rig.head.rotation.x, 0.42, s.sleep);
+      rig.head.rotation.z = THREE.MathUtils.lerp(rig.head.rotation.z, 0.25, s.sleep);
+      rig.tail.rotation.y = THREE.MathUtils.lerp(rig.tail.rotation.y, 1.1, s.sleep);
+      rig.tail.rotation.x = THREE.MathUtils.lerp(rig.tail.rotation.x, -0.5, s.sleep);
+    } else { rig.body.rotation.z = 0; rig.body.rotation.y = 0; }
+    // 눈 감기: 쓰다듬기를 받을 때(기분 좋게) · 잠잘 때
+    rig.lids.visible = s.happy > 0.5 || d.anim === DogAnim.Sleep;
   });
 
   return (

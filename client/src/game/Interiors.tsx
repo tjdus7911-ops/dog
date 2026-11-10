@@ -5,6 +5,8 @@ import type { UnitInfo } from '@shared/apartment';
 import { ROOM_HALF_D, ROOM_HALF_W } from '@shared/home';
 import { geo, mat } from './lowpoly';
 import { FurnitureModel } from './Furniture';
+import { FURNITURE_INTERACT } from '@shared/home';
+import type { ThreeEvent } from '@react-three/fiber';
 import { itemKey } from '@shared/home';
 import { set, useStore } from '../store';
 import { api } from '../lib/api';
@@ -107,7 +109,13 @@ export function HomeFurniture() {
   return (
     <group>
       {home.layout.map((i) => (
-        <group key={itemKey(i)} position={[i.x, 0, i.z]} rotation={[0, i.rot * (Math.PI / 2), 0]}>
+        <group key={itemKey(i)} position={[i.x, 0, i.z]} rotation={[0, i.rot * (Math.PI / 2), 0]}
+          // 상호작용이 있는 가구(소파·침대·강아지 침대)를 누르면 가구 메뉴
+          {...(FURNITURE_INTERACT[i.type]?.actions.some((a) => a !== 'view') ? {
+            onClick: (e: ThreeEvent<MouseEvent>) => { if (e.delta > 8) return; e.stopPropagation(); set({ furnMenu: itemKey(i), dogMenu: null }); },
+            onPointerOver: (e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); document.body.style.cursor = 'pointer'; },
+            onPointerOut: () => { document.body.style.cursor = ''; },
+          } : {})}>
           {/* 액자를 누르면 사진 크게 보기 (방문자도 볼 수 있음, 수정은 집주인 꾸미기 화면에서만) */}
           <FurnitureModel type={i.type} n={i.n} photo={home.owner.dogPhoto} item={i}
             onOpen={(url) => set({ viewer: { photos: [url], index: 0, title: `🖼️ ${home.owner.dogName}`, caption: `${home.owner.nickname}님 집 액자` } })} />

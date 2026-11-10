@@ -95,3 +95,10 @@ canvas { touch-action: none; }
   .above-nav { bottom: calc(var(--safe-b) + 62px) !important; padding-bottom: 16px !important; }
   .above-nav-panel { bottom: calc(var(--safe-b) + 70px) !important; }
 }
+
+/* 잠자기 Zzz (사람·강아지) */
+.zzz { font-family: 'Jua', sans-serif; color: #7a8fc7; font-size: 22px; text-shadow: 0 1px 0 #fff, 0 0 6px #fff; transform: translate(-50%, -100%); white-space: nowrap; animation: zzz-float 2.4s ease-in-out infinite; }
+.zzz span { display: inline-block; margin-left: 2px; font-size: 0.8em; transform: translateY(-8px); }
+.zzz span + span { font-size: 0.65em; transform: translateY(-16px); }
+.zzz-sm { font-size: 16px; }
+@keyframes zzz-float { 0%, 100% { opacity: 0.55; transform: translate(-50%, -100%); } 50% { opacity: 1; transform: translate(-40%, -125%); } }

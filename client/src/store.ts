@@ -107,6 +107,10 @@ interface State {
   /** 멍글런너 화면 (로비·게임·결과) 열림 / 랭킹 갱신 신호 */
   runner: boolean;
   runnerVersion: number;
+  /** 집 가구: 쓰고 있는 가구·동작 / 강아지 혼자 쉬는 가구 / 열린 가구 메뉴 */
+  furnUse: { key: string; action: 'sit' | 'lie' | 'sleep' } | null;
+  dogTaskKey: string | null;
+  furnMenu: string | null;
 }
 
 export const useStore = create<State>()(() => ({
@@ -164,6 +168,9 @@ export const useStore = create<State>()(() => ({
   lobbyFocus: null,
   runner: false,
   runnerVersion: 0,
+  furnUse: null,
+  dogTaskKey: null,
+  furnMenu: null,
 }));
 
 export const set = useStore.setState;

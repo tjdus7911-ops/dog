@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { io, type Socket } from 'socket.io-client';
 import { BINS } from '../../shared/world';
+import { furnitureSpots } from '../../shared/home';
 
 const PORT = 3997;
 const BASE = `http://localhost:${PORT}`;
@@ -178,6 +179,25 @@ async function main() {
     check('승인 후 입장 가능', (await emit(c.s, 'park:join', { parkId: `home-${b.id}` })).ok);
     await api('/api/home/me/visibility', { visibility: 'private' }, b.token, 'PUT');
     check('비공개: 집주인만', !(await emit(a.s, 'park:join', { parkId: `home-${b.id}` })).ok && (await emit(b.s, 'park:join', { parkId: `home-${b.id}` })).ok);
+
+    console.log('\n[4-1. 집 가구 앉기·눕기 자세 검증]');
+    await api('/api/home/me/visibility', { visibility: 'public' }, b.token, 'PUT');
+    const hj = await emit(a.s, 'park:join', { parkId: `home-${b.id}` });
+    const sofa = furnitureSpots((await api('/api/home/me', undefined, b.token)).body.home.layout).find((x) => x.type === 'sofa')!;
+    const seatSpot = sofa.human[0];
+    const lastAnim = (c: C, id: number) => { for (let k = c.ev.length - 1; k >= 0; k--) { const e = c.ev[k]; if (e.e === 'states' && e.d[id]) return e.d[id][3]; } return -1; };
+    // 소파 자리까지 걸어가서 앉기 자세 → 인정
+    await walk(a, [hj.spawn[0], hj.spawn[1]], [seatSpot.x, seatSpot.z + 0.9]);
+    await walk(a, [seatSpot.x, seatSpot.z + 0.9], [seatSpot.x, seatSpot.z]);
+    b.ev.length = 0;
+    state(a, seatSpot.x, seatSpot.z, seatSpot.x + 0.6, seatSpot.z + 0.3, 5); await sleep(400);
+    check('집 소파 자리에서 앉기 자세 인정 (다른 사람에게 앉은 모습)', lastAnim(b, a.id) === 5, lastAnim(b, a.id));
+    // 소파가 아닌 곳에서 앉기·눕기 → 서 있는 자세로
+    await walk(a, [seatSpot.x, seatSpot.z], [0, 0.8]);
+    state(a, 0, 0.8, 0.6, 1, 5); await sleep(400);
+    check('가구가 없는 곳의 앉기 자세는 무시', lastAnim(b, a.id) === 0);
+    state(a, 0, 0.8, 0.6, 1, 10); await sleep(400);
+    check('침대가 없는 곳의 잠자기 자세는 무시', lastAnim(b, a.id) === 0);
 
     console.log('\n[5. 액자 사진]');
     const up1 = await api('/api/home/me/photos', { dataUrl: PNG1 }, b.token);

@@ -47,7 +47,7 @@ export function CafeBar() {
   );
 }
 
-interface ShopItem { id: string; label: string; icon: string; desc: string; claimed: boolean }
+interface ShopItem { id: string; label: string; icon: string; desc: string; claimed: boolean; category?: 'bed' | 'decor' }
 
 /** 애견샵 실내: 나가기 + 카운터(입주 선물 가구 받기) */
 export function ShopBar() {
@@ -84,12 +84,15 @@ export function ShopBar() {
           <p className="text-sm text-cocoa-soft mt-1">멍글 아파트 주민에게 집 꾸미기 가구를 <b>무료</b>로 드려요. 받은 가구는 집 꾸미기 보관함에 들어가요.</p>
           {!me.residence && <p className="text-sm bg-cream-2 rounded-xl px-3 py-2 mt-2">🏢 아파트에 입주하면 받을 수 있어요.</p>}
           <div className="grid gap-2 mt-3">
-            {items === null ? <p className="text-sm text-cocoa-soft">불러오는 중…</p> : items.map((i) => (
-              <div key={i.id} className="rounded-2xl bg-white p-3 flex items-center gap-3">
+            {items === null ? <p className="text-sm text-cocoa-soft">불러오는 중…</p> : [...items].sort((a, b) => (a.category === 'bed' ? 0 : 1) - (b.category === 'bed' ? 0 : 1)).map((i, k, arr) => (
+              <div key={i.id} className="contents">
+              {(k === 0 || arr[k - 1].category !== i.category) && <div className="font-display text-sm mt-1">{i.category === 'bed' ? '🛏️ 침대' : '🐾 소품'}</div>}
+              <div className="rounded-2xl bg-white p-3 flex items-center gap-3">
                 <span className="text-3xl">{i.icon}</span>
                 <div className="flex-1 min-w-0"><div className="font-display">{i.label}</div><div className="text-xs text-cocoa-soft">{i.desc}</div></div>
                 {i.claimed ? <span className="text-sm text-sage-deep font-display">받음 ✓</span>
                   : <button disabled={!me.residence || busy === i.id} className="btn btn-peach px-4 min-h-[42px] text-sm" onClick={() => claim(i.id)}>받기</button>}
+              </div>
               </div>
             ))}
           </div>

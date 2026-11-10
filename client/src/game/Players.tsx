@@ -17,6 +17,9 @@ import { leaveSeat, sendState, sitOnSeat } from '../net/socket';
 import { openProfile } from '../net/socket';
 import { useStore } from '../store';
 import { petLow } from './fx';
+import { furn, stepFurnitureGoal, stopDogTask, stopFurniture } from './furniture';
+import { spotHeight } from '@shared/home';
+import { SEAT_HEIGHT } from '@shared/world';
 
 const TAG_RANGE = 24;
 
@@ -27,6 +30,9 @@ function usePairRefs(): PairRefs {
     humanDriver: useRef(newHumanDriver()),
     dogDriver: useRef(newDogDriver()),
     tag: useRef<HTMLDivElement | null>(null),
+    zzz: useRef<HTMLDivElement | null>(null),
+    dogZzz: useRef<HTMLDivElement | null>(null),
+    blob: useRef<THREE.Mesh | null>(null),
   };
 }
 
@@ -87,6 +93,10 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
     let mag = Math.min(1, Math.hypot(dx, dz));
     // 벤치에 앉아 있는 중: 이동 입력(키·조이스틱·바닥 클릭·점프)이 들어오면 일어난다
     let seat = local.seated ? SEAT_BY_ID.get(local.seated) ?? null : null;
+    // 집 가구(소파·침대)를 쓰는 중: 이동 입력이 들어오면 가구 앞으로 일어남
+    stepFurnitureGoal();
+    if (furn.use && (mag > 0.05 || local.moveTarget || input.jump)) { input.jump = false; stopFurniture(); }
+    const fu = furn.use;
     if (seat && (mag > 0.05 || local.moveTarget || input.jump)) {
       input.jump = false;
       local.x = seat.frontX; local.z = seat.frontZ;
@@ -169,6 +179,11 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
       local.x = seat.x; local.z = seat.z;
       local.rot = turnToward(local.rot, seat.rot, dt * 10);
       m.speed = 0;
+    } else if (fu) {
+      // 가구 자리에 고정 (가구 충돌 판정 없이 정확한 자리·방향)
+      local.x = fu.human.x; local.z = fu.human.z;
+      local.rot = turnToward(local.rot, fu.human.rot, dt * 10);
+      m.speed = 0; local.jumpY = 0; local.jumpV = 0;
     } else [local.x, local.z] = space.collide(local.x, local.z, 0.3);
     const moved = Math.hypot(local.x - px, local.z - pz);
     const realSpeed = moved / Math.max(dt, 1e-4);
@@ -180,7 +195,7 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
     hd.jumpY = local.jumpY;
     hd.petLow = act?.petLow ?? hd.petLow;
     hd.bag = local.bag;
-    hd.anim = act ? act.anim : seat ? HumanAnim.Sit : local.jumpY > 0 ? HumanAnim.Jump : realSpeed > WALK_SPEED * 1.3 ? HumanAnim.Run : realSpeed > 0.15 ? HumanAnim.Walk : waving ? HumanAnim.Wave : HumanAnim.Idle;
+    hd.anim = act ? act.anim : seat ? HumanAnim.Sit : fu ? (fu.action === 'sit' ? HumanAnim.Sit : fu.action === 'sleep' ? HumanAnim.Sleep : HumanAnim.Lie) : local.jumpY > 0 ? HumanAnim.Jump : realSpeed > WALK_SPEED * 1.3 ? HumanAnim.Run : realSpeed > 0.15 ? HumanAnim.Walk : waving ? HumanAnim.Wave : HumanAnim.Idle;
     hd.wave = waving ? 1 : 0;
     local.humanAnim = hd.anim;
 
@@ -188,8 +203,11 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
     const others: [number, number, number][] = [];
     rendered.forEach((r, id) => others.push([id, r.dx, r.dz]));
     const dpx = brain.x, dpz = brain.z;
+    // 강아지 혼자 쉬는 중(강아지 침대): 보호자가 멀리 가면 따라옴
+    if (furn.dog && Math.hypot(local.x - furn.dog.spot.x, local.z - furn.dog.spot.z) > 5) stopDogTask();
+    const dogSpot = fu?.dog ?? (furn.dog ? { ...furn.dog.spot, mode: furn.dog.mode } : null);
     brain.update(dt, local.x, local.z, local.rot, realSpeed, others, now < local.sitUntil, dogScale,
-      seat ? { x: seat.dogX, z: seat.dogZ, rot: seat.dogRot } : null);
+      seat ? { x: seat.dogX, z: seat.dogZ, rot: seat.dogRot } : dogSpot);
     const dmoved = Math.hypot(brain.x - dpx, brain.z - dpz);
     const dd = refs.dogDriver.current;
     dd.phase = advancePhase(dd.phase, dmoved, dmoved / Math.max(dt, 1e-4), DOG_STEP.walk * dogScale, DOG_STEP.run * dogScale);
@@ -197,9 +215,15 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
     dd.look = brain.look;
     local.dogX = brain.x; local.dogZ = brain.z; local.dogRot = brain.rot; local.dogAnim = brain.anim;
 
-    refs.human.current?.position.set(local.x, 0, local.z);
+    // 가구 위 높이: 소파는 앉는 자세 기준(벤치 높이)과의 차이만큼, 침대는 매트리스 높이
+    const hy = fu ? (fu.action === 'sit' ? fu.human.y - SEAT_HEIGHT : fu.human.y) : 0;
+    const dy = dogSpot && dogSpot.y > 0 ? dogSpot.y * Math.max(0, 1 - Math.hypot(brain.x - dogSpot.x, brain.z - dogSpot.z) / 0.35) : 0;
+    refs.human.current?.position.set(local.x, hy, local.z);
+    if (refs.blob?.current) refs.blob.current.visible = !fu;
     refs.human.current?.rotation.set(0, local.rot, 0);
-    refs.dog.current?.position.set(brain.x, 0, brain.z);
+    refs.dog.current?.position.set(brain.x, dy, brain.z);
+    if (refs.zzz.current) refs.zzz.current.style.display = hd.anim === HumanAnim.Sleep ? '' : 'none';
+    if (refs.dogZzz.current) refs.dogZzz.current.style.display = brain.anim === DogAnim.Sleep ? '' : 'none';
     refs.dog.current?.rotation.set(0, brain.rot, 0);
 
     // 네트워크 전송: 10Hz, 변화가 있을 때만 (정지 시 1초마다 상태 유지)
@@ -217,7 +241,7 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
     }
   });
 
-  return <AvatarPair profile={profile} refs={refs} isMe onSelectDog={() => useStore.setState({ dogMenu: profile.id })} />;
+  return <AvatarPair profile={profile} refs={refs} isMe onSelectDog={() => useStore.setState({ dogMenu: profile.id, furnMenu: null })} />;
 }
 
 export function RemotePlayer({ profile }: { profile: PublicProfile }) {
@@ -227,6 +251,7 @@ export function RemotePlayer({ profile }: { profile: PublicProfile }) {
   const blocked = useStore((s) => s.blocked.some((b) => b.id === profile.id));
   const bag = useStore((s) => !!s.bags[profile.id]);
   useEffect(() => { refs.humanDriver.current.bag = bag; }, [bag, refs.humanDriver]);
+  const layout = useStore((s) => s.home?.layout);
 
   useFrame((_, rawDt) => {
     const dt = Math.max(Math.min(rawDt, 0.05), 1e-3);
@@ -258,9 +283,18 @@ export function RemotePlayer({ profile }: { profile: PublicProfile }) {
     dd.anim = da;
     dd.look += ((da === DogAnim.Look || da === DogAnim.Sit || da === DogAnim.Lie ? Math.sin(performance.now() / 1100) * 0.7 : 0) - dd.look) * Math.min(1, dt * 3);
 
-    refs.human.current.position.set(x, 0, z);
+    // 집 가구 위(소파·침대·강아지 침대)에 앉거나 누워 있으면 그 자리 높이로
+    const furnPose = ha === HumanAnim.Sit || ha === HumanAnim.Lie || ha === HumanAnim.Sleep;
+    const hh = layout && furnPose ? spotHeight(layout, x, z, 'human') : 0;
+    const hy = hh > 0 ? (ha === HumanAnim.Sit ? hh - SEAT_HEIGHT : hh) : 0;
+    const dogPose = da === DogAnim.Sit || da === DogAnim.Lie || da === DogAnim.Sleep;
+    const dy = layout && dogPose ? spotHeight(layout, dx, dz, 'dog') : 0;
+    refs.human.current.position.set(x, hy, z);
+    if (refs.blob?.current) refs.blob.current.visible = hh === 0;
     refs.human.current.rotation.set(0, rot, 0);
-    refs.dog.current.position.set(dx, 0, dz);
+    refs.dog.current.position.set(dx, dy, dz);
+    if (refs.zzz.current) refs.zzz.current.style.display = ha === HumanAnim.Sleep ? '' : 'none';
+    if (refs.dogZzz.current) refs.dogZzz.current.style.display = da === DogAnim.Sleep ? '' : 'none';
     refs.dog.current.rotation.set(0, drot, 0);
     rendered.set(profile.id, { x, z, dx, dz, danim: da });
 
@@ -273,5 +307,5 @@ export function RemotePlayer({ profile }: { profile: PublicProfile }) {
   });
 
   if (blocked) return null;
-  return <AvatarPair profile={profile} refs={refs} onSelect={() => openProfile(profile.id)} onSelectDog={() => useStore.setState({ dogMenu: profile.id })} />;
+  return <AvatarPair profile={profile} refs={refs} onSelect={() => openProfile(profile.id)} onSelectDog={() => useStore.setState({ dogMenu: profile.id, furnMenu: null })} />;
 }

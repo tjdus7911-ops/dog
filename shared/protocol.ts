@@ -53,14 +53,14 @@ export interface ParkInfo {
 }
 
 /** 사람 애니메이션 상태 */
-export const HumanAnim = { Idle: 0, Walk: 1, Run: 2, Wave: 3, Jump: 4, Sit: 5, Pet: 6, Scoop: 7, Toss: 8 } as const;
-export const HUMAN_ANIM_MAX = 8;
+export const HumanAnim = { Idle: 0, Walk: 1, Run: 2, Wave: 3, Jump: 4, Sit: 5, Pet: 6, Scoop: 7, Toss: 8, Lie: 9, Sleep: 10 } as const;
+export const HUMAN_ANIM_MAX = 10;
 /** 점프: 초기 속도(m/s)·중력 — 내 화면과 다른 사람 화면이 같은 궤적을 그리도록 공용 */
 export const JUMP_VELOCITY = 4.4;
 export const GRAVITY = 15;
 /** 강아지 애니메이션 상태 */
-export const DogAnim = { Stand: 0, Walk: 1, Run: 2, Sit: 3, Look: 4, Greet: 5, Lie: 6, Poop: 7 } as const;
-export const DOG_ANIM_MAX = 7;
+export const DogAnim = { Stand: 0, Walk: 1, Run: 2, Sit: 3, Look: 4, Greet: 5, Lie: 6, Poop: 7, Sleep: 8 } as const;
+export const DOG_ANIM_MAX = 8;
 
 /** 산책 중 강아지 배변 (서버가 만들고 보호자만 치울 수 있음) */
 export interface PoopInfo { id: string; ownerId: number; x: number; z: number }
