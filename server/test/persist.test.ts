@@ -55,10 +55,10 @@ const PORT = 3870;
 const BASE = `http://localhost:${PORT}`;
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mungle-persist-'));
 
-function start(): Promise<ChildProcess> {
+function start(extra: Record<string, string> = {}): Promise<ChildProcess> {
   const proc = spawn(process.execPath, ['--import', 'tsx', 'src/main.ts'], {
     cwd: path.resolve(import.meta.dirname, '..'),
-    env: { ...process.env, PORT: String(PORT), MUNGLE_DATA_DIR: dataDir, MUNGLE_BACKUP_HOURS: '0', MUNGLE_GITHUB_REPO: 'me/data', MUNGLE_GITHUB_TOKEN: 'test-token', MUNGLE_GITHUB_API: 'http://localhost:3871', MUNGLE_SYNC_MINUTES: '60' },
+    env: { ...process.env, PORT: String(PORT), MUNGLE_DATA_DIR: dataDir, MUNGLE_BACKUP_HOURS: '0', MUNGLE_GITHUB_REPO: 'me/data', MUNGLE_GITHUB_TOKEN: 'test-token', MUNGLE_GITHUB_API: 'http://localhost:3871', MUNGLE_SYNC_MINUTES: '60', ...extra },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   proc.stderr!.on('data', (d) => { const t = String(d); if (!/ExperimentalWarning|trace-warnings/.test(t)) process.stderr.write(t); });
@@ -109,6 +109,37 @@ async function main() {
     await sleep(500);
     check('사진 삭제가 저장소에도 반영', del.status === 200 && ![...files.keys()].some((k) => k.startsWith('uploads/')));
     await stop(s);
+
+    // ---- 디스크가 남는 서버(오라클 등): 서버 DB가 있으면 저장소는 백업으로만 ----
+    console.log('\n[디스크가 남는 서버 · 서버 밖 백업]');
+    const KEEP = { MUNGLE_GITHUB_RESTORE: 'missing' };
+    const stale = { ...files.get('mungle.db')! }; // 이 시점의 백업본 (곧 오래된 것이 됨)
+    s = await start(KEEP);
+    const su2 = await api('/api/auth/signup', { username: 'local02', password: 'password123', nickname: '새주민', dogName: '콩', agree: true });
+    await stop(s);
+    check('새 가입 후 종료 시 백업 저장', su2.status === 200 && files.get('mungle.db')!.sha !== stale.sha);
+    files.set('mungle.db', stale); // 저장소에 오래된 백업만 남은 상황
+    s = await start(KEEP);
+    check('서버 DB가 있으면 오래된 백업으로 덮어쓰지 않음', (await api('/api/auth/login', { username: 'local02', password: 'password123' })).status === 200);
+    await stop(s);
+    fs.rmSync(dataDir, { recursive: true, force: true }); fs.mkdirSync(dataDir);
+    s = await start(KEEP);
+    check('서버 DB가 없으면(새 서버) 백업에서 되살림', (await api('/api/auth/login', { username: 'keeper01', password: 'password123' })).status === 200);
+    await stop(s);
+
+    // ---- 이사 안내 모드: 예전 서버는 새 주소로 보내고 데이터는 건드리지 않음 ----
+    console.log('\n[예전 주소 → 새 주소 안내]');
+    const putsMoved = puts;
+    s = await start({ MUNGLE_MOVED_TO: 'https://new.example.com/' });
+    const r1 = await fetch(BASE + '/', { redirect: 'manual' });
+    const r2 = await fetch(BASE + '/invite?code=ab12', { redirect: 'manual' });
+    check('첫 화면 → 새 주소로 이동', r1.status === 302 && r1.headers.get('location') === 'https://new.example.com/');
+    check('경로·쿼리 유지', r2.headers.get('location') === 'https://new.example.com/invite?code=ab12');
+    const lg = await api('/api/auth/login', { username: 'keeper01', password: 'password123' });
+    check('API는 새 주소 안내(410)', lg.status === 410 && lg.body.movedTo === 'https://new.example.com');
+    check('상태 확인(health)은 그대로', (await api('/api/health', undefined, undefined, 'GET')).status === 200);
+    await stop(s);
+    check('예전 서버는 백업 저장소에 쓰지 않음', puts === putsMoved);
   } finally {
     gh.close();
     fs.rmSync(dataDir, { recursive: true, force: true });

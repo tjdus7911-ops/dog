@@ -10,6 +10,12 @@ const TOKEN = process.env.MUNGLE_GITHUB_TOKEN ?? '';
 const BRANCH = process.env.MUNGLE_GITHUB_BRANCH ?? 'main';
 const API = (process.env.MUNGLE_GITHUB_API ?? 'https://api.github.com').replace(/\/$/, '');
 export const enabled = !!(REPO && TOKEN);
+/**
+ * 서버를 켤 때 저장소의 DB로 되살리는 조건
+ *  · always (기본): 디스크가 임시인 곳(Render 무료). 켤 때마다 저장소의 최신본으로
+ *  · missing: 디스크가 남는 서버(오라클 등). 서버 DB가 없을 때만(새 서버·복구) 되살리고, 평소엔 백업만
+ */
+const RESTORE_MODE = process.env.MUNGLE_GITHUB_RESTORE === 'missing' ? 'missing' : 'always';
 
 export const DATA_DIR = process.env.MUNGLE_DATA_DIR ?? path.resolve(import.meta.dirname, '../data');
 const DB_FILE = process.env.MUNGLE_DB ?? path.join(DATA_DIR, 'mungle.db');
@@ -71,8 +77,10 @@ function queue(job: () => Promise<unknown>): Promise<void> {
 export async function restore() {
   if (!enabled) return;
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-  const dbBuf = await download('mungle.db');
-  if (dbBuf) {
+  const keepLocal = RESTORE_MODE === 'missing' && fs.existsSync(DB_FILE);
+  const dbBuf = keepLocal ? null : await download('mungle.db');
+  if (keepLocal) console.log('💾 서버 디스크의 데이터를 그대로 사용 (GitHub 저장소는 백업용)');
+  else if (dbBuf) {
     fs.writeFileSync(DB_FILE, dbBuf);
     for (const ext of ['-wal', '-shm']) fs.rmSync(DB_FILE + ext, { force: true });
     console.log(`💾 GitHub에서 데이터 복원 (${(dbBuf.length / 1024).toFixed(1)}KB)`);

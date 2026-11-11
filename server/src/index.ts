@@ -31,6 +31,16 @@ if (process.env.RENDER || process.env.MUNGLE_TRUST_PROXY) app.set('trust proxy',
 app.use(express.json({ limit: '6mb' }));
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
+// ---------- 서버 이사: 예전 주소로 들어오면 새 주소로 안내 (MUNGLE_MOVED_TO=https://새주소) ----------
+const MOVED_TO = process.env.MUNGLE_MOVED_TO?.trim().replace(/\/+$/, '');
+if (MOVED_TO) {
+  console.log(`🚚 이사 안내 모드: 모든 접속을 ${MOVED_TO} 로 보냅니다`);
+  app.use((req, res) => {
+    if (req.method === 'GET' && !/^\/(api|socket\.io)(\/|$)/.test(req.path)) return res.redirect(302, MOVED_TO + req.originalUrl);
+    res.status(410).json({ error: `멍글마을 주소가 바뀌었어요: ${MOVED_TO}`, movedTo: MOVED_TO });
+  });
+}
+
 // ---------- 비회원 둘러보기: 읽기(GET)만 허용하고 쓰기는 회원 전용 ----------
 const MEMBER_ERROR = { error: '이 기능은 멍글마을 주민만 이용할 수 있어요.', code: 'members_only' };
 app.use('/api', (req, res, next) => {
@@ -696,7 +706,10 @@ if (backupHours > 0) {
 }
 
 // GitHub 저장소 영구 저장 (MUNGLE_GITHUB_REPO + MUNGLE_GITHUB_TOKEN 설정 시)
-persist.startDbSync(repo.snapshotBuffer, repo.totalChanges);
-if (persist.enabled) console.log('💾 GitHub 저장소에 데이터 자동 저장 사용 중');
+// (이사 안내 모드인 예전 서버는 저장하지 않음 — 새 서버가 같은 저장소에 백업 중일 수 있음)
+if (!MOVED_TO) {
+  persist.startDbSync(repo.snapshotBuffer, repo.totalChanges);
+  if (persist.enabled) console.log('💾 GitHub 저장소에 데이터 자동 저장 사용 중');
+}
 
 server.listen(PORT, () => console.log(`🐾 멍글마을 서버 실행 중: http://localhost:${PORT}`));

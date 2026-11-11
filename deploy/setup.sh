@@ -6,8 +6,11 @@
 #   - 첫 번째 값: 도메인 (비워 두면 서버 IP로 무료 주소 <IP>.sslip.io 를 자동으로 사용)
 #   - 두 번째·세 번째 값: 이용약관/개인정보 처리방침에 표시할 운영자 이름과 연락처
 #   - 네 번째 값(선택): 운영자(관리 화면) 아이디, 쉼표로 여러 개
+#   - (선택) 서버 밖 백업: 실행 전에 MUNGLE_GITHUB_REPO=소유자/저장소, MUNGLE_GITHUB_TOKEN=토큰 을 export 해 두면
+#     DB·강아지 사진을 그 비공개 저장소에도 자동 저장 (서버가 통째로 사라져도 새 서버에서 되살림)
 #
 # 하는 일: Node.js 22·Caddy 설치 → 코드 내려받기·빌드 → 서비스 등록(자동 재시작) → HTTPS 자동 발급 → 방화벽 80/443 열기
+#          → GitHub main 에 새 코드가 올라오면 5분 안에 자동 업데이트
 # 다시 실행해도 안전합니다. 데이터(/var/lib/mungle)와 설정(/etc/mungle.env)은 덮어쓰지 않습니다.
 set -euo pipefail
 
@@ -15,6 +18,8 @@ DOMAIN="${1:-}"
 OPERATOR="${2:-}"
 CONTACT="${3:-}"
 ADMINS="${4:-}"
+GH_REPO="${MUNGLE_GITHUB_REPO:-}"
+GH_TOKEN="${MUNGLE_GITHUB_TOKEN:-}"
 REPO="${MUNGLE_REPO:-https://github.com/tjdus7911-ops/dog.git}"
 APP=/opt/mungle
 DATA=/var/lib/mungle
@@ -24,7 +29,7 @@ export DEBIAN_FRONTEND=noninteractive
 [ "$(id -u)" -eq 0 ] || { echo "sudo 로 실행해 주세요."; exit 1; }
 say() { printf '\n\033[1;35m🐾 %s\033[0m\n' "$*"; }
 
-say "1/7 기본 패키지 설치"
+say "1/8 기본 패키지 설치"
 apt-get update -y
 apt-get install -y ca-certificates curl gnupg git debian-keyring debian-archive-keyring apt-transport-https
 
@@ -35,14 +40,14 @@ if [ "$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)" -lt 2000 ] && ! swa
   grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
 fi
 
-say "2/7 Node.js 22 설치"
+say "2/8 Node.js 22 설치"
 if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 22 ]; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get install -y nodejs
 fi
 node -v
 
-say "3/7 Caddy(HTTPS 웹서버) 설치"
+say "3/8 Caddy(HTTPS 웹서버) 설치"
 if ! command -v caddy >/dev/null; then
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
@@ -50,14 +55,16 @@ if ! command -v caddy >/dev/null; then
   apt-get install -y caddy
 fi
 
-say "4/7 코드 내려받기·빌드"
+say "4/8 코드 내려받기·빌드"
 id mungle >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/mungle --shell /usr/sbin/nologin mungle
 mkdir -p "$DATA" && chown mungle:mungle "$DATA"
-if [ -d "$APP/.git" ]; then git -C "$APP" pull --ff-only; else git clone "$REPO" "$APP"; fi
+# 코드 폴더는 mungle 사용자 소유 — git 도 그 사용자로 실행 (root 로 하면 소유자 불일치로 거부됨)
+if [ ! -d "$APP/.git" ]; then git clone "$REPO" "$APP"; fi
 chown -R mungle:mungle "$APP"
+sudo -u mungle -H git -C "$APP" pull --ff-only
 sudo -u mungle -H bash -c "cd '$APP' && npm ci --include=dev --no-audit --no-fund && npm run build"
 
-say "5/7 서비스 등록"
+say "5/8 서비스 등록"
 if [ ! -f "$ENVFILE" ]; then
   cat > "$ENVFILE" <<ENV
 # 멍글마을 서버 설정 — 바꾼 뒤: sudo systemctl restart mungle
@@ -79,6 +86,14 @@ else
   if [ -n "$OPERATOR" ]; then sed -i "s|^MUNGLE_OPERATOR=.*|MUNGLE_OPERATOR=$OPERATOR|" "$ENVFILE"; fi
   if [ -n "$CONTACT" ]; then sed -i "s|^MUNGLE_CONTACT=.*|MUNGLE_CONTACT=$CONTACT|" "$ENVFILE"; fi
   if [ -n "$ADMINS" ]; then sed -i "s|^MUNGLE_ADMINS=.*|MUNGLE_ADMINS=$ADMINS|" "$ENVFILE"; fi
+fi
+# 서버 밖 백업(선택): 값이 들어온 경우에만 기록. 이 서버는 디스크가 남으므로 '서버 DB가 없을 때만' 저장소에서 되살림
+setenv() { if grep -q "^$1=" "$ENVFILE"; then sed -i "s|^$1=.*|$1=$2|" "$ENVFILE"; else echo "$1=$2" >> "$ENVFILE"; fi; }
+if [ -n "$GH_REPO" ] && [ -n "$GH_TOKEN" ]; then
+  setenv MUNGLE_GITHUB_REPO "$GH_REPO"
+  setenv MUNGLE_GITHUB_TOKEN "$GH_TOKEN"
+  setenv MUNGLE_GITHUB_RESTORE missing
+  echo "   서버 밖 백업 사용: $GH_REPO"
 fi
 
 cat > /etc/systemd/system/mungle.service <<UNIT
@@ -102,13 +117,13 @@ systemctl daemon-reload
 systemctl enable mungle >/dev/null
 systemctl restart mungle
 
-say "6/7 방화벽 80/443 열기"
+say "6/8 방화벽 80/443 열기"
 for p in 80 443; do
   iptables -C INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport "$p" -j ACCEPT
 done
 if command -v netfilter-persistent >/dev/null; then netfilter-persistent save >/dev/null 2>&1 || true; fi
 
-say "7/7 HTTPS 주소 설정"
+say "7/8 HTTPS 주소 설정"
 if [ -z "$DOMAIN" ]; then
   IP="$(curl -fsS https://api.ipify.org || curl -fsS https://ifconfig.me)"
   DOMAIN="${IP//./-}.sslip.io"
@@ -120,8 +135,35 @@ $DOMAIN {
 }
 CADDY
 systemctl reload caddy || systemctl restart caddy
+echo "https://$DOMAIN" > /root/mungle-url.txt
 
-for i in $(seq 1 30); do curl -fsS http://127.0.0.1:3001/api/health >/dev/null 2>&1 && break; sleep 1; done
+say "8/8 자동 업데이트 (GitHub main → 5분 안에 반영)"
+cat > /etc/systemd/system/mungle-update.service <<UNIT
+[Unit]
+Description=Mungle Village auto update (GitHub main)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash $APP/deploy/autoupdate.sh
+UNIT
+cat > /etc/systemd/system/mungle-update.timer <<UNIT
+[Unit]
+Description=Check GitHub main for Mungle Village updates every 5 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now mungle-update.timer >/dev/null
+
+for _ in $(seq 1 30); do curl -fsS http://127.0.0.1:3001/api/health >/dev/null 2>&1 && break; sleep 1; done
 if curl -fsS http://127.0.0.1:3001/api/health >/dev/null 2>&1; then
   say "완료! 1~2분 뒤 접속해 보세요 → https://$DOMAIN"
   echo "   (주소가 안 열리면 오라클 콘솔에서 80·443 포트 수신 규칙을 추가했는지 확인)"
