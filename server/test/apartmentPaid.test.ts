@@ -128,7 +128,7 @@ async function main() {
     check('가입 보상·코인 없음', (await api('/api/coins', undefined, g.token)).status === 403);
     check('출석 보상 없음', (await api('/api/coins/attendance', {}, g.token)).status === 403);
     const gs: Socket = io(BASE, { auth: { token: g.token }, transports: ['websocket'] });
-    await new Promise((r) => gs.on('connect', r));
+    await new Promise<void>((r) => gs.on('connect', () => r()));
     const emit = (ev: string, data?: unknown) => new Promise<any>((r) => gs.emit(ev, data, r));
     const lob = await emit('park:join', { parkId: 'lobby-1' });
     check('아파트 로비 구경 가능', lob.ok === true, lob);
