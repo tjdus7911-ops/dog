@@ -5,6 +5,8 @@
 set -euo pipefail
 APP="${MUNGLE_APP:-/opt/mungle}"
 BRANCH="${MUNGLE_BRANCH:-main}"
+# 저장소의 deploy/branch 가 있으면 그 브랜치를 따라감 (서버에 접속하지 않고 따라갈 브랜치를 바꾸기 위함)
+if [ -f "$APP/deploy/branch" ]; then B="$(tr -d '[:space:]' < "$APP/deploy/branch")"; [ -z "$B" ] || BRANCH="$B"; fi
 git_app() { sudo -u mungle -H git "$@"; }
 
 # 추가 주소(도메인): 저장소의 deploy/domains (한 줄에 하나) 를 Caddy 에 반영 — 5분마다 확인, 바뀐 경우에만 적용
