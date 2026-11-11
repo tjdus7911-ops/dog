@@ -85,14 +85,15 @@ function Garden() {
   );
 }
 
-function CameraFocus({ focus, controls }: { focus: StageFocus; controls: React.MutableRefObject<OrbitImpl | null> }) {
+function CameraFocus({ focus, controls, compact }: { focus: StageFocus; controls: React.MutableRefObject<OrbitImpl | null>; compact: boolean }) {
   const tmp = useMemo(() => new THREE.Vector3(), []);
-  const last = useRef<StageFocus | null>(null);
+  const last = useRef<string | null>(null);
   const animT = useRef(0);
   useFrame(({ camera }, dt) => {
     const c = controls.current;
     if (!c) return;
-    if (last.current !== focus) { last.current = focus; animT.current = 1.2; }
+    const key = `${focus}:${compact}`;
+    if (last.current !== key) { last.current = key; animT.current = 1.2; }
     if (animT.current <= 0) return;
     animT.current -= dt;
     const f = FOCUS[focus];
@@ -100,14 +101,15 @@ function CameraFocus({ focus, controls }: { focus: StageFocus; controls: React.M
     c.target.lerp(tmp.set(...f.target), k);
     // 현재 방향은 유지하고 거리만 맞춤
     const dir = camera.position.clone().sub(c.target).normalize();
-    const want = tmp.copy(c.target).addScaledVector(dir, f.dist);
+    // 모바일의 낮고 넓은 미리보기에서는 조금 더 가까이 (빈 하늘이 줄고 아바타가 크게 보임)
+    const want = tmp.copy(c.target).addScaledVector(dir, f.dist * (compact ? 0.84 : 1));
     camera.position.lerp(want, k);
     c.update();
   });
   return null;
 }
 
-export function AvatarStage({ human, dog, walking, focus }: { human: HumanAvatar; dog: DogAvatar; walking: boolean; focus: StageFocus }) {
+export function AvatarStage({ human, dog, walking, focus, compact = false }: { human: HumanAvatar; dog: DogAvatar; walking: boolean; focus: StageFocus; compact?: boolean }) {
   const controls = useRef<OrbitImpl | null>(null);
   return (
     <Canvas camera={{ position: [0.6, 1.05, 3.25], fov: 36 }} dpr={[1, 2]} gl={{ antialias: true }}>
@@ -119,7 +121,7 @@ export function AvatarStage({ human, dog, walking, focus }: { human: HumanAvatar
       <Actors human={human} dog={dog} walking={walking} />
       <OrbitControls ref={controls as never} enablePan={false} enableDamping minDistance={1.2} maxDistance={5}
         minPolarAngle={0.6} maxPolarAngle={1.62} target={FOCUS.both.target} />
-      <CameraFocus focus={focus} controls={controls} />
+      <CameraFocus focus={focus} controls={controls} compact={compact} />
     </Canvas>
   );
 }

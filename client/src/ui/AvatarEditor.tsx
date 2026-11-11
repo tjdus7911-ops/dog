@@ -113,6 +113,15 @@ export default function AvatarEditor({ mode }: { mode: 'onboarding' | 'edit' }) 
   const [walking, setWalking] = useState(false);
   const [focus, setFocus] = useState<StageFocus>('both');
   const [expanded, setExpanded] = useState(false);
+  // 모바일(768px 미만) 여부 — 아바타 예시를 미리보기 바로 아래 가로 카드로 보여 줌
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const on = () => setIsMobile(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  const mobilePresets = isMobile && tab === 'human' && !expanded;
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const h = (patch: Partial<HumanAvatar>) => setHuman((p) => ({ ...p, ...patch }));
@@ -280,23 +289,35 @@ export default function AvatarEditor({ mode }: { mode: 'onboarding' | 'edit' }) 
       <div className="flex-1 min-h-0 flex flex-col md:flex-row gap-3 md:gap-5 px-3 md:px-7 pb-3 md:pb-6">
         {/* 왼쪽: 미리보기 + 예시 */}
         <div className="md:w-[41%] shrink-0 flex flex-col gap-3 md:gap-4 min-h-0">
-          <div className={`${expanded ? 'fixed inset-0 z-50 rounded-none' : 'relative rounded-[28px] h-[34vh] md:h-auto md:flex-1 min-h-[220px]'} overflow-hidden shadow-[0_6px_24px_rgba(122,82,56,.14)] bg-[#bfe3f7]`}>
-            <AvatarStage human={human} dog={dog} walking={walking} focus={focus} />
-            <div className="absolute right-3 top-3 flex flex-col gap-2.5">
+          <div data-testid="avatar-preview" className={`${expanded ? 'fixed inset-0 z-50 rounded-none' : `relative rounded-[24px] md:rounded-[28px] ${mobilePresets ? 'h-[clamp(168px,26vh,240px)]' : 'h-[34vh] min-h-[220px]'} md:h-auto md:flex-1 md:min-h-[220px]`} overflow-hidden shadow-[0_6px_24px_rgba(122,82,56,.14)] bg-[#bfe3f7]`}>
+            <AvatarStage human={human} dog={dog} walking={walking} focus={focus} compact={isMobile && !expanded} />
+            <div className="absolute right-2.5 top-2.5 md:right-3 md:top-3 flex flex-col gap-1.5 [@media(max-height:700px)]:gap-1 md:gap-2.5">
               {stageButtons.map(([icon, label, onClick, active]) => (
                 <button key={label} onClick={onClick} title={label} aria-label={label}
-                  className={`w-11 h-11 md:w-12 md:h-12 rounded-full grid place-items-center text-lg shadow-md transition ${active ? 'bg-[#f4776a] text-white' : 'bg-white/95 hover:bg-white'}`}>{icon}</button>
+                  className={`w-9 h-9 text-base md:w-12 md:h-12 md:text-lg rounded-full grid place-items-center shadow-md transition ${active ? 'bg-[#f4776a] text-white' : 'bg-white/95 hover:bg-white'}`}>{icon}</button>
               ))}
             </div>
-            <div className="absolute bottom-3 inset-x-0 flex justify-center pointer-events-none">
-              <span className="font-display text-white text-lg md:text-xl drop-shadow-[0_1px_3px_rgba(0,0,0,.35)]">⟲ 360° ⟳</span>
+            <div className="absolute bottom-2 md:bottom-3 inset-x-0 flex justify-center pointer-events-none">
+              <span className="font-display text-white text-base md:text-xl drop-shadow-[0_1px_3px_rgba(0,0,0,.35)]">⟲ 360° ⟳</span>
             </div>
           </div>
+          {/* 모바일: 아바타 예시 (PC와 같은 EXAMPLES · 같은 적용 방식) — 가로로 넘겨 보는 카드 */}
+          {mobilePresets && (
+            <div className="md:hidden -mx-3 shrink-0" data-testid="avatar-presets-mobile">
+              <div className="px-4 font-display text-sm mb-1.5 flex items-center gap-1.5 [@media(max-height:700px)]:text-[13px] [@media(max-height:700px)]:mb-1"><span className="text-[#f4776a]">●</span> 아바타 예시 <span className="text-xs text-cocoa-soft font-body">· 누르면 바로 적용돼요</span></div>
+              <div className="flex gap-2.5 overflow-x-auto snap-x snap-mandatory scroll-px-4 px-4 pb-1 no-scrollbar" style={{ WebkitOverflowScrolling: 'touch' }}>
+                {EXAMPLES.map((ex, i) => (
+                  <ExampleCard key={i} a={ex} bg={EXAMPLE_BG[i % EXAMPLE_BG.length]} onClick={() => setHuman({ ...ex })}
+                    selected={sameHuman(human, ex)} className="snap-start shrink-0 w-[30%] max-w-[112px] [@media(max-height:700px)]:max-w-[84px]" testId={`avatar-preset-${i}`} />
+                ))}
+              </div>
+            </div>
+          )}
           {tab === 'human' && !expanded && (
             <div className="hidden md:block panel !rounded-[24px] p-3.5 shrink-0">
               <div className="font-display text-sm mb-2 flex items-center gap-1.5"><span className="text-[#f4776a]">●</span> 아바타 예시 <span className="text-xs text-cocoa-soft font-body">· 누르면 바로 적용돼요</span></div>
               <div className="grid grid-cols-4 gap-2.5">
-                {EXAMPLES.map((ex, i) => <ExampleCard key={i} a={ex} bg={['#e6ecf7', '#fde3e6', '#ece7f4', '#f1e6f7'][i]} onClick={() => setHuman({ ...ex })} />)}
+                {EXAMPLES.map((ex, i) => <ExampleCard key={i} a={ex} bg={EXAMPLE_BG[i % EXAMPLE_BG.length]} onClick={() => setHuman({ ...ex })} />)}
               </div>
             </div>
           )}
@@ -327,10 +348,18 @@ function NoneBtn({ selected, onClick }: { selected: boolean; onClick: () => void
   );
 }
 
-function ExampleCard({ a, bg, onClick }: { a: HumanAvatar; bg: string; onClick: () => void }) {
+const EXAMPLE_BG = ['#e6ecf7', '#fde3e6', '#ece7f4', '#f1e6f7'];
+/** 지금 아바타가 예시와 같은지 (예시에 있는 항목만 비교) */
+function sameHuman(cur: HumanAvatar, ex: HumanAvatar) {
+  return (Object.keys(ex) as (keyof HumanAvatar)[]).every((k) => JSON.stringify(cur[k]) === JSON.stringify(ex[k]));
+}
+
+function ExampleCard({ a, bg, onClick, selected, className = '', testId }: { a: HumanAvatar; bg: string; onClick: () => void; selected?: boolean; className?: string; testId?: string }) {
   const src = useHumanThumb(a, 'bust');
+  // selected 를 넘기는 곳(모바일)에서만 선택 테두리 — PC 카드 모양은 그대로
+  const ring = selected === undefined ? '' : selected ? 'border-[3px] border-[#f4776a]' : 'border-[3px] border-transparent';
   return (
-    <button onClick={onClick} className="rounded-2xl aspect-square grid place-items-center overflow-hidden hover:scale-[1.03] transition" style={{ background: bg }} aria-label="예시 아바타 적용">
+    <button onClick={onClick} data-testid={testId} aria-pressed={selected} className={`rounded-2xl aspect-square grid place-items-center overflow-hidden hover:scale-[1.03] transition ${ring} ${className}`} style={{ background: bg }} aria-label="예시 아바타 적용">
       {src ? <img src={src} alt="" className="w-full h-full object-contain" /> : <span className="w-1/2 h-1/2 rounded-xl bg-white/60 animate-pulse" />}
     </button>
   );
