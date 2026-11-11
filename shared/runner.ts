@@ -5,6 +5,9 @@
 // 아래 악보 데이터로 브라우저에서 직접 합성한다(멍글마을 자체 편곡). 그래서 음원과 비트 타임라인이 항상 일치한다.
 
 import { SONG_DEFS } from './songs';
+import { generateChart, MIN_GAP, type SongMeta } from './runnerChart';
+import { DUCK_MS, EARLY_MARGIN_MS, JUMP_MS, overlapWindow } from './runnerPose';
+export { DUCK_MS, JUMP_MS };
 
 export const RUNNER_GAME_VERSION = 1;
 
@@ -31,11 +34,11 @@ export interface CourseInfo {
 }
 
 export const COURSES: CourseInfo[] = [
-  { id: 'elise', order: 1, title: '엘리제를 위하여', composer: '베토벤', difficulty: 1, course: '벚꽃 산책길', theme: 'cherry', available: true, patternVersion: 1, speed: 4.6 },
-  { id: 'danube', order: 2, title: '아름답고 푸른 도나우', composer: '요한 슈트라우스 2세', difficulty: 2, course: '구름 정원', theme: 'cloud', available: true, patternVersion: 1, speed: 4.6 },
-  { id: 'turkish', order: 3, title: '터키 행진곡', composer: '모차르트', difficulty: 3, course: '장난감 마을', theme: 'toy', available: true, patternVersion: 1, speed: 5.0 },
-  { id: 'revolutionary', order: 4, title: '혁명 연습곡', composer: '쇼팽', difficulty: 4, course: '별빛 숲길', theme: 'star', available: true, patternVersion: 1, speed: 5.3 },
-  { id: 'summer', order: 5, title: '사계 중 여름 3악장', composer: '비발디', difficulty: 5, course: '폭풍 질주', theme: 'storm', available: true, patternVersion: 1, speed: 5.5 },
+  { id: 'elise', order: 1, title: '엘리제를 위하여', composer: '베토벤', difficulty: 1, course: '벚꽃 산책길', theme: 'cherry', available: true, patternVersion: 2, speed: 4.6 },
+  { id: 'danube', order: 2, title: '아름답고 푸른 도나우', composer: '요한 슈트라우스 2세', difficulty: 2, course: '구름 정원', theme: 'cloud', available: true, patternVersion: 2, speed: 4.6 },
+  { id: 'turkish', order: 3, title: '터키 행진곡', composer: '모차르트', difficulty: 3, course: '장난감 마을', theme: 'toy', available: true, patternVersion: 2, speed: 5.0 },
+  { id: 'revolutionary', order: 4, title: '혁명 연습곡', composer: '쇼팽', difficulty: 4, course: '별빛 숲길', theme: 'star', available: true, patternVersion: 2, speed: 5.3 },
+  { id: 'summer', order: 5, title: '사계 중 여름 3악장', composer: '비발디', difficulty: 5, course: '폭풍 질주', theme: 'storm', available: true, patternVersion: 2, speed: 5.5 },
 ];
 export const COURSE_BY_ID = new Map(COURSES.map((c) => [c.id, c]));
 
@@ -47,9 +50,6 @@ export const GRADE_POINTS: Record<Grade, number> = { perfect: 100, great: 70, go
 const GRADE_ACC: Record<Grade, number> = { perfect: 1, great: 0.7, good: 0.4, miss: 0 };
 /** 콤보 보너스: 10콤보마다 +10%, 최대 +100% (모든 사용자 동일) */
 export const comboMultiplier = (combo: number) => 1 + Math.min(10, Math.floor(combo / 10)) * 0.1;
-/** 점프 체공 / 몸 낮추기 유지 시간 (ms) */
-export const JUMP_MS = 460;
-export const DUCK_MS = 560;
 
 // ---------------------------------------------------------------- 악보 (엘리제를 위하여 · 멍글마을 편곡)
 // 3/8박자, 한 마디 = 16분음표 6칸. [칸, 음(MIDI), 길이(16분음표 수), 손(0 오른손 1 왼손)]
@@ -145,36 +145,7 @@ export interface Obstacle {
 }
 export interface Chart { courseId: string; difficulty: RunnerDifficulty; patternVersion: number; obstacles: Obstacle[]; duration: number; maxScore: number; bpm: number }
 
-const ALL: Lane[] = [-1, 0, 1];
-const LANE_CODE: Record<string, Lane> = { L: -1, C: 0, R: 1 };
 
-/**
- * 장애물 패턴 표 — 사람이 악보를 보며 직접 확인·수정할 수 있는 형식.
- * [마디 번호(ELISE_PLAN 순서, 0부터), 마디 안 16분음표 칸(0=첫 박, 3=둘째 박), 종류, 레인, 방향]
- *  - 'J' 통나무(점프) · 'D' 높은 리본 막대(숙이기)
- *  - 'P' 화분: 레인 = 막힌 레인 (L/C/R) · 'F' 울타리: 레인 = 비어 있는 레인 (나머지 둘은 막힘)
- *  - 방향(안내 화살표): 'S' 좌우 아무 쪽 · 'L' 왼쪽 · 'R' 오른쪽
- * 마디 시각은 템포 지도(ELISE_PLAN)에서 계산하므로 루바토·리타르단도가 그대로 반영된다.
- * 규칙(validateChart): 장애물 간격 ≥ 0.52초, 레인 장애물은 한 번 이동으로 피할 수 있게.
- */
-type PatternRow = [number, number, 'J' | 'D' | 'P' | 'F', string?, ('S' | 'L' | 'R')?];
-const ELISE_PATTERN: PatternRow[] = [
-  // 1절: 마디 2부터 (마디 0·1은 전주)
-  [2, 0, 'P', 'C', 'S'], [3, 0, 'J'], [4, 0, 'D'], [5, 0, 'J'],
-  [6, 0, 'F', 'C', 'R'], [7, 0, 'J'], [8, 0, 'D'], [9, 0, 'J'],
-  // 1절 반복
-  [10, 0, 'P', 'C', 'S'], [11, 0, 'J'], [12, 0, 'D'], [13, 0, 'J'],
-  [14, 0, 'P', 'L', 'R'], [15, 0, 'J'], [16, 0, 'D'], [17, 0, 'J'],
-  // 가운데 부분 (셈여림이 세서 아르페지오 시작 박에도 장애물)
-  [18, 0, 'J'], [18, 3, 'F', 'R', 'R'], [19, 0, 'D'], [20, 0, 'J'], [20, 3, 'F', 'C', 'L'], [21, 0, 'P', 'C', 'S'],
-  // 2절 (밝고 강하게)
-  [22, 0, 'P', 'L', 'R'], [23, 0, 'J'], [23, 3, 'P', 'C', 'S'], [24, 0, 'D'], [25, 0, 'J'],
-  [26, 0, 'F', 'C', 'R'], [27, 0, 'J'], [27, 3, 'P', 'C', 'S'], [28, 0, 'D'], [29, 0, 'J'],
-  [30, 0, 'J'], [30, 3, 'F', 'C', 'R'], [31, 0, 'D'], [32, 0, 'J'], [32, 3, 'F', 'R', 'R'], [33, 0, 'P', 'R', 'L'],
-  // 마지막 주제 → 리타르단도로 끝
-  [34, 0, 'P', 'C', 'S'], [35, 0, 'J'], [36, 0, 'D'], [37, 0, 'J'],
-  [38, 0, 'F', 'C', 'R'], [39, 0, 'J'], [40, 0, 'D'], [41, 0, 'J'],
-];
 /** 기본 템포: 3/8박자 점4분음표 기준 BPM (마디마다 ELISE_PLAN 배율로 변함) */
 export const ELISE_BPM = Math.round(60 / (ELISE_SIXTEENTH * 3));
 
@@ -182,7 +153,7 @@ export const ELISE_BPM = Math.round(60 / (ELISE_SIXTEENTH * 3));
 export type RunnerDifficulty = 'easy' | 'normal' | 'hard';
 export const DIFFICULTIES: RunnerDifficulty[] = ['easy', 'normal', 'hard'];
 export const DIFFICULTY_LABEL: Record<RunnerDifficulty, string> = { easy: 'EASY', normal: 'NORMAL', hard: 'HARD' };
-export const DIFFICULTY_DESC: Record<RunnerDifficulty, string> = { easy: '마디 첫 박만 · 느리게', normal: '기본 패턴', hard: '박 사이 장애물 추가 · 빠르게' };
+export const DIFFICULTY_DESC: Record<RunnerDifficulty, string> = { easy: '주요 박자만 · 한 번에 한 동작', normal: '반 박 섞임 · 2~3개 연속', hard: '16분음표 멜로디 · 4~6개 연속 · 빠르게' };
 /** 난이도별 달리는 속도 배율 (화면에서 장애물이 다가오는 빠르기 — 판정 시각은 음악 기준 그대로) */
 export const DIFFICULTY_SPEED: Record<RunnerDifficulty, number> = { easy: 0.9, normal: 1, hard: 1.14 };
 export const isDifficulty = (v: unknown): v is RunnerDifficulty => v === 'easy' || v === 'normal' || v === 'hard';
@@ -198,69 +169,20 @@ export function parseRankKey(key: string): { courseId: string; difficulty: Runne
 }
 export const ALL_RANK_KEYS = COURSES.filter((c) => c.available).flatMap((c) => DIFFICULTIES.map((d) => rankKey(c.id, d)));
 
-/** 엘리제 HARD: 마디 가운데(칸 3)에 점프·숙이기 추가 */
-const ELISE_HARD_EXTRA: PatternRow[] = [
-  [3, 3, 'D'], [5, 3, 'D'], [7, 3, 'D'], [21, 3, 'D'], [11, 3, 'D'], [13, 3, 'D'], [15, 3, 'D'], [17, 3, 'D'],
-  [25, 3, 'D'], [29, 3, 'D'], [33, 3, 'J'], [35, 3, 'D'], [37, 3, 'D'], [39, 3, 'D'],
-];
-
-/**
- * 패턴 문자열 → 패턴 표. 화분·울타리 레인은 '지금 있어야 할 레인'을 따라가며 정한다:
- *  화분 = 지금 레인을 막음(가운데면 좌우 아무 쪽, 가장자리면 가운데로) / 울타리 = 바로 옆 레인 하나만 열림
- */
-export function resolveLanes(tokens: string[], mid: number): PatternRow[] {
-  const rows: PatternRow[] = [];
-  let cur: Lane = 0, fenceSide: Lane = 1;
-  const code = (l: Lane) => (l === -1 ? 'L' : l === 1 ? 'R' : 'C');
-  tokens.forEach((tok, bar) => {
-    [...tok].forEach((k, i) => {
-      if (k === '.') return;
-      const pos = i === 0 ? 0 : mid;
-      if (k === 'J' || k === 'D') { rows.push([bar, pos, k]); return; }
-      if (k === 'P') {
-        // 막힌 레인 = 지금 레인. 가운데에서는 오른쪽으로 피한다고 보고(validateChart와 같은 규칙), 가장자리에서는 가운데로
-        rows.push([bar, pos, 'P', code(cur), cur === 0 ? 'S' : cur === -1 ? 'R' : 'L']);
-        cur = cur === 0 ? 1 : 0;
-        return;
-      }
-      if (k === 'F') {
-        // 열린 레인 = 지금 레인 바로 옆 (가운데면 좌우를 번갈아)
-        const open: Lane = cur === 0 ? fenceSide : 0;
-        if (cur === 0) fenceSide = (fenceSide === 1 ? -1 : 1) as Lane;
-        rows.push([bar, pos, 'F', code(open), open > cur ? 'R' : 'L']);
-        cur = open;
-      }
-    });
-  });
-  return rows;
+/** 곡의 박자 구조 (한 마디 16분음표 칸 수 · 한 박의 칸 수) */
+export function songMeta(courseId: string): SongMeta | null {
+  if (courseId === 'elise') return { barLen: 6, beatLen: 3 };
+  const d = SONG_DEFS[courseId];
+  return d ? { barLen: d.barLen, beatLen: d.beatLen } : null;
 }
 
-/** 패턴 표 → 판정 시각이 붙은 장애물 목록 */
+/** 악보 → 판정 시각이 붙은 장애물 목록 (곡·난이도별로 악보의 멜로디·강세·셈여림에서 만듦 — runnerChart.ts) */
 export function buildChart(courseId: string, difficulty: RunnerDifficulty = 'normal'): Chart | null {
   const song = buildSong(courseId);
   const info = COURSE_BY_ID.get(courseId);
-  if (!song || !info?.available) return null;
-  let rows: PatternRow[];
-  if (courseId === 'elise') {
-    // 엘리제: 손으로 정한 패턴 표 (EASY는 마디 첫 박만, HARD는 가운데 칸 추가)
-    rows = difficulty === 'easy' ? ELISE_PATTERN.filter((r) => r[1] === 0)
-      : difficulty === 'hard' ? [...ELISE_PATTERN, ...ELISE_HARD_EXTRA].sort((a, b) => a[0] - b[0] || a[1] - b[1]) : ELISE_PATTERN;
-  } else {
-    const def = SONG_DEFS[courseId];
-    const toks = (difficulty === 'hard' ? def.hard : def.normal).trim().split(/\s+/);
-    // EASY: 마디 첫 글자만 (가운데 칸 장애물 없음) + 4마디 프레이즈의 마지막 마디는 쉬어 감
-    rows = resolveLanes(difficulty === 'easy' ? toks.map((t, i) => (i % 4 === 3 ? '.' : t[0])) : toks, def.mid);
-  }
-  const obs: Obstacle[] = rows.map(([bar, pos, k, lane, dir], id) => {
-    const b = song.bars[bar];
-    const t = Math.round((b.t + (b.len / song.barLen) * pos) * 1000);
-    if (k === 'J') return { id, t, kind: 'log', blocked: ALL, safe: [], need: 'jump', bar, pos };
-    if (k === 'D') return { id, t, kind: 'ribbon', blocked: ALL, safe: [], need: 'duck', bar, pos };
-    const l = LANE_CODE[lane ?? 'C'];
-    const need = dir === 'L' ? 'left' : dir === 'R' ? 'right' : 'side';
-    if (k === 'P') return { id, t, kind: 'pot', blocked: [l], safe: ALL.filter((x) => x !== l), need, bar, pos };
-    return { id, t, kind: 'fence', blocked: ALL.filter((x) => x !== l), safe: [l], need, bar, pos };
-  });
+  const meta = songMeta(courseId);
+  if (!song || !info?.available || !meta) return null;
+  const obs: Obstacle[] = generateChart(song, meta, difficulty, courseSpeed(courseId, difficulty)).map((o, id) => ({ ...o, id }));
   // 최대 점수: 모두 PERFECT로 이어 간 경우
   let max = 0;
   obs.forEach((_, i) => { max += Math.round(GRADE_POINTS.perfect * comboMultiplier(i)); });
@@ -271,28 +193,67 @@ export function buildChart(courseId: string, difficulty: RunnerDifficulty = 'nor
 }
 
 /**
- * 피할 수 없는 배치가 없는지 검사 (테스트·개발용). 문제 목록을 돌려준다.
- * - 장애물 사이 최소 간격 (점프 체공·숙이기 시간 고려)
- * - 레인 장애물: 안전한 레인이 있고, 패턴이 기대하는 레인에서 한 칸 이동으로 닿을 수 있음
+ * 출발 카운트다운(카운트인): 곡의 첫 박에 맞춰 3번 — 박 간격의 정수배(0.6~1.2초)로 센다.
+ * 반환: 각 숫자(3·2·1)가 시작되는 음악 시각(ms, 음수 가능)과 '출발!' 시각(= 첫 박)
+ */
+export function countIn(song: Song): { ticks: number[]; go: number; interval: number } {
+  const b0 = song.bars[0];
+  const meta = songMeta(song.courseId) ?? { barLen: song.barLen, beatLen: song.barLen };
+  const beat = (b0.len / song.barLen) * meta.beatLen * 1000;
+  const n = Math.max(1, Math.ceil(600 / beat));
+  const interval = Math.round(beat * n);
+  const go = Math.round(b0.t * 1000);
+  return { ticks: [go - 3 * interval, go - 2 * interval, go - interval], go, interval };
+}
+
+/** 모든 장애물을 정확한 박자에 피하는 입력 (테스트·검증용 '완벽한 플레이어') */
+export function perfectInputs(chart: Chart, offset = 0): RunnerInput[] {
+  const out: RunnerInput[] = [];
+  let lane: Lane = 0;
+  for (const o of chart.obstacles) {
+    const t = o.t + offset;
+    if (o.need === 'jump') out.push({ t, a: 'J' });
+    else if (o.need === 'duck') out.push({ t, a: 'D' });
+    else if (o.blocked.includes(lane)) {
+      const to = o.safe.filter((s) => Math.abs(s - lane) === 1).sort((a, b) => b - a)[0];
+      if (to === undefined) continue;
+      out.push({ t, a: to > lane ? 'R' : 'L' });
+      lane = to;
+    }
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+
+/**
+ * 클리어할 수 없는 배치가 없는지 검사 (테스트·개발용). 문제 목록을 돌려준다.
+ * - 동작 사이 최소 시간 (점프 체공·숙이기 유지·레인 이동) — runnerChart.MIN_GAP
+ * - 아직 몸을 지나가는 장애물과 부딪히는 동작 (통나무 위에서 숙이기, 리본 아래에서 점프, 막힌 레인으로 이동)
+ * - 레인 장애물: 지금 있을 수 있는 모든 레인에서 한 번 이동으로 피할 수 있고, 반드시 움직여야 함
  */
 export function validateChart(c: Chart): string[] {
   const errs: string[] = [];
-  let lane: Lane = 0;
+  const speed = courseSpeed(c.courseId, c.difficulty);
+  const act = (o: Obstacle) => (o.need === 'jump' ? 'J' : o.need === 'duck' ? 'D' : 'M');
+  let lanes: Lane[] = [0];
   c.obstacles.forEach((o, i) => {
-    const prev = c.obstacles[i - 1];
-    if (prev) {
-      const gap = o.t - prev.t;
-      if (gap < 520) errs.push(`#${o.id} 앞 장애물과 간격이 ${gap}ms`);
-      if (prev.need === 'jump' && o.need === 'jump' && gap < JUMP_MS + 40) errs.push(`#${o.id} 점프 착지 전에 다음 점프`);
-      if (prev.need === 'duck' && o.need === 'duck' && gap < DUCK_MS + 40) errs.push(`#${o.id} 숙이기가 끝나기 전에 다음 숙이기`);
+    for (const p of c.obstacles.slice(Math.max(0, i - 4), i)) {
+      const gap = o.t - p.t, need = MIN_GAP[act(p)][act(o)];
+      if (gap < need) errs.push(`#${o.id} #${p.id} 동작과 간격 ${gap}ms (최소 ${need}ms)`);
     }
+    const active = c.obstacles.slice(0, i).filter((p) => overlapWindow(p.t, speed, p.kind)[1] > o.t - EARLY_MARGIN_MS);
+    if (o.need === 'jump' && active.some((p) => p.kind === 'ribbon')) errs.push(`#${o.id} 리본 아래에서 점프`);
+    if (o.need === 'duck' && active.some((p) => p.kind === 'log')) errs.push(`#${o.id} 통나무 위에서 숙이기`);
     if (o.kind === 'pot' || o.kind === 'fence') {
       if (!o.safe.length) errs.push(`#${o.id} 피할 레인이 없음`);
-      if (o.blocked.includes(lane)) {
-        const reach = o.safe.filter((s) => Math.abs(s - lane) === 1);
-        if (!reach.length) errs.push(`#${o.id} 한 번 이동으로 피할 수 없음`);
-        lane = reach.includes(o.need === 'left' ? (lane - 1) as Lane : (lane + 1) as Lane) ? (o.need === 'left' ? lane - 1 : lane + 1) as Lane : reach[0] ?? lane;
+      if (!lanes.every((l) => o.blocked.includes(l))) errs.push(`#${o.id} 움직이지 않아도 되는 레인 장애물`);
+      const next = new Set<Lane>();
+      for (const l of lanes) {
+        const reach = o.safe.filter((s) => Math.abs(s - l) === 1);
+        if (!reach.length) errs.push(`#${o.id} 한 번 이동으로 피할 수 없음 (레인 ${l})`);
+        reach.forEach((r) => next.add(r));
       }
+      for (const l of next) for (const p of active) if ((p.kind === 'pot' || p.kind === 'fence') && !p.safe.includes(l)) errs.push(`#${o.id} 이동한 레인이 앞 장애물에 막힘`);
+      lanes = [...next];
     }
   });
   return errs;

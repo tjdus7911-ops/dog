@@ -7,6 +7,7 @@ import { GUEST_DOG, GUEST_HUMAN, type DogAvatar, type HumanAvatar } from '@share
 import {
   COURSES, DIFFICULTIES, DIFFICULTY_DESC, DIFFICULTY_LABEL, JUDGE, RUNNER_GAME_VERSION, buildChart, buildSong, courseSpeed, isDifficulty, judgeRun, parseRankKey, rankKey,
   type Chart, type CourseInfo, type Grade, type RunResult, type RunnerDifficulty,
+  countIn,
 } from '@shared/runner';
 import { Dog, newDogDriver } from '../game/models/Dog';
 import { Human, newHumanDriver } from '../game/models/Human';
@@ -17,7 +18,7 @@ import { DEMO } from '../demo';
 import { get, set, toast, useStore } from '../store';
 import { Modal } from '../ui/common';
 import { MusicPlayer, renderSong } from './music';
-import { COUNTDOWN_S, GRADE_COLOR, GRADE_LABEL, RunnerPlay, type PlayGame } from './RunnerPlay';
+import { countdownSec, GRADE_COLOR, GRADE_LABEL, RunnerPlay, type PlayGame } from './RunnerPlay';
 import { MultiResultScreen, MultiScreen } from './MultiLobby';
 import { clearResults, joinRoom, leaveRoom, serverNow, useMulti, type StartSignal } from './multi';
 
@@ -177,7 +178,7 @@ export default function RunnerApp() {
     stopPreview();
     const g: PlayGame = { chart, song, course: { ...course, speed: courseSpeed(course.id, difficulty) }, player, inputs: [], calib: settings.calib, sfx: settings.sfx, paused: false, ended: false, live: null, lastEvent: null };
     (g as PlayGame & { runId: string | null }).runId = runId;
-    await player.play(audio, 0, COUNTDOWN_S);
+    await player.play(audio, 0, countdownSec(song), countIn(song));
     game?.player.close();
     setGame(g); setScreen('play'); setStarting(false);
   }
@@ -201,7 +202,7 @@ export default function RunnerApp() {
     };
     // 서버 시작 시각까지 남은 시간만큼 기다렸다가 재생 (늦게 들어왔으면 그만큼 건너뛰고 재생)
     const delay = (sig.startAt - serverNow()) / 1000;
-    if (delay >= 0) await player.play(buf, 0, delay);
+    if (delay >= 0) await player.play(buf, 0, delay, countIn(sg));
     else await player.play(buf, Math.min(-delay, buf.duration - 0.5), 0);
     game?.player.close();
     setResult(null);

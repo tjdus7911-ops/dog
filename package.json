@@ -13,7 +13,7 @@
     "start": "npm run start -w server",
     "test:multi": "npm run test:multi -w server",
     "test:ai": "npm run test:ai -w server",
-    "test": "npm run test:ai -w server && npm run test:multi -w server && npm run test:community -w server && npm run test:interaction -w server && npm run test:runner -w server && npm run test:economy -w server && npm run test:runner-multi -w server && npm run test:persist -w server && npm run test:channels -w server && npm run test:apartment-free -w server",
+    "test": "npm run test:ai -w server && npm run test:multi -w server && npm run test:community -w server && npm run test:interaction -w server && npm run test:runner -w server && npm run test:runner-charts -w server && npm run test:economy -w server && npm run test:runner-multi -w server && npm run test:persist -w server && npm run test:channels -w server && npm run test:apartment-free -w server",
     "test:community": "npm run test:community -w server"
   },
   "devDependencies": {

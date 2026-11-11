@@ -3,9 +3,7 @@
 // 각 곡은 유명한 주제 선율을 중심으로 1분 안팎에 맞춘 축약 편곡이다.
 //
 // 표기: 'C5:2' = C5 음을 16분음표 2칸 / 'R:4' = 쉼표 4칸 / 'A4+C#5+E5:2' = 화음 / 길이를 빼면 기본 길이
-// 장애물 패턴: 마디마다 글자 하나 또는 둘 (둘째 글자는 마디 가운데 칸)
-//   J 통나무(점프) · D 높은 막대(숙이기) · P 화분(지금 레인이 막힘 → 옆으로) · F 울타리(빈 레인 하나로) · . 없음
-//   화분·울타리의 레인은 패턴 규칙(resolveLanes)이 '한 번 이동으로 피할 수 있게' 정하고, validateChart로 다시 검사한다.
+// 장애물 차트는 이 악보(멜로디·강세·셈여림)에서 난이도별로 만든다 — shared/runnerChart.ts
 
 /** [마디 안 16분음표 칸, MIDI 음, 길이(칸), 손(0 오른손 · 1 왼손)] */
 export type N = [number, number, number, number];
@@ -53,10 +51,6 @@ export interface SongDef {
   bpm: number;
   bars: Record<string, N[]>;
   plan: BarPlan[];
-  /** 장애물 패턴: 마디(plan 순서)마다 토큰, 둘째 글자는 mid 칸 */
-  mid: number;
-  normal: string;
-  hard: string;
 }
 
 // ================================================================ 모차르트 — 터키 행진곡 (론도 알라 투르카, 가단조 2/4)
@@ -96,10 +90,6 @@ const TURKISH: SongDef = {
     ...['M1', 'M2', 'M3', 'M4', 'M1', 'M2', 'M3', 'M7'].map((b, i): BarPlan => [b, i >= 6 ? 1.08 : 0.97, 0.8, 1]),
     ['END', 1.4, 0.75, 1],
   ],
-  mid: 4,
-  //          intro | A (1~8)         | A 반복           | B                  | A 끝              | 행진 후렴         | 끝
-  normal: '.  P J D J F J D J  P J D J F JD J J  P J D J F J D J  P J D J F J D .  J P D F J P D J  .',
-  hard:   '.  P JD J D F J DJ J  P JD J DJ F J D JP  P JD J D F JD J J  P J DJ J F JD J .  JP J DJ F JP J D J  .',
 };
 
 // ================================================================ 요한 슈트라우스 2세 — 아름답고 푸른 도나우 (라장조 3/4 왈츠)
@@ -140,10 +130,6 @@ const DANUBE: SongDef = {
     ...['W1', 'W18', 'W19', 'W20', 'W1', 'W18', 'W23', 'W24', 'W25', 'W26', 'W27', 'W28', 'W29', 'W30'].map((b, i): BarPlan => [b, i >= 12 ? 1.12 : 0.98, 0.72, 1]),
     ['END', 1.4, 0.6, 1],
   ],
-  mid: 8,
-  //        도입 | 1주제 (16마디)                      | 2주제 (14마디)                   | 2주제 반복 (14마디)               | 끝
-  normal: '. .  P J D J F . J D P J D . J J D .  P J D . F J D . J P D J . .  J P D J F . J D P J D J . .  .',
-  hard:   '. .  P J D J F J J D P J D J J J D J  P J D J F J D J J P D J J .  J P D J F J J D P J D J J .  .',
 };
 
 // ================================================================ 쇼팽 — 혁명 연습곡 Op.10-12 (다단조 4/4)
@@ -183,10 +169,6 @@ const REVOLUTIONARY: SongDef = {
     ...['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8'].map((b, i): BarPlan => [b, i >= 6 ? 1.06 : 0.98, 0.82, 1]),
     ['C1', 1.02, 0.85, 1], ['C1', 1.06, 0.85, 1], ['C3', 1.5, 0.8, 1],
   ],
-  mid: 8,
-  //        도입    | 주제               | 주제 (강하게)        | 가운데     | 주제 다시            | 끝
-  normal: 'J . D .  P J D J F J D J  PJ D JD J FJ D J J  P J D J  P J D JD F J D J  J D .',
-  hard:   'J D D J  PJ D JD J FJ D JP J  PJ DJ JD J FJ DJ JP J  PJ D JD J  PJ D JD JP FJ D JD J  J D .',
 };
 
 // ================================================================ 비발디 — 사계 중 '여름' 3악장 프레스토 (사단조 3/4)
@@ -217,11 +199,6 @@ const VIVALDI: SongDef = {
     ...['A1', 'A2', 'A3', 'A4'].map((b): BarPlan => [b, 0.98, 0.84, 1]),
     ['S1', 1, 0.85, 1], ['S3', 1.04, 0.86, 1], ['S4', 1.12, 0.86, 1], ['END', 1.5, 0.8, 1],
   ],
-  // 둘째 장애물은 마디 가운데(칸 6) — 16분음표가 쉬지 않고 이어지는 곡이라 모든 칸에 음이 있음
-  mid: 6,
-  //        시작 | 트레몰로·음계 (8)    | 다단조 (4) | 아르페지오 (8)       | 다시 (4) | 다단조 (4) | 아르페지오 (4) | 끝
-  normal: '.  P J D J F J D J  P J D J  J P D F J P D J  P J D J  F J D J  P J D J  J D J .',
-  hard:   '.  PJ JD DJ J FJ JP DJ J  PJ J DJ J  J PJ D FJ J PJ DJ J  PJ J DJ J  FJ J DJ J  PJ J DJ J  J D J .',
 };
 
 export const SONG_DEFS: Record<string, SongDef> = { turkish: TURKISH, danube: DANUBE, revolutionary: REVOLUTIONARY, summer: VIVALDI };
