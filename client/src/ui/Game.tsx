@@ -18,7 +18,7 @@ import { CafeBar, ShopBar } from './Places';
 import { InteractBar, InteractionOverlays, useOverlayOpen } from './Interact';
 import { Community, MeetupAlert } from './Community';
 import { isTouchDevice } from '../game/input';
-import { BottomNav, EventsPanel, MoreSheet, PlaceBar, QuickMenu, VillageMap } from './MobileHud';
+import { BottomNav, EventsPanel, HomeSheet, MoreSheet, PlaceBar, QuickMenu, VillageMap } from './MobileHud';
 import { HomeEditor, HomePanel } from './Home';
 import { CoinFx, WalletModal } from './Coins';
 import { MoveModal } from './Move';
@@ -71,7 +71,7 @@ export default function Game() {
         {!community && !overlay && !mobileChat && !(touch && moreOpen) && <InteractBar />}
         {kind === 'park' && !community && <BenchMenu />}
         {kind === 'lobby' && <LobbyPanel />}
-        {kind === 'home' && <HomePanel />}
+        {kind === 'home' && <><HomePanel /><HomeSheet /></>}
         {kind === 'cafe' && <CafeBar />}
         {kind === 'shop' && <ShopBar />}
         {!community && <MeetupAlert />}

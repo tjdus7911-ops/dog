@@ -337,6 +337,13 @@ export const PLANS: Record<HomeTier, FloorPlan> = {
 export const HOME_TIERS: HomeTier[] = [1, 2, 3];
 /** 동 → 집 등급 (1동 원룸 · 2동 투룸 · 3동 쓰리룸, 그 밖은 원룸) */
 export const tierOfBuilding = (building: string | null | undefined): HomeTier => (building === '3' ? 3 : building === '2' ? 2 : 1);
+/** 아파트 선택 화면 소개 문구 (가격 대신 표시) */
+export const PLAN_TAGLINE: Record<HomeTier, string> = {
+  1: '아늑한 첫 번째 집',
+  2: '조금 더 넓은 우리 집',
+  3: '넓고 여유로운 우리 집',
+};
+
 export const planOf = (tier: number | null | undefined) => PLANS[(tier === 2 || tier === 3 ? tier : 1) as HomeTier];
 /** 평면도 안쪽인지 (margin만큼 안쪽, 방 사이 벽 제외) */
 export function insidePlan(plan: FloorPlan, x: number, z: number, margin = 0) {

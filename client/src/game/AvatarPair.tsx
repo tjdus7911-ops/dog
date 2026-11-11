@@ -1,5 +1,5 @@
 // 사람 + 강아지 + 목줄 + 이름표/말풍선 묶음 (내 아바타와 다른 사용자 공통)
-import { useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from 'react';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { PublicProfile } from '@shared/protocol';
@@ -30,6 +30,9 @@ export function AvatarPair({ profile, refs, isMe, onSelect, onSelectDog }: { pro
   const hand = useRef<THREE.Object3D | null>(null);
   const anchor = useRef<THREE.Object3D | null>(null);
   const bubble = useStore((s) => s.bubbles[profile.id]);
+  // 집(원룸·투룸·쓰리룸) 안에서는 하네스·리드줄을 벗음 — 같은 공간의 모든 사람 화면에서 똑같이 (공간으로 정해지므로 따로 주고받을 필요 없음)
+  const atHome = useStore((s) => s.park?.kind === 'home');
+  useLayoutEffect(() => { refs.humanDriver.current.leash = !atHome; }, [atHome, refs.humanDriver]);
   const [showBubble, setShowBubble] = useState(false);
   const [hover, setHover] = useState(false);
 
@@ -88,7 +91,7 @@ export function AvatarPair({ profile, refs, isMe, onSelect, onSelectDog }: { pro
         </Html>
       </group>
       <group ref={refs.dog}>
-        <Dog avatar={profile.dog} driver={refs.dogDriver} anchorRef={anchor} />
+        <Dog avatar={profile.dog} driver={refs.dogDriver} anchorRef={anchor} harness={!atHome} />
         <Html position={[0, 0.7 * dogScale, 0]} zIndexRange={[19, 9]} style={{ pointerEvents: 'none' }}>
           <div ref={refs.dogZzz} className="zzz zzz-sm" style={{ display: 'none' }}>z<span>z</span></div>
         </Html>
@@ -100,7 +103,7 @@ export function AvatarPair({ profile, refs, isMe, onSelect, onSelectDog }: { pro
           </mesh>
         )}
       </group>
-      <Leash from={hand} to={anchor} color={isMe ? '#f6c453' : '#f2b880'} />
+      {!atHome && <Leash from={hand} to={anchor} color={isMe ? '#f6c453' : '#f2b880'} />}
     </>
   );
 }

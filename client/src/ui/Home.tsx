@@ -10,7 +10,7 @@ import {
 } from '@shared/home';
 import { residenceLabel } from '@shared/apartment';
 import { api } from '../lib/api';
-import { set, toast, useStore } from '../store';
+import { get, set, toast, useStore } from '../store';
 import { geo } from '../game/lowpoly';
 import { FurnitureModel } from '../game/Furniture';
 import { HomeRoom } from '../game/Interiors';
@@ -21,6 +21,10 @@ import { timeLabel } from './common';
 import { DEMO } from '../demo';
 import { resizeImage } from '../lib/image';
 import { Modal } from './common';
+import { Icon } from './icons';
+import { toggleMenu } from './menus';
+import { CHIP, chipRowTop } from './layout';
+import { isTouchDevice } from '../game/input';
 
 
 function Furniture({ item, photo, selected, editing, onSelect, onDragStart }: {
@@ -64,7 +68,8 @@ export function HomeEditor() {
   const [picker, setPicker] = useState<string | null>(null);
   const [frameTool, setFrameTool] = useState<'style' | 'size' | 'fit' | 'move' | null>(null);
   const [style, setStyle] = useState<HomeStyle | null>(home?.style ?? null);
-  const [styleOpen, setStyleOpen] = useState(false);
+  const [styleOpen, setStyleOpen] = useState(() => get().homeEditStyle);
+  useEffect(() => { if (get().homeEditStyle) set({ homeEditStyle: false }); }, []);
   useEffect(() => setFrameTool(null), [sel]);
   // PC(넓은 화면): 3D 화면 위에 메뉴 / 모바일: 3D 화면 아래에 메뉴
   const [wide, setWide] = useState(() => window.matchMedia('(min-width: 768px)').matches);
@@ -199,6 +204,7 @@ export function HomePanel() {
   const home = useStore((s) => s.home);
   const myHome = useStore((s) => (s.me?.residence ? s.me.id : null));
   const open = useStore((s) => s.homePanel);
+  const homeMenu = useStore((s) => s.activeMenu === 'home');
   const version = useStore((s) => s.visitRequestsVersion);
   const [text, setText] = useState('');
   const [requests, setRequests] = useState<{ visitorId: number; nickname: string; dogName: string; ts: number }[]>([]);
@@ -207,6 +213,7 @@ export function HomePanel() {
   }, [home?.isOwner, home?.ownerId, version]);
   if (!home) return null;
   const close = () => set({ homePanel: false });
+  const touch = isTouchDevice();
   const setHome = (h: HomeView) => set({ home: h });
 
   async function setVisibility(v: HomeVisibility) {
@@ -235,15 +242,23 @@ export function HomePanel() {
 
   return (
     <>
-      <div className="absolute z-20 left-2 md:left-3 top-[108px] md:top-[78px] flex gap-2 flex-wrap max-w-[calc(100vw-16px)]">
-        <button className="btn btn-ghost px-4 min-h-[44px] text-sm" onClick={() => void joinPark('lobby-1')}>🚪 로비로 나가기</button>
-        {!open && <button className="btn btn-coral px-4 min-h-[44px] text-sm relative" onClick={() => set({ homePanel: true })}>
-          🏠 집 정보{requests.length > 0 && <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-[#e2604f] text-white text-[11px] grid place-items-center">{requests.length}</span>}
-        </button>}
-        {home.isOwner && <button className="btn btn-ghost px-4 min-h-[44px] text-sm" onClick={() => set({ homeEdit: true, homePanel: false })}>🛠️ 꾸미기</button>}
-        {/* 친구 집에 놀러 온 방문자: 바로 내 집으로 */}
-        {!home.isOwner && myHome && <button className="btn btn-sage px-4 min-h-[44px] text-sm" onClick={() => void joinPark(homeSpaceId(myHome))}>🏠 내 집으로 돌아가기</button>}
-      </div>
+      {/* 승인 시안: 집 상단 버튼(로비로 나가기·집 정보·꾸미기)은 '내 집' 시트로 옮김
+          — 모바일은 하단 '내 집' 탭, PC는 이 자리의 '내 집 메뉴' 하나. 친구 집 방문자는 방명록·내 집으로만 */}
+      {(!home.isOwner || !touch) && (
+        <div className="absolute z-20 left-3 flex gap-1.5 flex-wrap max-w-[calc(100vw-24px)] pointer-events-none" style={{ top: chipRowTop(touch) }}>
+          {home.isOwner ? (
+            <button className={`${CHIP} relative ${homeMenu ? 'hud-on' : ''}`} onClick={() => toggleMenu('home')} data-menu-trigger="home" data-testid="home-menu-btn">
+              <Icon name="home" size={17} className={homeMenu ? '' : 'hud-icon'} />내 집 메뉴<Icon name={homeMenu ? 'chevronUp' : 'chevronDown'} size={15} className={homeMenu ? '' : 'hud-icon'} />
+              {requests.length > 0 && <span className="absolute -top-1 -right-1 min-w-[17px] h-[17px] px-1 rounded-full bg-[#E86A5A] text-white text-[10px] grid place-items-center border-[1.5px] border-white">{requests.length}</span>}
+            </button>
+          ) : (
+            <>
+              {!open && <button className={CHIP} onClick={() => set({ homePanel: true })} data-testid="visitor-info"><Icon name="chat" size={16} className="hud-icon" />집 정보 · 방명록</button>}
+              {myHome && <button className={CHIP} onClick={() => void joinPark(homeSpaceId(myHome))}><Icon name="home" size={16} className="hud-icon" />내 집으로</button>}
+            </>
+          )}
+        </div>
+      )}
       {open && (
         <aside className="above-nav absolute z-30 inset-x-0 bottom-0 max-h-[min(70%,calc(100%-224px))] md:inset-x-auto md:right-3 md:top-[74px] md:bottom-3 md:w-[400px] md:max-h-none panel !rounded-b-none md:!rounded-[22px] p-4 overflow-y-auto scroll-soft pop"
           style={{ paddingBottom: 'calc(var(--safe-b) + 16px)' }}>

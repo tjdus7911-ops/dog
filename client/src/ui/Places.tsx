@@ -1,10 +1,11 @@
 // 공원 건물 입구(아파트·애견카페·애견샵) · 광장 모임 게시판 안내 · 카페/샵 실내 UI
-import { ABOVE_CTRL } from './layout';
+import { ABOVE_CTRL, CHIP, chipRowTop } from './layout';
+import { Icon } from './icons';
 import { useEffect, useState } from 'react';
 import { get, set, toast, useStore } from '../store';
 import { local } from '../game/local';
 import { isTouchDevice } from '../game/input';
-import { joinPark } from '../net/socket';
+import { joinPark, lastPark } from '../net/socket';
 import { api } from '../lib/api';
 import { APARTMENT_ENTRANCE, CAFE_ENTRANCE, MEETING_BOARD, RUNNER_ARENA, SHOP_ENTRANCE } from '@shared/world';
 import { openCommunity } from './Community';
@@ -40,9 +41,9 @@ export function EntrancePrompt() {
 /** 애견카페 실내: 나가기 + 동네 모임 바로가기 */
 export function CafeBar() {
   return (
-    <div className="absolute z-20 left-2 md:left-3 top-[108px] md:top-[78px] flex gap-2 flex-wrap max-w-[calc(100vw-16px)]">
-      <button className="btn btn-ghost px-4 min-h-[44px] text-sm" onClick={() => void joinPark('central-1', 'cafe')}>🌳 공원으로 나가기</button>
-      <button className="btn btn-coral px-4 min-h-[44px] text-sm" onClick={() => openCommunity('meetups')}>🐾 산책 모임 찾기</button>
+    <div className="absolute z-20 left-3 flex gap-1.5 flex-wrap max-w-[calc(100vw-24px)] pointer-events-none" style={{ top: chipRowTop(isTouchDevice()) }}>
+      <button className={CHIP} onClick={() => void joinPark(lastPark(), 'cafe')}><Icon name="tree" size={16} className="hud-icon" />광장으로 나가기</button>
+      <button className={CHIP} onClick={() => openCommunity('meetups')}><Icon name="wave" size={16} className="hud-icon" />산책 모임 찾기</button>
     </div>
   );
 }
@@ -70,9 +71,9 @@ export function ShopBar() {
   }
   return (
     <>
-      <div className="absolute z-20 left-2 md:left-3 top-[108px] md:top-[78px] flex gap-2">
-        <button className="btn btn-ghost px-4 min-h-[44px] text-sm" onClick={() => void joinPark('central-1', 'shop')}>🌳 공원으로 나가기</button>
-        {!open && <button className="btn btn-coral px-4 min-h-[44px] text-sm" onClick={() => set({ shopOpen: true })}>🎁 카운터</button>}
+      <div className="absolute z-20 left-3 flex gap-1.5 pointer-events-none" style={{ top: chipRowTop(isTouchDevice()) }}>
+        <button className={CHIP} onClick={() => void joinPark(lastPark(), 'shop')}><Icon name="tree" size={16} className="hud-icon" />광장으로 나가기</button>
+        {!open && <button className={CHIP} onClick={() => set({ shopOpen: true })}><Icon name="store" size={16} className="hud-icon" />카운터</button>}
       </div>
       {open && (
         <aside className="above-nav absolute z-30 inset-x-0 bottom-0 max-h-[72%] md:inset-x-auto md:right-3 md:top-[74px] md:bottom-auto md:w-[400px] panel !rounded-b-none md:!rounded-[22px] p-4 overflow-y-auto scroll-soft pop"

@@ -10,6 +10,8 @@ import { interpretDogFeatures, jsonPrompt, type DogPhotoKind } from '@shared/dog
 import { demoClaimed, demoCommunity } from './demoCommunity';
 
 export const DEMO = import.meta.env.VITE_DEMO === '1';
+/** 미리보기도 서버 기본 운영 설정과 같게: 아파트 무료 이용 */
+const DEMO_FREE = true;
 
 const KEY = 'mungle.demo.profile';
 
@@ -65,7 +67,7 @@ export async function demoApi(path: string, opts: { method?: string; body?: any 
   if (path === '/api/apartment') {
     const mine = cur.residence;
     return {
-      mine,
+      mine, freeAccess: DEMO_FREE,
       buildings: APARTMENT_BUILDINGS.map((b) => ({
         ...b,
         units: unitsOf(b).map(({ unit, floor }) => {
@@ -82,12 +84,16 @@ export async function demoApi(path: string, opts: { method?: string; body?: any 
     const { building, unit } = opts.body ?? {};
     if (!isValidUnit(String(building), String(unit))) throw new Error('존재하지 않는 호실이에요.');
     if (cur.residence) throw new Error('이미 입주한 집이 있어요.');
-    if (tierOfBuilding(String(building)) !== 1) throw new Error('처음에는 1동 원룸에 입주할 수 있어요.');
     const w = wallet();
-    if (w.balance < PLANS[1].price) throw new Error(`입주까지 ${(PLANS[1].price - w.balance).toLocaleString('ko-KR')}코인 남았어요!`);
-    addTx(w, -PLANS[1].price, 'movein', `${PLANS[1].name} ${unit}호 입주`);
+    if (!DEMO_FREE) {
+      if (tierOfBuilding(String(building)) !== 1) throw new Error('처음에는 1동 원룸에 입주할 수 있어요.');
+      if (w.balance < PLANS[1].price) throw new Error(`입주까지 ${(PLANS[1].price - w.balance).toLocaleString('ko-KR')}코인 남았어요!`);
+      addTx(w, -PLANS[1].price, 'movein', `${PLANS[1].name} ${unit}호 입주`);
+    }
     const next = { ...cur, residence: { building: String(building), unit: String(unit) } };
     saveDemoProfile(next);
+    const tierIn = tierOfBuilding(String(building));
+    if (tierIn > 1) { const h = loadDemoHome(); saveDemoHome({ ...h, layout: movedLayout(h.layout, tierIn) }); }
     return { profile: next, coins: demoCoinStatus(w) };
   }
   // ---- 코인 (미리보기: 이 기기에만 저장) ----
@@ -106,11 +112,11 @@ export async function demoApi(path: string, opts: { method?: string; body?: any 
     const w = wallet();
     const t = cur.residence ? tierOfBuilding(cur.residence.building) : null;
     return {
-      balance: w.balance, current: t, residence: cur.residence,
+      balance: w.balance, current: t, residence: cur.residence, freeAccess: DEMO_FREE,
       plans: ([1, 2, 3] as HomeTier[]).map((k) => {
         const p = PLANS[k];
-        const status = t === k ? 'current' : t !== null && k < t ? 'past' : t === null ? (k === 1 ? 'available' : 'locked') : t + 1 === k ? (w.balance >= p.price ? 'available' : 'insufficient') : 'locked';
-        return { tier: k, building: p.building, name: p.name, type: p.type, rooms: p.rooms, price: p.price, features: p.features, capacity: p.capacity, free: 12, status, need: Math.max(0, p.price - w.balance) };
+        const status = t === k ? 'current' : DEMO_FREE ? 'available' : t !== null && k < t ? 'past' : t === null ? (k === 1 ? 'available' : 'locked') : t + 1 === k ? (w.balance >= p.price ? 'available' : 'insufficient') : 'locked';
+        return { tier: k, building: p.building, name: p.name, type: p.type, rooms: p.rooms, price: p.price, features: p.features, capacity: p.capacity, free: 12, status, need: DEMO_FREE ? 0 : Math.max(0, p.price - w.balance) };
       }),
     };
   }
@@ -119,10 +125,13 @@ export async function demoApi(path: string, opts: { method?: string; body?: any 
     if (!cur.residence) throw new Error('먼저 1동 원룸에 입주해 주세요.');
     const tier = tierOfBuilding(String(opts.body?.building));
     const t = tierOfBuilding(cur.residence.building);
-    if (tier !== t + 1) throw new Error('1동 → 2동 → 3동 순서로 이사할 수 있어요.');
     const p = PLANS[tier];
-    if (w.balance < p.price) throw new Error(`이사까지 ${(p.price - w.balance).toLocaleString('ko-KR')}코인 남았어요! 산책과 멍글런너를 즐기며 코인을 모아보세요.`);
-    addTx(w, -p.price, 'move', `${p.name} 101호로 이사`);
+    if (tier === t) throw new Error('지금 살고 있는 동이에요.');
+    if (!DEMO_FREE) {
+      if (tier !== t + 1) throw new Error('1동 → 2동 → 3동 순서로 이사할 수 있어요.');
+      if (w.balance < p.price) throw new Error(`이사까지 ${(p.price - w.balance).toLocaleString('ko-KR')}코인 남았어요! 산책과 멍글런너를 즐기며 코인을 모아보세요.`);
+      addTx(w, -p.price, 'move', `${p.name} 101호로 이사`);
+    }
     const next = { ...cur, residence: { building: p.building, unit: '101' } };
     saveDemoProfile(next);
     const h = loadDemoHome();

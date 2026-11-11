@@ -34,7 +34,7 @@ let proc: ChildProcess | null = null;
 async function startServer(extraEnv: Record<string, string> = {}) {
   proc = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
     cwd: path.resolve(import.meta.dirname, '..'),
-    env: { ...process.env, PORT: String(PORT), MUNGLE_DATA_DIR: dataDir, MUNGLE_BACKUP_HOURS: '0', MUNGLE_TEST_HOOKS: '1', MUNGLE_POOP_MIN_S: '99999', MUNGLE_POOP_MAX_S: '99999', ...extraEnv },
+    env: { ...process.env, PORT: String(PORT), MUNGLE_DATA_DIR: dataDir, MUNGLE_BACKUP_HOURS: '0', MUNGLE_TEST_HOOKS: '1', MUNGLE_POOP_MIN_S: '99999', MUNGLE_POOP_MAX_S: '99999', MUNGLE_APARTMENT_FREE: '0', ...extraEnv },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   proc.stderr!.on('data', (d) => { const t = String(d); if (!t.includes('ExperimentalWarning') && !t.includes('--trace-warnings') && !t.includes('[move]')) process.stderr.write(t); });

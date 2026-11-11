@@ -37,10 +37,12 @@ export function CoinChip() {
   if (!me || me.role === 'guest') return null;
   const dot = coins && !coins.attendance.claimedToday;
   return (
-    <button className="btn btn-ghost h-11 px-2.5 md:px-3 shrink-0 relative pointer-events-auto whitespace-nowrap text-sm font-display" data-testid="coin-chip"
+    <button className="hud h-[38px] md:h-11 pl-2 pr-3 rounded-full shrink-0 relative pointer-events-auto whitespace-nowrap text-[14px] flex items-center gap-1.5" data-testid="coin-chip"
       aria-label={`코인 ${coins ? coinFmt(coins.balance) : ''}개 · 출석 체크와 코인 지갑`} onClick={() => set({ wallet: dot ? 'attendance' : 'wallet' })}>
-      <span className="coin-icon" aria-hidden>🪙</span> <span className="tabular-nums">{coins ? compact(coins.balance) : '…'}</span>
-      {dot && <span className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-[#ef6b5b] border-2 border-white" aria-label="오늘 출석 전" />}
+      {/* 코인은 고유 그림 유지 (라인 아이콘으로 바꾸지 않음) */}
+      <span aria-hidden className="w-[19px] h-[19px] rounded-full bg-[radial-gradient(circle_at_35%_30%,#FFE08A,#F2B83B_70%)] border-[1.5px] border-[#E2A132] shadow-[inset_0_-1px_0_rgba(0,0,0,.08)]" />
+      <span className="tabular-nums">{coins ? compact(coins.balance) : '…'}</span>
+      {dot && <span className="dot-new" aria-label="오늘 출석 전" style={{ top: 2, right: 2 }} />}
     </button>
   );
 }

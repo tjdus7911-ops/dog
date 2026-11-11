@@ -8,7 +8,7 @@ import { DEMO } from '../demo';
 import { api } from '../lib/api';
 import { setSpace } from '../game/space';
 import { cam } from '../game/CameraRig';
-import { PLACES, homeSpaceId, spawnOf } from '@shared/spaces';
+import { PLACES, homeSpaceId, parseSpace, spawnOf } from '@shared/spaces';
 import type { CoinEarned } from '@shared/coins';
 import { tierOfBuilding } from '@shared/home';
 import { onCoinEarned } from '../ui/Coins';
@@ -74,8 +74,8 @@ export function connect() {
     const prevPark = get().park?.id;
     await refreshFriends();
     await refreshBlocked();
-    // 재접속: 있던 장소로 돌아가되, 들어갈 수 없게 됐으면(집 공개 범위 변경 등) 공원으로
-    if (!(await joinPark(prevPark, undefined, true))) await joinPark();
+    // 재접속: 있던 장소로 돌아가되, 들어갈 수 없게 됐으면(집 공개 범위 변경 등) 광장으로
+    if (!(await joinPark(prevPark, undefined, true))) await joinOrWait();
   });
   s.on('disconnect', () => {
     if (get().connection !== 'kicked') set({ connection: 'connecting' });
@@ -237,6 +237,24 @@ export function disconnect() {
 let joining = false;
 export type DoorFrom = 'lobby' | 'cafe' | 'shop';
 /** warp: 공원에 들어가며 그 장소의 입구 앞에서 시작 (장소 선택 바로 가기) */
+/** 마지막 입장 실패 이유 (all_full: 모든 광장 만원) */
+let lastJoinCode: string | undefined;
+let waitTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * 광장 자동 입장. 모든 광장이 가득 찼으면 대기 안내를 띄우고 자리가 날 때까지 8초마다 다시 시도한다.
+ * (인원은 서버가 관리 — 클라이언트는 결과만 따름)
+ */
+export async function joinOrWait(): Promise<boolean> {
+  if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; }
+  const ok = await joinPark(undefined, undefined, true);
+  if (ok) { set({ parkWait: false }); return true; }
+  if (lastJoinCode === 'all_full' && socket?.connected && !get().park) {
+    set({ parkWait: true });
+    waitTimer = setTimeout(() => { waitTimer = null; if (socket?.connected && !get().park) void joinOrWait(); }, 8000);
+  } else if (!get().park) toast('광장에 들어가지 못했어요. 잠시 후 다시 시도해 주세요.', 'error');
+  return false;
+}
+
 export async function joinPark(parkId?: string, from?: DoorFrom, quiet = false, warp?: WarpId): Promise<boolean> {
   if (joining) return false; // 이동 중 중복 요청 방지
   joining = true;
@@ -277,12 +295,14 @@ function applyWarp(state: NetState) {
 async function doJoin(parkId: string | undefined, from: DoorFrom | undefined, quiet: boolean, warp?: WarpId) {
   if (DEMO) return demoJoin(parkId ?? 'central-1', from, warp);
   const res = await request<{ park: ParkInfo; spawn: NetState; players: PlayerSnapshot[]; seats?: SeatMap; poops?: PoopInfo[]; bags?: number[] }>('park:join', parkId ? { parkId, from, warp } : undefined);
+  lastJoinCode = res.ok ? undefined : res.code;
   if (!res.ok) {
     if (!quiet && res.code !== 'members_only') toast(res.error, 'error');
-    if (!get().park && parkId && !quiet) return doJoin(undefined, undefined, true); // 지정 장소 입장 실패 시 빈 공원으로
+    if (!get().park && parkId && !quiet) return doJoin(undefined, undefined, true); // 지정 장소 입장 실패 시 자리 있는 광장으로
     return false;
   }
   if (local.seated) void request('seat:leave');
+  if (get().parkWait) set({ parkWait: false });
   enterSpace(res.park, res.spawn);
   const players: Record<number, PublicProfile> = {};
   for (const p of res.players) { players[p.profile.id] = p.profile; pushSnapshot(p.profile.id, p.state); }
@@ -414,7 +434,9 @@ export async function goToFriend(userId: number) {
   const res = await request<{ parkId: string; parkName: string }>('friend:locate', { userId });
   if (!res.ok) { toast(res.error, 'error'); return; }
   if (get().park?.id === res.parkId) { toast(`이미 ${res.parkName}에 함께 있어요!`); return; }
-  if (await joinPark(res.parkId)) toast(`${res.parkName}(으)로 이동했어요 🐾`);
+  // 광장이면 광장 입구 앞에서 시작 (공간 이동 = 입구로 바로 이동 정책)
+  const isPlaza = parseSpace(res.parkId)?.kind === 'park';
+  if (await joinPark(res.parkId, undefined, false, isPlaza ? 'plaza' : undefined)) toast(`${res.parkName}(으)로 이동했어요 🐾`);
 }
 
 export async function report(userId: number, reason: string, detail: string) {

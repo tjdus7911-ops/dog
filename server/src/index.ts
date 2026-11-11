@@ -11,6 +11,7 @@ import { APARTMENT_BUILDINGS, isValidUnit, unitsOf, type UnitInfo } from '../../
 import { FURNITURE, GUESTBOOK_MAX_LEN, HOME_VISIBILITY, PLANS, movedLayout, tierOfBuilding, validateLayout, validateStyle, type HomeTier, type HomeView, type HomeVisibility } from '../../shared/home';
 import { CoinError, applyTx, balanceOf, coinStatus, grantSignup, nowOf, registerCoins, setCoinNotifier, testFault } from './coins';
 import { all, one, run, transaction } from './db';
+import { apartmentFree, getSettings, updateSettings } from './settings';
 import { hashPassword, issueToken, requireAdmin, requireAuth, revokeToken, userFromToken, verifyPassword, type AuthedRequest } from './auth';
 import { setupRealtime } from './realtime';
 import { filterProfanity, RateLimiter, sanitize } from './moderation';
@@ -254,17 +255,30 @@ app.get('/api/apartment', requireAuth, (req, res) => {
     });
     return { ...b, units };
   });
-  res.json({ buildings, mine: repo.getResidence(me) });
+  res.json({ buildings, mine: repo.getResidence(me), freeAccess: apartmentFree() });
 });
 
-/** 첫 입주: 1동 원룸만, 입주비 500코인 (가입 선물로 실질 무료). 코인 차감과 입주를 한 트랜잭션으로 */
+/** 이사 선물 가구 (2동 사람 침대 · 3동 놀이방 시설) — 그 동에 처음 살게 될 때. 이미 받은 것은 그대로 */
+function grantMoveGifts(me: number, tier: HomeTier, ts: number) {
+  const gifts = FURNITURE.filter((f) => f.gift === tier).map((f) => f.id);
+  if (tier >= 2 && !gifts.includes('bed_cream')) gifts.push('bed_cream');
+  for (const g of gifts) run('INSERT OR IGNORE INTO shop_claims (user_id, item, claimed_at) VALUES (?,?,?)', me, g, ts);
+}
+
+/**
+ * 첫 입주. 코인 차감과 입주를 한 트랜잭션으로.
+ *  · 무료 이용(apartmentFreeAccess): 1·2·3동 아무 곳이나, 코인 차감 없음
+ *  · 유료: 1동 원룸만, 입주비 500코인 (가입 선물로 실질 무료)
+ */
 app.post('/api/apartment/move-in', requireAuth, (req, res) => {
   const me = (req as AuthedRequest).userId;
   const building = String(req.body?.building ?? '');
   const unit = String(req.body?.unit ?? '');
+  const free = apartmentFree();
   if (!isValidUnit(building, unit)) return res.status(400).json({ error: '존재하지 않는 호실이에요.' });
-  if (tierOfBuilding(building) !== 1) return res.status(400).json({ error: '처음에는 1동 원룸에 입주할 수 있어요. 코인을 모아 2동·3동으로 이사해 보세요!', code: 'order' });
-  const price = PLANS[1].price;
+  const tier = tierOfBuilding(building);
+  if (!free && tier !== 1) return res.status(400).json({ error: '처음에는 1동 원룸에 입주할 수 있어요. 코인을 모아 2동·3동으로 이사해 보세요!', code: 'order' });
+  const price = free ? 0 : PLANS[1].price;
   if (repo.getResidence(me)) return res.status(409).json({ error: '이미 입주한 집이 있어요.' });
   const bal = balanceOf(me);
   if (bal < price) return res.status(400).json({ error: `입주까지 ${(price - bal).toLocaleString('ko-KR')}코인 남았어요! 출석과 산책으로 코인을 모아 보세요.`, code: 'insufficient', need: price - bal });
@@ -272,8 +286,11 @@ app.post('/api/apartment/move-in', requireAuth, (req, res) => {
     transaction(() => {
       const r = repo.moveIn(me, building, unit);
       if (!r.ok) throw new MoveError(r.reason === 'already' ? '이미 입주한 집이 있어요.' : '방금 다른 주민이 입주한 호실이에요. 다른 호실을 골라 주세요.', 409);
-      applyTx(me, -price, 'movein', 'first', Date.now(), `${PLANS[1].name} ${unit}호 입주`);
-      repo.saveHome(me, { layout: PLANS[1].defaultLayout.map((i) => ({ ...i })) });
+      if (price > 0) applyTx(me, -price, 'movein', 'first', Date.now(), `${PLANS[1].name} ${unit}호 입주`);
+      if (tier > 1) grantMoveGifts(me, tier, Date.now());
+      // 예전에 살던 기록이 있으면(다시 입주) 가구는 보관함에 그대로 — 새집 기본 배치만
+      const prev = rawLayout(me);
+      repo.saveHome(me, { layout: prev ? movedLayout(prev, tier) : PLANS[tier].defaultLayout.map((i) => ({ ...i })) });
     });
   } catch (e) {
     if (e instanceof MoveError) return res.status(e.status).json({ error: e.message });
@@ -295,15 +312,18 @@ app.get('/api/apartment/plans', requireAuth, (req, res) => {
   const cur = resi ? tierOfBuilding(resi.building) : null;
   const bal = balanceOf(me);
   const lived = new Set(all('SELECT building FROM residence_history WHERE user_id=?', me).map((r) => tierOfBuilding(r.building as string)));
+  const freeAccess = apartmentFree();
   res.json({
-    balance: bal, current: cur, residence: resi,
+    balance: bal, current: cur, residence: resi, freeAccess,
     plans: ([1, 2, 3] as HomeTier[]).map((t) => {
       const p = PLANS[t];
       const b = APARTMENT_BUILDINGS.find((x) => x.id === p.building)!;
       const free = unitsOf(b).length - repo.listResidents(b.id).length;
-      const status = cur === t ? 'current' : lived.has(t) || (cur !== null && t < cur) ? 'past'
+      // 무료 이용: 지금 사는 동만 빼고 모두 이사 가능 (순서·되돌아가기·횟수 제한 없음)
+      const status = cur === t ? 'current' : freeAccess ? (free <= 0 ? 'full' : 'available')
+        : lived.has(t) || (cur !== null && t < cur) ? 'past'
         : cur === null ? (t === 1 ? 'available' : 'locked') : nextTier(cur) === t ? (free <= 0 ? 'full' : bal >= p.price ? 'available' : 'insufficient') : 'locked';
-      return { tier: t, building: p.building, name: p.name, type: p.type, rooms: p.rooms, price: p.price, features: p.features, capacity: p.capacity, free, status, need: Math.max(0, p.price - bal) };
+      return { tier: t, building: p.building, name: p.name, type: p.type, rooms: p.rooms, price: p.price, features: p.features, capacity: p.capacity, free, status, need: freeAccess ? 0 : Math.max(0, p.price - bal) };
     }),
   });
 });
@@ -322,19 +342,22 @@ app.post('/api/apartment/move', requireAuth, (req, res) => {
   const tier = tierOfBuilding(building);
   const plan = PLANS[tier];
   const ts = nowOf(req);
+  const freeAccess = apartmentFree();
   let result: { unit: string; balance: number; prev: { building: string; unit: string } };
   try {
     result = transaction(() => {
-      // 같은 요청 번호로 이미 이사했다면 결제 없이 결과만 돌려줌
-      if (one("SELECT 1 FROM coin_tx WHERE user_id=? AND kind='move' AND ref=?", me, requestId)) throw new MoveError('이미 처리된 이사예요.', 409, 'duplicate');
+      // 같은 요청 번호로 이미 이사했다면 결과만 돌려줌 (중복 클릭 방지)
+      if (one("SELECT 1 FROM coin_tx WHERE user_id=? AND kind='move' AND ref=?", me, requestId) || one('SELECT 1 FROM move_requests WHERE user_id=? AND ref=?', me, requestId)) throw new MoveError('이미 처리된 이사예요.', 409, 'duplicate');
       const cur = repo.getResidence(me);
-      if (!cur) throw new MoveError('먼저 1동 원룸에 입주해 주세요.', 400, 'no_home');
+      if (!cur) throw new MoveError('먼저 입주할 집을 골라 주세요.', 400, 'no_home');
       const curTier = tierOfBuilding(cur.building);
       if (curTier === tier) throw new MoveError('지금 살고 있는 동이에요.', 409, 'same');
-      if (tier < curTier) throw new MoveError('이미 거쳐 온 동으로는 돌아갈 수 없어요.', 400, 'order');
-      if (nextTier(curTier) !== tier) throw new MoveError(`${PLANS[nextTier(curTier)!].name}으로 먼저 이사해 주세요.`, 400, 'order');
-      const bal = balanceOf(me);
-      if (bal < plan.price) throw new MoveError(`이사까지 ${(plan.price - bal).toLocaleString('ko-KR')}코인 남았어요! 산책과 멍글런너를 즐기며 코인을 모아보세요.`, 400, 'insufficient');
+      if (!freeAccess) {
+        if (tier < curTier) throw new MoveError('이미 거쳐 온 동으로는 돌아갈 수 없어요.', 400, 'order');
+        if (nextTier(curTier) !== tier) throw new MoveError(`${PLANS[nextTier(curTier)!].name}으로 먼저 이사해 주세요.`, 400, 'order');
+        const bal = balanceOf(me);
+        if (bal < plan.price) throw new MoveError(`이사까지 ${(plan.price - bal).toLocaleString('ko-KR')}코인 남았어요! 산책과 멍글런너를 즐기며 코인을 모아보세요.`, 400, 'insufficient');
+      }
       // 새 호실: 비어 있는 가장 낮은 층·번호 (DB UNIQUE로 중복 배정 차단)
       const taken = new Set(repo.listResidents(target.id).map((r) => r.unit as string));
       const free = [...unitsOf(target)].sort((x, y) => x.floor - y.floor || x.n - y.n).find((u) => !taken.has(u.unit));
@@ -344,17 +367,16 @@ app.post('/api/apartment/move', requireAuth, (req, res) => {
       run('INSERT INTO residence_history (user_id, building, unit, moved_in_at, moved_out_at) VALUES (?,?,?,?,?)', me, cur.building, cur.unit, Number(prevRow?.moved_in_at ?? ts), ts);
       run('DELETE FROM residences WHERE user_id=?', me);
       run('INSERT INTO residences (user_id, building, unit, moved_in_at) VALUES (?,?,?,?)', me, target.id, free.unit, ts);
-      const tx = applyTx(me, -plan.price, 'move', requestId, ts, `${plan.name} ${free.unit}호로 이사`);
+      // 유료: 코인 차감 기록 / 무료: 차감 없이 요청 번호만 기록 (코인 내역에 0코인 줄이 생기지 않게)
+      const balance = freeAccess
+        ? (run('INSERT INTO move_requests (user_id, ref, created_at) VALUES (?,?,?)', me, requestId, ts), balanceOf(me))
+        : applyTx(me, -plan.price, 'move', requestId, ts, `${plan.name} ${free.unit}호로 이사`).balance;
       if (testFault(req, 'move')) throw new Error('테스트: 이사 처리 중 오류');
-      // 이사 선물 가구 (2동 사람 침대 · 3동 놀이방 시설) — 이미 받은 것은 그대로
-      const gifts = FURNITURE.filter((f) => f.gift === tier).map((f) => f.id);
-      if (tier === 2) gifts.push('bed_cream');
-      if (tier === 3 && !gifts.includes('bed_cream')) gifts.push('bed_cream');
-      for (const g of gifts) run('INSERT OR IGNORE INTO shop_claims (user_id, item, claimed_at) VALUES (?,?,?)', me, g, ts);
+      grantMoveGifts(me, tier, ts);
       // 새집 배치: 기본 가구 + 사진 액자 (옛 위치는 쓰지 않음, 나머지 가구는 보관함)
       const h = repo.getHome(me);
       repo.saveHome(me, { layout: movedLayout(rawLayout(me) ?? h.layout, tier) });
-      return { unit: free.unit, balance: tx.balance, prev: cur };
+      return { unit: free.unit, balance, prev: cur };
     });
   } catch (e) {
     if (e instanceof MoveError) return res.status(e.status).json({ error: e.message, code: e.code, coins: coinStatus(me, ts) });
@@ -665,6 +687,13 @@ registerCommunity(app, { saveImage, removeImage, notify: (u, e, p) => rt.notify(
 
 // ---------- 운영 ----------
 app.get('/api/admin/reports', requireAuth, requireAdmin, (_req, res) => res.json({ reports: repo.listReports() }));
+// 운영 설정 (아파트 무료 이용 등) — 바꿔도 기존 거주·가구·결제 내역은 그대로
+app.get('/api/admin/settings', requireAuth, requireAdmin, (_req, res) => res.json({ settings: getSettings() }));
+app.post('/api/admin/settings', requireAuth, requireAdmin, (req, res) => {
+  const v = req.body?.apartmentFreeAccess;
+  if (typeof v !== 'boolean') return res.status(400).json({ error: '잘못된 설정 값이에요.' });
+  res.json({ settings: updateSettings({ apartmentFreeAccess: v }) });
+});
 app.post('/api/admin/reports/:id/status', requireAuth, requireAdmin, (req, res) => {
   const status = req.body?.status;
   if (!['open', 'resolved', 'dismissed'].includes(status)) return res.status(400).json({ error: '잘못된 상태' });
