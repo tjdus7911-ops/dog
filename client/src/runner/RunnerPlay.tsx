@@ -42,6 +42,28 @@ const SIDE_CAM = (() => { try { return localStorage.getItem('mungle.e2e') === '1
 /** 새 3D 공간(파스텔 테마파크) 시안: 승인 전까지는 mungle.runnerWorld=v2 일 때만 */
 const WORLD_V2 = (() => { try { return localStorage.getItem('mungle.runnerWorld') === 'v2'; } catch { return false; } })();
 const LOW_FPS = (() => { try { return localStorage.getItem('mungle.e2e') === '1' && localStorage.getItem('mungle.e2e.lowfps') === '1'; } catch { return false; } })();
+/** 자동 화면 테스트 전용: 그리기 횟수·삼각형 수 확인 (mungle.e2e) */
+function GlInfo() {
+  const { gl, scene } = useThree();
+  useEffect(() => {
+    const w = window as unknown as { __mungleTest?: Record<string, unknown> };
+    if (!w.__mungleTest) return;
+    const top = () => {
+      const list: [string, number][] = [];
+      scene.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh || !m.visible) return;
+        const g = m.geometry; const tri = (g.index ? g.index.count : g.getAttribute('position').count) / 3;
+        const n = (m as unknown as THREE.InstancedMesh).isInstancedMesh ? (m as unknown as THREE.InstancedMesh).count : 1;
+        list.push([`${m.type}:${tri}x${n}`, tri * n]);
+      });
+      return list.sort((a, b) => b[1] - a[1]).slice(0, 12);
+    };
+    w.__mungleTest.glInfo = () => ({ calls: gl.info.render.calls, triangles: gl.info.render.triangles, geometries: gl.info.memory.geometries, textures: gl.info.memory.textures, top: top() });
+    return () => { delete w.__mungleTest?.glInfo; };
+  }, [gl]);
+  return null;
+}
 function LowFpsTicker() {
   const { invalidate } = useThree();
   useEffect(() => { const id = window.setInterval(() => invalidate(), 125); return () => window.clearInterval(id); }, [invalidate]);
@@ -932,6 +954,7 @@ export function RunnerPlay({ game, avatar, human, best, onEnd, onQuit, onRetry }
       <div className="relative flex-1 min-h-0">
       <Canvas shadows dpr={LOW_FPS ? 0.5 : [1, 1.75]} frameloop={LOW_FPS ? 'demand' : 'always'} camera={{ fov: 50, near: 0.1, far: 120, position: [0, 2.5, 4.4] }} gl={{ antialias: !LOW_FPS }}>
         {LOW_FPS && <LowFpsTicker />}
+        <GlInfo />
         <color attach="background" args={[WORLD_V2 ? PARK_SKY : '#fde4ea']} />
         <fog attach="fog" args={WORLD_V2 ? [PARK_FOG, 26, 88] : ['#fde4ea', 20, 52]} />
         <Lighting indoor={false} shadows={!touch} />

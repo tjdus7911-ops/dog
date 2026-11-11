@@ -6,11 +6,15 @@
 // - 가까운 소품은 달리는 속도로 지나가고(속도감), 먼 언덕·관람차·구름은 거의 움직이지 않음(깊이감).
 // - 큰 텍스처를 쓰지 않음 (로고판 글씨만 작은 캔버스 텍스처 1장).
 import { useMemo, useRef } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { countIn } from '@shared/runner';
 import { AHEAD_MS, LANE_W, sceneNow, type PlayGame } from './RunnerPlay';
+import { isTouchDevice } from '../game/input';
+
+/** 모바일은 꽃·덤불·나무 밀도를 줄임 (성능) */
+const DENSE = isTouchDevice() ? 0.6 : 1;
 
 export const PARK_SKY = '#cdeefc';
 export const PARK_FOG = '#eef4ee';
@@ -37,9 +41,10 @@ function build(pieces: Piece[]): THREE.BufferGeometry {
   out.computeBoundingSphere();
   return out;
 }
-const S = (r: number, w = 18, h = 14) => new THREE.SphereGeometry(r, w, h);
-const C = (rt: number, rb: number, h: number, seg = 16) => new THREE.CylinderGeometry(rt, rb, h, seg);
-const CAP = (r: number, l: number) => new THREE.CapsuleGeometry(r, l, 4, 12);
+/** 구: 크기에 따라 면 수를 줄임 (작은 소품은 8×6) — 모바일 삼각형 수 절약 */
+const S = (r: number, w?: number, h?: number) => new THREE.SphereGeometry(r, w ?? (r < 0.15 ? 6 : r < 0.5 ? 10 : 12), h ?? (r < 0.15 ? 4 : r < 0.5 ? 6 : 8));
+const C = (rt: number, rb: number, h: number, seg = 10) => new THREE.CylinderGeometry(rt, rb, h, seg);
+const CAP = (r: number, l: number) => new THREE.CapsuleGeometry(r, l, 2, 8);
 const vc = new THREE.MeshLambertMaterial({ vertexColors: true });
 const vcTint = new THREE.MeshLambertMaterial({ vertexColors: true, color: '#ffffff' });
 
@@ -48,25 +53,25 @@ function rng(seed: number) { let s = seed; return () => { s = (s * 16807) % 2147
 
 // 소품 모양
 const paw = (c: string, y = 0): Piece[] => [
-  { g: S(0.2, 16, 8), c, p: [0, y, 0.06], s: [1.15, 0.12, 0.95] },
-  ...[[-0.2, -0.16], [-0.08, -0.27], [0.08, -0.27], [0.2, -0.16]].map(([x, z]) => ({ g: S(0.075, 12, 6), c, p: [x, y, z] as V3, s: [1, 0.14, 1.15] as V3 })),
+  { g: S(0.2, 8, 3), c, p: [0, y, 0.06], s: [1.15, 0.12, 0.95] },
+  ...[[-0.2, -0.16], [-0.08, -0.27], [0.08, -0.27], [0.2, -0.16]].map(([x, z]) => ({ g: S(0.075, 5, 3), c, p: [x, y, z] as V3, s: [1, 0.14, 1.15] as V3 })),
 ];
 const GEO = {
-  curb: () => build([{ g: CAP(0.11, 0.78), c: '#ffffff', p: [0, 0.06, 0], r: [Math.PI / 2, 0, 0] }]),
-  dash: () => build([{ g: CAP(0.045, 0.7), c: '#ffffff', p: [0, 0.012, 0], r: [Math.PI / 2, 0, 0], s: [1, 1, 0.25] }]),
+  curb: () => build([{ g: C(0.11, 0.11, 0.94, 7), c: '#ffffff', p: [0, 0.05, 0], r: [Math.PI / 2, 0, 0] }]),
+  dash: () => build([{ g: new THREE.BoxGeometry(0.08, 0.01, 0.8), c: '#ffffff', p: [0, 0.012, 0] }]),
   paw: () => build(paw('#f6c9b4', 0.008)),
   star: () => build([{ g: new THREE.CircleGeometry(0.16, 5), c: '#ffd86b', p: [0, 0.012, 0], r: [-Math.PI / 2, 0, Math.PI / 10] }]),
   fence: () => build([
-    ...[-0.62, 0, 0.62].map((z) => ({ g: CAP(0.045, 0.42), c: '#fff7ea', p: [0, 0.3, z] as V3 })),
-    ...[-0.62, 0, 0.62].map((z) => ({ g: S(0.06, 10, 8), c: '#ffd1dc', p: [0, 0.6, z] as V3 })),
-    { g: CAP(0.03, 1.3), c: '#fff7ea', p: [0, 0.42, 0], r: [Math.PI / 2, 0, 0] },
-    { g: CAP(0.03, 1.3), c: '#fff7ea', p: [0, 0.22, 0], r: [Math.PI / 2, 0, 0] },
+    ...[-0.62, 0, 0.62].map((z) => ({ g: C(0.045, 0.045, 0.56, 6), c: '#fff7ea', p: [0, 0.28, z] as V3 })),
+    ...[-0.62, 0, 0.62].map((z) => ({ g: S(0.065, 5, 3), c: '#ffd1dc', p: [0, 0.58, z] as V3 })),
+    { g: C(0.03, 0.03, 1.3, 5), c: '#fff7ea', p: [0, 0.42, 0], r: [Math.PI / 2, 0, 0] },
+    { g: C(0.03, 0.03, 1.3, 5), c: '#fff7ea', p: [0, 0.22, 0], r: [Math.PI / 2, 0, 0] },
   ]),
-  bush: () => build([{ g: S(0.42), c: '#9fd89a', s: [1.2, 0.8, 1] }, { g: S(0.3), c: '#b5e4a8', p: [0.36, 0.06, 0.1] }, { g: S(0.26), c: '#8fcf8f', p: [-0.32, 0.02, -0.08] }, { g: S(0.07, 8, 6), c: '#ffb3c7', p: [0.15, 0.32, 0.22] }, { g: S(0.06, 8, 6), c: '#ffffff', p: [-0.2, 0.28, 0.2] }]),
-  treeMint: () => build([{ g: C(0.1, 0.15, 1.3, 10), c: '#c89a72', p: [0, 0.65, 0] }, { g: S(0.85), c: '#a6dfa6', p: [0, 1.75, 0] }, { g: S(0.6), c: '#bde9b4', p: [0.5, 2.1, 0.2] }, { g: S(0.55), c: '#93d39a', p: [-0.45, 1.95, -0.2] }, { g: S(0.45), c: '#c9efbf', p: [0.05, 2.45, -0.1] }]),
-  treePink: () => build([{ g: C(0.1, 0.15, 1.2, 10), c: '#c89a72', p: [0, 0.6, 0] }, { g: S(0.8), c: '#ffc9d8', p: [0, 1.65, 0] }, { g: S(0.58), c: '#ffd9e3', p: [0.45, 2.0, 0.15] }, { g: S(0.5), c: '#ffb7cb', p: [-0.42, 1.85, -0.15] }]),
-  treeLemon: () => build([{ g: C(0.09, 0.13, 1.0, 10), c: '#c89a72', p: [0, 0.5, 0] }, { g: S(0.62), c: '#fff0a8', p: [0, 1.35, 0], s: [1, 1.15, 1] }, { g: S(0.42), c: '#ffe68a', p: [0, 1.95, 0] }]),
-  flower: () => build([{ g: S(0.075, 10, 6), c: '#ffffff', p: [0, 0.16, 0] }, { g: S(0.035, 8, 6), c: '#ffd86b', p: [0, 0.2, 0.05] }, { g: C(0.012, 0.012, 0.16, 5), c: '#7cc27c', p: [0, 0.08, 0] }]),
+  bush: () => build([{ g: S(0.42, 9, 6), c: '#9fd89a', s: [1.2, 0.8, 1] }, { g: S(0.3, 8, 5), c: '#b5e4a8', p: [0.36, 0.06, 0.1] }, { g: S(0.26, 8, 5), c: '#8fcf8f', p: [-0.32, 0.02, -0.08] }, { g: S(0.07, 8, 6), c: '#ffb3c7', p: [0.15, 0.32, 0.22] }, { g: S(0.06, 8, 6), c: '#ffffff', p: [-0.2, 0.28, 0.2] }]),
+  treeMint: () => build([{ g: C(0.1, 0.15, 1.3, 6), c: '#c89a72', p: [0, 0.65, 0] }, { g: S(0.85, 10, 6), c: '#a6dfa6', p: [0, 1.75, 0] }, { g: S(0.6, 10, 6), c: '#bde9b4', p: [0.5, 2.1, 0.2] }, { g: S(0.55, 10, 6), c: '#93d39a', p: [-0.45, 1.95, -0.2] }, { g: S(0.45, 10, 6), c: '#c9efbf', p: [0.05, 2.45, -0.1] }]),
+  treePink: () => build([{ g: C(0.1, 0.15, 1.2, 6), c: '#c89a72', p: [0, 0.6, 0] }, { g: S(0.8, 10, 6), c: '#ffc9d8', p: [0, 1.65, 0] }, { g: S(0.58, 10, 6), c: '#ffd9e3', p: [0.45, 2.0, 0.15] }, { g: S(0.5, 10, 6), c: '#ffb7cb', p: [-0.42, 1.85, -0.15] }]),
+  treeLemon: () => build([{ g: C(0.09, 0.13, 1.0, 6), c: '#c89a72', p: [0, 0.5, 0] }, { g: S(0.62, 10, 6), c: '#fff0a8', p: [0, 1.35, 0], s: [1, 1.15, 1] }, { g: S(0.42, 10, 6), c: '#ffe68a', p: [0, 1.95, 0] }]),
+  flower: () => build([{ g: S(0.075, 6, 4), c: '#ffffff', p: [0, 0.14, 0] }, { g: S(0.035, 5, 3), c: '#ffd86b', p: [0, 0.18, 0.05] }, { g: C(0.012, 0.012, 0.14, 3), c: '#7cc27c', p: [0, 0.07, 0] }]),
   balloon: () => build([{ g: S(0.2), c: '#ffffff', p: [0, 0, 0], s: [1, 1.18, 1] }, { g: new THREE.ConeGeometry(0.045, 0.06, 8), c: '#ffffff', p: [0, -0.25, 0], r: [Math.PI, 0, 0] }, { g: C(0.006, 0.006, 1.3, 4), c: '#ffffff', p: [0, -0.92, 0] }]),
   flag: () => build([{ g: new THREE.ConeGeometry(0.16, 0.34, 3), c: '#ffffff', r: [Math.PI, 0, 0], s: [1, 1, 0.12] }]),
   pole: () => build([{ g: C(0.04, 0.05, 2.5, 10), c: '#fff7ea', p: [0, 1.25, 0] }, { g: S(0.09, 12, 8), c: '#ffd86b', p: [0, 2.55, 0] }]),
@@ -200,9 +205,10 @@ function Tent({ x, z, s = 1, a = '#ffb7cb' }: { x: number; z: number; s?: number
   return <mesh geometry={g} material={new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide })} position={[x, 0, z]} scale={s} />;
 }
 function FarScenery({ midX, span }: { midX: number; span: number }) {
-  const hill = useMemo(() => build([{ g: S(1, 28, 14), c: '#ffffff', s: [1, 1, 1] }]), []);
+  const hill = useMemo(() => build([{ g: S(1, 20, 8), c: '#ffffff', s: [1, 1, 1] }]), []);
   const cloud = useMemo(() => build([{ g: S(1.2), c: '#ffffff' }, { g: S(0.9), c: '#ffffff', p: [1.2, -0.15, 0] }, { g: S(0.8), c: '#ffffff', p: [-1.15, -0.2, 0.1] }, { g: S(0.7), c: '#fdfbff', p: [0.4, 0.55, 0] }]), []);
-  const tree = useMemo(() => GEO.treeMint(), []);
+  // 먼 나무: 멀리 있어 면 수를 크게 줄인 모양
+  const tree = useMemo(() => build([{ g: C(0.12, 0.16, 1.2, 5), c: '#c89a72', p: [0, 0.6, 0] }, { g: S(0.9, 8, 5), c: '#a6dfa6', p: [0, 1.7, 0] }, { g: S(0.6, 7, 4), c: '#bde9b4', p: [0.45, 2.1, 0.1] }]), []);
   const hills: Item[] = useMemo(() => {
     const r = rng(7); const out: Item[] = [];
     for (let i = 0; i < 9; i++) out.push({ x: midX - 70 + i * 17.5 + r() * 6, z: -78 - r() * 10, s: 14 + r() * 8, ry: 0, y: -8, col: ['#b9e6bc', '#c9eec5', '#acdcb5'][i % 3] });
@@ -249,7 +255,7 @@ function textTexture(title: string, sub: string, goal: boolean) {
 function Gate({ game, xs, goal }: { game: PlayGame; xs: number[]; goal?: boolean }) {
   const edge = LANE_W * 1.5;
   const L = Math.min(...xs) - edge - 0.7, R = Math.max(...xs) + edge + 0.7;
-  const W = R - L, cx = (L + R) / 2, H = goal ? 4.6 : 4.1;
+  const W = R - L, cx = (L + R) / 2, H = goal ? 3.5 : 3.2;
   const tex = useMemo(() => textTexture(goal ? 'GOAL!' : '멍글런너', goal ? '' : 'MUNGLE RUNNER', !!goal), [goal]);
   const pillar = useMemo(() => build([
     ...Array.from({ length: 8 }, (_, i) => ({ g: C(0.3, 0.3, H / 8, 18), c: i % 2 ? '#ffffff' : goal ? '#ffd86b' : '#ffb7cb', p: [0, (i + 0.5) * (H / 8), 0] as V3 })),
@@ -289,12 +295,12 @@ function Gate({ game, xs, goal }: { game: PlayGame; xs: number[]; goal?: boolean
       <group position={[0, H, 0]}>
         <mesh geometry={beam} material={vc} />
         <instancedMesh ref={bulbs} args={[S(0.07, 8, 6), new THREE.MeshBasicMaterial({ color: '#fff5c2', toneMapped: false }), nB]} frustumCulled={false} />
-        <mesh position={[0, 0.95, 0.05]}>
-          <planeGeometry args={[Math.min(W * 0.6, 3.6), Math.min(W * 0.6, 3.6) * (160 / 512)]} />
+        <mesh position={[0, 0.5, 0.3]}>
+          <planeGeometry args={[Math.min(W * 0.62, 3.6), Math.min(W * 0.62, 3.6) * (160 / 512)]} />
           <meshBasicMaterial map={tex} transparent toneMapped={false} />
         </mesh>
         {!goal && [0, 1, 2].map((i) => (
-          <mesh key={i} position={[(i - 1) * 0.42, -0.62, 0.12]}>
+          <mesh key={i} position={[(i - 1) * 0.42, -0.5, 0.3]}>
             <circleGeometry args={[0.15, 20]} />
             <meshBasicMaterial ref={(mm) => { lamps.current[i] = mm; }} color="#e8ddd6" toneMapped={false} />
           </mesh>
@@ -316,7 +322,7 @@ function Confetti({ game, finishT, xs }: { game: PlayGame; finishT: number; xs: 
   const ref = useRef<THREE.InstancedMesh>(null);
   const n = 220;
   const midX = (Math.min(...xs) + Math.max(...xs)) / 2, W = Math.max(...xs) - Math.min(...xs) + 6;
-  const data = useMemo(() => { const r = rng(11); return Array.from({ length: n }, () => ({ x: midX + (r() - 0.5) * W, vx: (r() - 0.5) * 1.2, vy: 2.5 + r() * 3, z: -1 - r() * 3, ph: r() * 6, col: PASTEL[Math.floor(r() * PASTEL.length)] })); }, [midX, W]);
+  const data = useMemo(() => { const r = rng(11); return Array.from({ length: n }, () => ({ x: midX + (r() - 0.5) * W, vx: (r() - 0.5) * 1.6, vy: 1 + r() * 3, z: -0.5 - r() * 5.5, ph: r() * 6, col: PASTEL[Math.floor(r() * PASTEL.length)] })); }, [midX, W]);
   const o = useMemo(() => new THREE.Object3D(), []);
   const colored = useRef(false);
   useFrame(({ clock }) => {
@@ -326,18 +332,22 @@ function Confetti({ game, finishT, xs }: { game: PlayGame; finishT: number; xs: 
     m.visible = e > 0 && e < 3.6;
     if (!m.visible) return;
     data.forEach((d, i) => {
-      if (!colored.current) m.setColorAt(i, new THREE.Color(d.col));
-      const y = 4.4 + d.vy * e - 2.6 * e * e;
+      const y = 2.6 + d.vy * e - 1.6 * e * e;
       o.position.set(d.x + d.vx * e + Math.sin(clock.elapsedTime * 3 + d.ph) * 0.15, Math.max(0.05, y), d.z);
       o.rotation.set(clock.elapsedTime * 4 + d.ph, d.ph, clock.elapsedTime * 3);
-      o.scale.setScalar(0.08);
+      o.scale.setScalar(0.11);
       o.updateMatrix(); m.setMatrixAt(i, o.matrix);
     });
     colored.current = true;
     m.instanceMatrix.needsUpdate = true;
     if (m.instanceColor) m.instanceColor.needsUpdate = true;
   });
-  return <instancedMesh ref={ref} args={[new THREE.PlaneGeometry(1, 1.4), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, toneMapped: false }), n]} frustumCulled={false} visible={false} />;
+  const geoMat = useMemo(() => [new THREE.PlaneGeometry(1, 1.4), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, toneMapped: false })] as const, []);
+  return <instancedMesh ref={(m) => {
+    (ref as React.MutableRefObject<THREE.InstancedMesh | null>).current = m;
+    // 색은 처음 그리기 전에 넣어야 셰이더가 인스턴스 색을 씀
+    if (m && !m.instanceColor) { data.forEach((d, i) => m.setColorAt(i, new THREE.Color(d.col))); colored.current = true; }
+  }} args={[geoMat[0], geoMat[1], n]} frustumCulled={false} visible={false} />;
 }
 
 // ---------------------------------------------------------------- 공간 전체
@@ -369,12 +379,12 @@ export function ThemePark({ game, xs }: { game: PlayGame; xs: number[] }) {
     const bush: Item[] = [], trees: Item[][] = [[], [], []], flowers: Item[] = [], stones: Item[] = [];
     for (const k of [0, 1]) {
       // 덤불: 울타리 바로 바깥, 띄엄띄엄
-      for (let z = 0; z < SPAN; z += 2.2 + r() * 3.2) bush.push({ x: side(k, 1.1 + r() * 0.6), z, s: 0.6 + r() * 0.5, ry: r() * 6 });
+      for (let z = 0; z < SPAN; z += (2.2 + r() * 3.2) / DENSE) bush.push({ x: side(k, 1.1 + r() * 0.6), z, s: 0.6 + r() * 0.5, ry: r() * 6 });
       // 나무: 바깥으로 갈수록 듬성듬성, 크기 다양 (가까운 줄은 시야를 가리지 않게 낮고 작게)
       for (let z = 0; z < SPAN; z += 3 + r() * 4) { const d = 2.6 + r() * 3; trees[Math.floor(r() * 3)].push({ x: side(k, d), z, s: 0.75 + r() * 0.35, ry: r() * 6 }); }
-      for (let z = 0; z < SPAN; z += 4 + r() * 5) { const d = 6.5 + r() * 9; trees[Math.floor(r() * 3)].push({ x: side(k, d), z, s: 1 + r() * 0.7, ry: r() * 6 }); }
+      for (let z = 0; z < SPAN; z += (4 + r() * 5) / DENSE) { const d = 6.5 + r() * 9; trees[Math.floor(r() * 3)].push({ x: side(k, d), z, s: 1 + r() * 0.7, ry: r() * 6 }); }
       // 꽃밭: 무리 지어
-      for (let z = 1; z < SPAN; z += 5 + r() * 6) {
+      for (let z = 1; z < SPAN; z += (5 + r() * 6) / DENSE) {
         const cx = side(k, 1.9 + r() * 3.5), n = 6 + Math.floor(r() * 8), col = FLOWER_COL[Math.floor(r() * FLOWER_COL.length)], col2 = FLOWER_COL[Math.floor(r() * FLOWER_COL.length)];
         for (let j = 0; j < n; j++) flowers.push({ x: cx + (r() - 0.5) * 1.4, z: z + (r() - 0.5) * 1.6, s: 0.8 + r() * 0.6, ry: r() * 6, col: j % 3 ? col : col2 });
       }
@@ -389,9 +399,9 @@ export function ThemePark({ game, xs }: { game: PlayGame; xs: number[] }) {
     for (const k of [0, 1]) {
       for (let i = 0; i < 9; i++) {
         const z = i * 8 + (k ? 4 : 0);
-        poles.push({ x: side(k, 0.25), z, s: 1, ry: 0 });
+        poles.push({ x: side(k, 1.7), z, s: 0.85, ry: 0 });
         // 다음 깃대까지 늘어진 삼각 깃발 줄
-        for (let j = 1; j < 8; j++) flags.push({ x: side(k, 0.25), z: z + j, y: 2.4 - Math.sin((j / 8) * Math.PI) * 0.35, s: 0.55, ry: Math.PI / 2, col: PASTEL[(i + j) % PASTEL.length] });
+        for (let j = 1; j < 8; j++) flags.push({ x: side(k, 1.7), z: z + j, y: 2.05 - Math.sin((j / 8) * Math.PI) * 0.3, s: 0.5, ry: Math.PI / 2, col: PASTEL[(i + j) % PASTEL.length] });
       }
       for (let z = 10 + (k ? 13 : 0); z < SPAN; z += 26) for (let j = 0; j < 4; j++) balloons.push({ x: side(k, 0.9) + Math.cos(j * 1.6) * 0.25, z: z + Math.sin(j * 1.6) * 0.25, y: 1.7 + (j % 2) * 0.3, s: 1, ry: 0, bob: 0.07, col: PASTEL[(j + Math.floor(z)) % PASTEL.length] });
     }
@@ -401,13 +411,17 @@ export function ThemePark({ game, xs }: { game: PlayGame; xs: number[] }) {
 
   const goal = useRef<THREE.Group>(null);
   const start = useRef<THREE.Group>(null);
+  const { size } = useThree();
+  // 세로 화면은 카메라가 가까워 게이트를 조금 더 멀리 (로고가 상단 정보를 가리지 않게)
+  const gateAhead = size.height > size.width ? 8.5 : 5;
   const finishT = game.chart.duration - 1600;
   const speed = game.course.speed;
   useFrame(() => {
     const now = sceneNow(game);
     const dist = (Math.max(0, now) / 1000) * speed;
     if (goal.current) { goal.current.position.z = -((finishT - now) / 1000) * speed; goal.current.visible = finishT - now < AHEAD_MS * 3; }
-    if (start.current) { start.current.position.z = dist + (game.multi ? 0.7 : -1.2); start.current.visible = dist < 40; }
+    // 혼자 달리기: 게이트를 강아지 앞 5m에 두어 카운트다운 동안 로고·신호등이 보이고, 출발 후 통과 / 함께 달리기: 강아지들 바로 뒤
+    if (start.current) { start.current.position.z = dist + (game.multi ? 0.7 : -gateAhead); start.current.visible = dist < 40; }
   });
   const flowerMat = useMemo(() => new THREE.MeshLambertMaterial({ vertexColors: true }), []);
   return (
@@ -440,7 +454,7 @@ export function ThemePark({ game, xs }: { game: PlayGame; xs: number[] }) {
       {/* 주변 */}
       <Scroll game={game} geo={g.fence} items={L.fence} span={71.76} />
       <Scroll game={game} geo={g.bush} items={L.bush} span={SPAN} />
-      {L.trees.map((it, i) => <Scroll key={i} game={game} geo={g.trees[i]} items={it} span={SPAN} shadow />)}
+      {L.trees.map((it, i) => <Scroll key={i} game={game} geo={g.trees[i]} items={it} span={SPAN} />)}
       <Scroll game={game} geo={g.flower} items={L.flowers} span={SPAN} material={flowerMat} />
       <Scroll game={game} geo={g.stone} items={L.stones} span={SPAN} />
       <Scroll game={game} geo={g.sign} items={L.signs} span={SPAN} />
