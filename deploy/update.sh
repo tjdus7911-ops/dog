@@ -37,7 +37,11 @@ fi
 if ! cmp -s "$APP/package-lock.json" "$NEXT/package-lock.json" || [ ! -d "$NEXT/node_modules" ]; then
   as_app "cd '$NEXT' && npm ci --include=dev --no-audit --no-fund"
 fi
-if ! as_app "cd '$NEXT' && npm run build"; then
+# 화면 빌드: 같은 소스로 미리 빌드한 결과가 저장소에 있으면 그대로 사용 (작은 VM 메모리 절약), 없으면 Vite 빌드만
+WANT="$(git_app -C "$NEXT" rev-parse HEAD:client/src)-$(git_app -C "$NEXT" rev-parse HEAD:shared)"
+if [ -f "$NEXT/client/dist/.src" ] && [ "$(cat "$NEXT/client/dist/.src")" = "$WANT" ]; then
+  echo "🐾 미리 빌드된 화면 사용"
+elif ! as_app "cd '$NEXT/client' && NODE_OPTIONS=--max-old-space-size=1400 npx vite build"; then
   echo "❌ 새 버전 빌드 실패 — 지금 버전($OLD)을 그대로 씁니다."; rm -rf "$NEXT"; exit 1
 fi
 

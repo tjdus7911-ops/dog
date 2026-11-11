@@ -31,14 +31,40 @@ export DEBIAN_FRONTEND=noninteractive
 [ "$(id -u)" -eq 0 ] || { echo "sudo 로 실행해 주세요."; exit 1; }
 say() { printf '\n\033[1;35m🐾 %s\033[0m\n' "$*"; }
 
+# 설치 진행 상황을 SSH 없이 브라우저로 확인 (MUNGLE_STATUS=1 일 때만):
+#   설치하는 동안 http://<서버IP>:443/ 에 설치 기록 끝부분을 보여 주고, HTTPS 설정 직전에 끔.
+#   설치가 중간에 실패하면 계속 켜 두어 원인을 볼 수 있음.
+STATUS_PIDS=""
+if [ "${MUNGLE_STATUS:-}" = 1 ] && command -v python3 >/dev/null; then
+  iptables -C INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport 443 -j ACCEPT
+  mkdir -p /run/mungle-status
+  ( while true; do { date -u; free -m | head -2; echo; tail -n 120 /var/log/mungle-setup.log 2>/dev/null; } > /run/mungle-status/status.tmp; mv -f /run/mungle-status/status.tmp /run/mungle-status/index.txt; sleep 3; done ) &
+  STATUS_PIDS="$!"
+  ( cd /run/mungle-status && exec python3 -m http.server 443 >/dev/null 2>&1 ) &
+  STATUS_PIDS="$STATUS_PIDS $!"
+  trap 'echo "❌ 설치가 줄 $LINENO 에서 멈췄어요"' ERR
+fi
+stop_status() { [ -n "$STATUS_PIDS" ] && kill $STATUS_PIDS 2>/dev/null || true; STATUS_PIDS=""; }
+
+# 화면(클라이언트) 빌드: 저장소에 같은 소스로 미리 빌드한 결과(client/dist/.src)가 있으면 그대로 쓰고,
+# 없으면 메모리를 아껴 Vite 빌드만 (서버 타입 검사는 실행에 필요 없어 생략 — 작은 VM에서 메모리 부족 방지)
+build_client() {
+  local dir="$1" want
+  want="$(sudo -u mungle -H git -C "$dir" rev-parse HEAD:client/src)-$(sudo -u mungle -H git -C "$dir" rev-parse HEAD:shared)"
+  if [ -f "$dir/client/dist/.src" ] && [ "$(cat "$dir/client/dist/.src")" = "$want" ]; then
+    echo "   미리 빌드된 화면 사용 ($want)"; return 0
+  fi
+  sudo -u mungle -H bash -c "cd '$dir/client' && NODE_OPTIONS=--max-old-space-size=1400 npx vite build"
+}
+
 say "1/8 기본 패키지 설치"
 apt-get update -y
 apt-get install -y ca-certificates curl gnupg git debian-keyring debian-archive-keyring apt-transport-https
 
-# 메모리가 작은 VM(1GB)에서도 빌드가 되도록 스왑 2GB 확보
+# 메모리가 작은 VM(1GB)에서도 설치·빌드가 되도록 스왑 3GB 확보
 if [ "$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)" -lt 2000 ] && ! swapon --show | grep -q .; then
-  say "메모리가 작아 스왑 2GB를 만듭니다"
-  fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+  say "메모리가 작아 스왑 3GB를 만듭니다"
+  fallocate -l 3G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
   grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
 fi
 
@@ -64,7 +90,8 @@ mkdir -p "$DATA" && chown mungle:mungle "$DATA"
 if [ ! -d "$APP/.git" ]; then git clone -b "$BRANCH" "$REPO" "$APP"; fi
 chown -R mungle:mungle "$APP"
 sudo -u mungle -H git -C "$APP" pull --ff-only origin "$BRANCH"
-sudo -u mungle -H bash -c "cd '$APP' && npm ci --include=dev --no-audit --no-fund && npm run build"
+sudo -u mungle -H bash -c "cd '$APP' && npm ci --include=dev --no-audit --no-fund"
+build_client "$APP"
 
 say "5/8 서비스 등록"
 if [ ! -f "$ENVFILE" ]; then
@@ -126,6 +153,7 @@ for p in 80 443; do
 done
 if command -v netfilter-persistent >/dev/null; then netfilter-persistent save >/dev/null 2>&1 || true; fi
 
+stop_status
 say "7/8 HTTPS 주소 설정"
 if [ -z "$DOMAIN" ]; then
   IP="$(curl -fsS https://api.ipify.org || curl -fsS https://ifconfig.me)"
