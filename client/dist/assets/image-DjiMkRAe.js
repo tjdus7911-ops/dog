@@ -1,0 +1,1 @@
+async function n(h,i=768){const e=await createImageBitmap(h),a=Math.min(1,i/Math.max(e.width,e.height)),t=document.createElement("canvas");return t.width=Math.round(e.width*a),t.height=Math.round(e.height*a),t.getContext("2d").drawImage(e,0,0,t.width,t.height),t.toDataURL("image/jpeg",.86)}export{n as r};
