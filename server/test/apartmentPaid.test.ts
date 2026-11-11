@@ -54,8 +54,8 @@ async function main() {
     const ap = (await api('/api/apartment', undefined, a.token)).body;
     const list = (id: string) => ap.buildings.find((b: any) => b.id === id).units.map((u: any) => u.unit).sort();
     check('원룸(1동) 101~404 · 16호', JSON.stringify(list('1')) === JSON.stringify(expect(4, 4)), list('1'));
-    check('투룸(2동) 101~403 · 12호 (401·402·403 포함)', JSON.stringify(list('2')) === JSON.stringify(expect(4, 3)), list('2'));
-    check('쓰리룸(3동) 101~403 · 12호 (401·402·403 포함)', JSON.stringify(list('3')) === JSON.stringify(expect(4, 3)), list('3'));
+    check('투룸(2동) 101~404 · 16호 (04호·400호대 포함)', JSON.stringify(list('2')) === JSON.stringify(expect(4, 4)), list('2'));
+    check('쓰리룸(3동) 101~404 · 16호 (04호·400호대 포함)', JSON.stringify(list('3')) === JSON.stringify(expect(4, 4)), list('3'));
     check('공용 호수 규칙과 서버 목록이 같음', APARTMENT_BUILDINGS.every((b) => unitsOf(b).length === ap.buildings.find((x: any) => x.id === b.id).units.length));
     check('기본 운영 설정: 유료 입주', ap.freeAccess === false);
 
@@ -87,19 +87,19 @@ async function main() {
 
     const b = await signup('paiduser2');
     grant(b.id, 500, 'g-b'); // 1,000
-    const bIn = await api('/api/apartment/move-in', { building: '2', unit: '403' }, b.token);
+    const bIn = await api('/api/apartment/move-in', { building: '2', unit: '404' }, b.token);
     const cb = await coins(b.token);
-    check('투룸 403호 입주 (400호대) · 1,000 차감', bIn.status === 200 && bIn.body.profile.residence.unit === '403' && cb.balance === 0 && cb.spent[0].amount === -1000, bIn.body);
+    check('투룸 404호 입주 (새로 생긴 04호) · 1,000 차감', bIn.status === 200 && bIn.body.profile.residence.unit === '404' && cb.balance === 0 && cb.spent[0].amount === -1000, bIn.body);
     const u3 = await signup('paiduser3');
     grant(u3.id, 500, 'g-u3');
-    const taken = await api('/api/apartment/move-in', { building: '2', unit: '403' }, u3.token);
+    const taken = await api('/api/apartment/move-in', { building: '2', unit: '404' }, u3.token);
     check('이미 입주한 호실은 다른 회원이 못 들어감 · 차감 없음', taken.status === 409 && (await coins(u3.token)).balance === 1000, taken.body);
     const c = await signup('paiduser4');
     const cIn = await api('/api/apartment/move-in', { building: '1', unit: '404' }, c.token);
     check('원룸 404호 입주 (가입 선물로 바로) · 500 차감', cIn.status === 200 && (await coins(c.token)).balance === 0);
     const ap2 = (await api('/api/apartment', undefined, a.token)).body;
     const occ = (id: string, u: string) => ap2.buildings.find((x: any) => x.id === id).units.find((x: any) => x.unit === u).occupied;
-    check('안내판에 입주 표시 (3동 401 · 2동 403 · 1동 404)', occ('3', '401') && occ('2', '403') && occ('1', '404'));
+    check('안내판에 입주 표시 (3동 401 · 2동 404 · 1동 404)', occ('3', '401') && occ('2', '404') && occ('1', '404'));
 
     console.log('\n[매일 출석 100 · 한국 시간 자정 기준 · 하루 1번]');
     const day0 = Date.parse('2025-06-01T15:10:00Z'); // 한국 6/2 00:10
@@ -121,7 +121,7 @@ async function main() {
     const g = (await api('/api/auth/guest', {})).body;
     check('둘러보기 시작', !!g.token && g.profile.role === 'guest');
     const gAp = await api('/api/apartment', undefined, g.token);
-    check('아파트 건물·호수 목록 구경 가능', gAp.status === 200 && gAp.body.buildings.length === 3 && gAp.body.buildings[2].units.some((u: any) => u.unit === '401'));
+    check('아파트 건물·호수 목록 구경 가능', gAp.status === 200 && gAp.body.buildings.length === 3 && gAp.body.buildings[2].units.some((u: any) => u.unit === '404'));
     const gIn = await api('/api/apartment/move-in', { building: '1', unit: '101' }, g.token);
     check('실제 입주 불가 (회원 전용)', gIn.status === 403 && gIn.body.code === 'members_only');
     check('입주 정보 저장 안 됨', !(await api('/api/me', undefined, g.token)).body.profile?.residence);

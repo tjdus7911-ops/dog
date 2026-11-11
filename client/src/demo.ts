@@ -116,7 +116,7 @@ export async function demoApi(path: string, opts: { method?: string; body?: any 
       plans: ([1, 2, 3] as HomeTier[]).map((k) => {
         const p = PLANS[k];
         const status = t === k ? 'current' : DEMO_FREE ? 'available' : t !== null && k < t ? 'past' : t === null ? (w.balance >= p.price ? 'available' : 'insufficient') : t + 1 === k ? (w.balance >= p.price ? 'available' : 'insufficient') : 'locked';
-        return { tier: k, building: p.building, name: p.name, type: p.type, rooms: p.rooms, price: p.price, features: p.features, capacity: p.capacity, free: 12, status, need: DEMO_FREE ? 0 : Math.max(0, p.price - w.balance) };
+        return { tier: k, building: p.building, name: p.name, type: p.type, rooms: p.rooms, price: p.price, features: p.features, capacity: p.capacity, free: 16, status, need: DEMO_FREE ? 0 : Math.max(0, p.price - w.balance) };
       }),
     };
   }
