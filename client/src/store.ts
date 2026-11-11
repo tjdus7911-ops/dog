@@ -32,6 +32,8 @@ interface State {
   onboarding: boolean;
   connection: 'offline' | 'connecting' | 'online' | 'kicked';
   kickReason: string | null;
+  /** 모든 광장이 가득 차서 자리가 나기를 기다리는 중 (자동으로 다시 시도) */
+  parkWait: boolean;
 
   park: ParkInfo | null;
   parks: ParkInfo[];
@@ -64,6 +66,8 @@ interface State {
   home: HomeView | null;
   /** 집 꾸미기 편집 화면 열림 */
   homeEdit: boolean;
+  /** 꾸미기를 벽지·바닥 패널부터 열기 ('내 집' 시트의 '벽지 · 바닥 바꾸기') */
+  homeEditStyle: boolean;
   /** 로비 호실 안내판 패널 열림 */
   lobbyPanel: boolean;
   /** 집 정보 패널 열림 */
@@ -105,7 +109,8 @@ interface State {
   /** 사진 크게 보기 */
   viewer: ViewerState | null;
   /** 둘러보기 방문자가 주민 전용 기능을 눌렀을 때 가입 안내 */
-  joinPrompt: boolean;
+  /** true = 기본 안내, 문자열 = 그 안내 문구 */
+  joinPrompt: boolean | string;
   /** 친구 집 놀러 가기: 로비에 도착하면 이 집 문 앞 안내를 바로 띄움 */
   lobbyFocus: number | null;
   /** 멍글런너 화면 (로비·게임·결과) 열림 / 랭킹 갱신 신호 */
@@ -132,6 +137,7 @@ export const useStore = create<State>()(() => ({
   onboarding: false,
   connection: 'offline',
   kickReason: null,
+  parkWait: false,
   park: null,
   parks: [],
   players: {},
@@ -155,6 +161,7 @@ export const useStore = create<State>()(() => ({
   seated: null,
   home: null,
   homeEdit: false,
+  homeEditStyle: false,
   lobbyPanel: false,
   homePanel: false,
   visitRequestsVersion: 0,

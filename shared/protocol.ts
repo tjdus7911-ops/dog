@@ -123,10 +123,15 @@ export interface NotificationItem {
 
 export type Ack<T = {}> = (res: ({ ok: true } & T) | { ok: false; error: string }) => void;
 
+/**
+ * 광장 채널: 같은 광장 맵을 쓰고 서버에서 사람만 나눈 독립 공간 (채널마다 정원 MUNGLE_PARK_CAPACITY, 기본 30명)
+ * id 는 예전 그대로(central-n) — 저장된 모임·자랑 글의 장소 정보가 그대로 이어짐
+ */
 export const PARKS: { id: string; name: string }[] = [
-  { id: 'central-1', name: '중앙 공원 1' },
-  { id: 'central-2', name: '중앙 공원 2' },
-  { id: 'central-3', name: '중앙 공원 3' },
+  { id: 'central-1', name: '광장 1' },
+  { id: 'central-2', name: '광장 2' },
+  { id: 'central-3', name: '광장 3' },
+  { id: 'central-4', name: '광장 4' },
 ];
 
 export const NET_TICK_MS = 100;

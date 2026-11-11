@@ -7,6 +7,9 @@ import { AuthScreen } from './AuthScreen';
 import { ErrorBoundary, Toasts } from './common';
 import type { MyProfile } from '@shared/protocol';
 import { DEMO, loadDemoProfile } from '../demo';
+import { InstallGuideSheet } from './Install';
+import { LogoMark } from './Logo';
+import { useAutoAttendance } from './Coins';
 
 const Game = lazy(() => import('./Game'));
 const AvatarEditor = lazy(() => import('./AvatarEditor'));
@@ -18,6 +21,8 @@ export function App() {
   const moveInLater = useStore((s) => s.moveInLater);
   const needMoveIn = !!me && me.role !== 'guest' && !onboarding && !me.residence && !moveInLater;
   const [booting, setBooting] = useState(!DEMO && !!tokenStore.get());
+  // 매일 출석: 로그인한 회원이 그날 처음 들어오면 자동 지급 (어느 화면에 있든)
+  useAutoAttendance();
 
   useEffect(() => {
     installKeyboard();
@@ -52,6 +57,7 @@ export function App() {
           </Suspense>
         </ErrorBoundary>
       )}
+      <InstallGuideSheet />
       <Toasts />
     </>
   );
@@ -61,7 +67,7 @@ function Splash() {
   return (
     <div className="h-full grid place-items-center bg-cream">
       <div className="text-center">
-        <div className="text-5xl animate-bounce">🐾</div>
+        <div className="animate-bounce inline-block"><LogoMark size={72} /></div>
         <p className="font-display text-2xl mt-3 text-cocoa">멍글마을</p>
         <p className="text-sm text-cocoa-soft mt-1">공원을 준비하고 있어요…</p>
       </div>

@@ -8,9 +8,10 @@ import * as THREE from 'three';
 import { DogAnim, HumanAnim } from '@shared/protocol';
 import type { DogAvatar, HumanAvatar } from '@shared/avatar';
 import {
-  DIFFICULTY_LABEL, DUCK_MS, JUDGE, JUMP_MS, judgeRun, type Chart, type CourseInfo, type Grade, type JudgeEvent, type Lane, type Obstacle, type RunResult, type RunnerAction, type RunnerInput, type Song,
+  DIFFICULTY_LABEL, DUCK_MS, JUDGE, JUMP_MS, countIn, judgeRun, type Chart, type CourseInfo, type Grade, type JudgeEvent, type Lane, type Obstacle, type RunResult, type RunnerAction, type RunnerInput, type Song,
 } from '@shared/runner';
 import { PaceSim } from '@shared/runnerPace';
+import { LANE_RATE, LANE_W as POSE_LANE_W, LEAD_MS, OBSTACLE_DEPTH, duckAmount, jumpHeight, judgeLineZ, obstacleZ } from '@shared/runnerPose';
 import { Dog, DOG_SCALE, DOG_STEP, newDogDriver } from '../game/models/Dog';
 import { Human, newHumanDriver } from '../game/models/Human';
 import { geo, mat } from '../game/lowpoly';
@@ -19,8 +20,9 @@ import { isTouchDevice } from '../game/input';
 import type { MusicPlayer } from './music';
 import { MR_COUNTDOWN_MS, byDistance, type MRPlayer, type MRResult } from '@shared/runnerMulti';
 import { multiLive, sendInput } from './multi';
+import { PARK_FOG, PARK_SKY, ThemePark } from './RunnerWorld';
 
-export const LANE_W = 1.35;
+export const LANE_W = POSE_LANE_W;
 /** 함께 달리기: 플레이어마다 독립 트랙 (트랙 안에 3레인). 트랙 중심 간격 */
 const TRACK_PITCH = 5.2;
 const TRACK_SLOTS = [0, 1, -1, 2];
@@ -37,15 +39,39 @@ export function trackLayout(game: { multi?: { myId: number; players: MRPlayer[] 
  */
 /** 자동 화면 테스트 전용: 내 강아지를 옆에서 가까이 보는 카메라 (삐끗·귀 자세 확인) — mungle.e2e + mungle.e2e.sidecam */
 const SIDE_CAM = (() => { try { return localStorage.getItem('mungle.e2e') === '1' && localStorage.getItem('mungle.e2e.sidecam') === '1'; } catch { return false; } })();
+/** 3D 공간: 파스텔 테마파크(승인된 새 디자인)가 기본. 예전 벚꽃 산책길은 mungle.runnerWorld=old 일 때만 (비교·되돌리기용) */
+const WORLD_V2 = (() => { try { return localStorage.getItem('mungle.runnerWorld') !== 'old'; } catch { return true; } })();
 const LOW_FPS = (() => { try { return localStorage.getItem('mungle.e2e') === '1' && localStorage.getItem('mungle.e2e.lowfps') === '1'; } catch { return false; } })();
+/** 자동 화면 테스트 전용: 그리기 횟수·삼각형 수 확인 (mungle.e2e) */
+function GlInfo() {
+  const { gl, scene } = useThree();
+  useEffect(() => {
+    const w = window as unknown as { __mungleTest?: Record<string, unknown> };
+    if (!w.__mungleTest) return;
+    const top = () => {
+      const list: [string, number][] = [];
+      scene.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh || !m.visible) return;
+        const g = m.geometry; const tri = (g.index ? g.index.count : g.getAttribute('position').count) / 3;
+        const n = (m as unknown as THREE.InstancedMesh).isInstancedMesh ? (m as unknown as THREE.InstancedMesh).count : 1;
+        list.push([`${m.type}:${tri}x${n}`, tri * n]);
+      });
+      return list.sort((a, b) => b[1] - a[1]).slice(0, 12);
+    };
+    w.__mungleTest.glInfo = () => ({ calls: gl.info.render.calls, triangles: gl.info.render.triangles, geometries: gl.info.memory.geometries, textures: gl.info.memory.textures, top: top() });
+    return () => { delete w.__mungleTest?.glInfo; };
+  }, [gl]);
+  return null;
+}
 function LowFpsTicker() {
   const { invalidate } = useThree();
   useEffect(() => { const id = window.setInterval(() => invalidate(), 125); return () => window.clearInterval(id); }, [invalidate]);
   return null;
 }
-const AHEAD_MS = 4200; // 앞쪽에 보이는 시간 (속도가 느려진 만큼 멀리)
-/** 출발 전 카운트다운 (사람이 강아지를 응원) */
-export const COUNTDOWN_S = 3.2;
+export const AHEAD_MS = 4200; // 앞쪽에 보이는 시간 (속도가 느려진 만큼 멀리)
+/** 출발 전 기다리는 시간(초): 카운트인(곡 첫 박에 맞춘 3·2·1)이 모두 들어가고, 보호자 응원이 보일 만큼 */
+export const countdownSec = (song: Song) => Math.max(2.4, -countIn(song).ticks[0] / 1000 + 0.4);
 /** 달리기 다리 동작 최대 빠르기 (초당 주기) — 속도가 올라가도 허우적거리지 않게 */
 const MAX_GAIT_HZ = 2.9;
 
@@ -56,7 +82,7 @@ export interface PlayGame {
   live: RunResult | null;
   lastEvent: { e: JudgeEvent; at: number; points: number } | null;
   /** 함께 달리기: 판 번호 · 나 · 참가자 (없으면 혼자 달리기) */
-  multi?: { round: number; myId: number; players: MRPlayer[] };
+  multi?: { round: number; myId: number; players: MRPlayer[]; startAt?: number };
   /** 거리 경쟁·삐끗·추월 상태 (플레이 화면이 만듦) */
   race?: Race;
   /** 함께 달리기: 음악이 끝난 시각 (performance.now) → 마무리 연출 */
@@ -85,8 +111,8 @@ function ObstacleModel({ o }: { o: Obstacle }) {
   const cue = NEED_COLOR[o.need];
   return (
     <group>
-      {/* 박자 표시: 장애물 바닥의 빛나는 띠가 강아지에 닿는 순간이 박자 */}
-      <mesh geometry={geo.box(LANE_W * 3.05, 0.02, 0.2)} position={[0, 0.02, 0]}>
+      {/* 박자 표시: 장애물 앞면(강아지 쪽)의 빛나는 띠가 판정선에 닿는 순간이 박자 */}
+      <mesh geometry={geo.box(LANE_W * 3.05, 0.02, 0.14)} position={[0, 0.02, OBSTACLE_DEPTH[o.kind] / 2 - 0.07]}>
         <meshBasicMaterial color={cue} transparent opacity={0.85} toneMapped={false} />
       </mesh>
       {o.kind === 'log' && (
@@ -159,8 +185,8 @@ function useLoop(count: number, spacing: number) {
     return -(((i * spacing + offset - dist) % span) + span) % span + 8;
   };
 }
-type Part = { geo: THREE.BufferGeometry; color: string; at: [number, number, number]; scale?: [number, number, number] };
-function Instanced({ parts, count, spacing, xOf, game, offset = 0, rot = false }: {
+export type Part = { geo: THREE.BufferGeometry; color: string; at: [number, number, number]; scale?: [number, number, number] };
+export function Instanced({ parts, count, spacing, xOf, game, offset = 0, rot = false }: {
   parts: Part[]; count: number; spacing: number; xOf: (i: number) => number; game: PlayGame; offset?: number; rot?: boolean;
 }) {
   const refs = useRef<(THREE.InstancedMesh | null)[]>([]);
@@ -241,6 +267,42 @@ function StartGate({ xs }: { xs: number[] }) {
   );
 }
 
+/**
+ * 판정선 + 박자선 (내 트랙에만 — 다른 사람 트랙은 네트워크 지연만큼 늦게 그려서 박자선과 어긋나므로)
+ * 박자선은 음악의 실제 박 위치. 장애물 앞면의 빛나는 띠가 판정선에 닿는 순간이 박자.
+ */
+export function BeatGuide({ game, color = '#ffffff' }: { game: PlayGame; color?: string }) {
+  const beats = useRef<(THREE.Mesh | null)[]>([]);
+  const speed = game.course.speed;
+  const edge = LANE_W * 1.5;
+  useFrame(() => {
+    const now = sceneNow(game);
+    let k = 0;
+    for (const t of game.song.beats) {
+      if (now > game.chart.duration) break;
+      const dt = t * 1000 - now;
+      if (dt < -300 || dt > AHEAD_MS) continue;
+      const m = beats.current[k++];
+      if (!m) break;
+      m.visible = true;
+      m.position.z = judgeLineZ(speed) - (dt / 1000) * speed;
+    }
+    for (; k < beats.current.length; k++) if (beats.current[k]) beats.current[k]!.visible = false;
+  });
+  return (
+    <group>
+      <mesh geometry={geo.box(edge * 2 - 0.1, 0.012, 0.07)} position={[0, 0.016, judgeLineZ(speed)]}>
+        <meshBasicMaterial color={color} transparent opacity={0.95} toneMapped={false} />
+      </mesh>
+      {Array.from({ length: 16 }, (_, i) => (
+        <mesh key={i} ref={(m) => { beats.current[i] = m; }} geometry={geo.box(edge * 2, 0.006, 0.05)} position={[0, 0.004, 0]} visible={false}>
+          <meshBasicMaterial color={color} transparent opacity={0.5} toneMapped={false} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 function CherryWalk({ game, xs }: { game: PlayGame; xs: number[] }) {
   const minX = Math.min(...xs), maxX = Math.max(...xs), midX = (minX + maxX) / 2, span = maxX - minX;
   const sorted = [...xs].sort((a, b) => a - b);
@@ -284,22 +346,9 @@ function CherryWalk({ game, xs }: { game: PlayGame; xs: number[] }) {
     { geo: geo.sphere(0.09, 8, 6), color: '#b59ad6', at: [0.02, 0.38, 0.14] },
   ], []);
   const dashes: Part[] = useMemo(() => [{ geo: geo.box(0.07, 0.012, 1.0), color: '#fffaf2', at: [0, 0.012, 0] }], []);
-  const beats = useRef<(THREE.Mesh | null)[]>([]);
   useFrame(({ clock }) => {
     const now = sceneNow(game);
     const dist = (Math.max(0, now) / 1000) * speed;
-    // 박자선: 실제 음악 박자 위치 — 내 트랙에만 (다른 사람 트랙은 네트워크 지연만큼 늦게 그려서 박자선과 어긋나므로)
-    let k = 0;
-    for (const t of game.song.beats) {
-      if (now > game.chart.duration) break;
-      const dt = t * 1000 - now;
-      if (dt < -300 || dt > AHEAD_MS) continue;
-      const m = beats.current[k++];
-      if (!m) break;
-      m.visible = true;
-      m.position.z = -(dt / 1000) * speed;
-    }
-    for (; k < beats.current.length; k++) if (beats.current[k]) beats.current[k]!.visible = false;
     if (goal.current) { goal.current.position.z = -((finishT - now) / 1000) * speed; goal.current.visible = finishT - now < AHEAD_MS * 2.5; }
     // 출발 아치: 혼자 달리기는 강아지 바로 앞(출발하며 통과), 함께 달리기는 강아지들 바로 뒤(출발선 소개 때 배경)
     if (start.current) { start.current.position.z = dist + (game.multi ? 0.7 : -1.2); start.current.visible = dist < 30; }
@@ -331,12 +380,6 @@ function CherryWalk({ game, xs }: { game: PlayGame; xs: number[] }) {
           {/* 레인 구분 점선 (2줄) */}
           <Instanced game={game} parts={dashes} count={18} spacing={2.2} xOf={(i) => (i % 2 ? 0.5 : -0.5) * LANE_W} />
         </group>
-      ))}
-      {/* 박자선 (내 트랙) */}
-      {Array.from({ length: 16 }, (_, i) => (
-        <mesh key={i} ref={(m) => { beats.current[i] = m; }} geometry={geo.box(edge * 2, 0.006, 0.05)} position={[0, 0, 0]} visible={false}>
-          <meshBasicMaterial color="#ffffff" transparent opacity={0.5} toneMapped={false} />
-        </mesh>
       ))}
       {/* 트랙 사이 칸막이 (넘어갈 수 없음) */}
       {dividers.map((dx) => <Instanced key={dx} game={game} parts={hedge} count={36} spacing={2.0} xOf={() => dx} />)}
@@ -375,7 +418,7 @@ function Obstacles({ game, r }: { game: PlayGame; r: Racer }) {
       const dt = o.t - now;
       g.visible = dt < AHEAD_MS && dt > -900;
       if (!g.visible) return;
-      g.position.z = -(dt / 1000) * game.course.speed;
+      g.position.z = obstacleZ(dt, game.course.speed, o.kind);
       // 피한 장애물은 지나간 뒤 작게 사라짐
       const ev = done.get(o.id);
       g.scale.setScalar(ev && ev.grade !== 'miss' && dt < 0 ? Math.max(0.01, 1 + dt / 380) : 1);
@@ -408,27 +451,23 @@ function Cheer({ game, human }: { game: PlayGame; human: HumanAvatar }) {
 
 
 // ---------------------------------------------------------------- 강아지 자세 (판정 결과 → 레인·점프·숙이기)
-const JUMP_CROUCH = 70; // 도약 전 살짝 몸 낮추기 (ms)
-const JUMP_H = 0.55;
+// 누르는 순간 바로 동작 (예전의 70ms 도약 준비 자세를 없앰 — 박자에 눌렀는데 늦게 뛰어 보이지 않게). 동작 모양은 shared/runnerPose.
 /** 판정 결과(받아들여진 입력)로 지금 레인·점프·숙이기 자세 계산 — 내 강아지와 함께 달리는 강아지가 같은 규칙 */
 function poseAt(now: number, live: RunResult | null) {
-  let lane = 0;
-  for (const l of live?.lanes ?? []) { if (l.t <= now) lane = l.lane; else break; }
+  let lane = 0, laneT = -1e9;
+  for (const l of live?.lanes ?? []) { if (l.t <= now) { lane = l.lane; laneT = l.t; } else break; }
   const last = (list: number[] | undefined, len: number) => { if (!list) return undefined; for (let i = list.length - 1; i >= 0; i--) if (list[i] <= now) return now < list[i] + len + 120 ? list[i] : undefined; return undefined; };
   const j = last(live?.jumps, JUMP_MS);
   const dk = last(live?.ducks, DUCK_MS);
-  // 점프: 몸 낮추기(70ms) → 공중(포물선) → 착지 때 살짝 눌림(120ms)
+  // 점프: 즉시 떠올라 포물선 → 착지 때 살짝 눌림(120ms)
   let jy = 0, crouch = 0, air = 0;
   if (j !== undefined) {
     const e = now - j;
-    if (e < JUMP_CROUCH) crouch = e / JUMP_CROUCH;
-    else if (e < JUMP_MS) { const k = (e - JUMP_CROUCH) / (JUMP_MS - JUMP_CROUCH); jy = 4 * JUMP_H * k * (1 - k); air = Math.sin(k * Math.PI); }
+    if (e < JUMP_MS) { jy = jumpHeight(e); air = Math.sin((e / JUMP_MS) * Math.PI); }
     else crouch = 1 - (e - JUMP_MS) / 120;
   }
-  // 숙이기: 부드럽게 낮췄다가(앞 25%) 미끄러지고 → 원래 자세로(뒤 25%)
-  let slide = 0;
-  if (dk !== undefined) { const k = (now - dk) / DUCK_MS; slide = k < 0.25 ? smooth01(k / 0.25) : k < 0.75 ? 1 : smooth01((1 - k) / 0.25); }
-  return { lane, jy, crouch, air, slide, j };
+  const slide = dk !== undefined ? duckAmount(now - dk) : 0;
+  return { lane, laneT, jy, crouch, air, slide, j };
 }
 const laneAt = (live: RunResult, t: number) => { let l: Lane = 0; for (const x of live.lanes) { if (x.t <= t) l = x.lane; else break; } return l; };
 /** 그 시각까지 마지막으로 받아들여진 조작 (뛰기·숙이기·레인 이동) */
@@ -498,7 +537,7 @@ const playerOf = (game: PlayGame, id: number) => game.multi?.players.find((p) =>
 const dogNameOf = (game: PlayGame, id: number) => playerOf(game, id)?.dogName ?? '친구';
 
 /**
- * 장애물을 지나는 순간(박자 + 40ms) 피하지 못한 상태면 바로 '삐끗' 시작.
+ * 장애물이 코끝에 닿는 순간(박자 + LEAD_MS) 피하지 못한 상태면 바로 '삐끗' 시작.
  * 아직 GOOD 범위 안에서 늦게 조작하면 그 조작이 삐끗을 끊고 바로 반응한다 (최종 판정은 judgeRun).
  * 같은 장애물에서는 한 번만.
  */
@@ -507,7 +546,7 @@ function detectTrips(chart: Chart, r: Racer) {
   if (!live) return;
   const v = r.view;
   for (const o of chart.obstacles) {
-    if (o.t + 40 > v) break;
+    if (o.t + LEAD_MS > v) break;
     if (o.t + 600 < v || r.tripSeen.has(o.id)) continue;
     r.tripSeen.add(o.id);
     let kind = -1, side = 1;
@@ -515,10 +554,11 @@ function detectTrips(chart: Chart, r: Racer) {
       const list = o.need === 'jump' ? live.jumps : live.ducks;
       if (!list.some((x) => x <= v && Math.abs(x - o.t) <= JUDGE.good)) kind = o.need === 'jump' ? 0 : 1;
     } else {
-      const lane = laneAt(live, o.t);
+      // 장애물이 코끝에 닿는 순간(박자 + LEAD_MS)의 레인 — 박자에 맞춰 옮겼으면 이미 비켜 있음
+      const lane = laneAt(live, o.t + LEAD_MS);
       if (o.blocked.includes(lane)) { kind = 2; side = lane > 0 ? -1 : 1; }
     }
-    if (kind >= 0) { r.trips.push({ at: o.t + 40, kind, side }); if (r.trips.length > 3) r.trips.shift(); }
+    if (kind >= 0) { r.trips.push({ at: o.t + LEAD_MS, kind, side }); if (r.trips.length > 3) r.trips.shift(); }
   }
 }
 /** 삐끗 세기 (겹쳐도 더해지지 않고 가장 센 것 하나) — 다음 조작이 들어오면 회복 단계를 끊음 */
@@ -659,7 +699,7 @@ function RaceDog({ game, r, avatar, label, color }: { game: PlayGame; r: Racer; 
     const perf = performance.now();
     const { lane, jy, crouch, air, slide, j } = poseAt(v, r.live);
     const prevX = r.lx;
-    r.lx += (lane * LANE_W - r.lx) * Math.min(1, dt * (r.me ? 12 : 10)); // 레인 이동은 부드럽게 (지연 보정)
+    r.lx += (lane * LANE_W - r.lx) * (1 - Math.exp(-dt * LANE_RATE)); // 레인 이동: 판정 규칙과 같은 빠르기 (shared/runnerPose)
     const drv = d.current;
     drv.crouch += (crouch - drv.crouch) * Math.min(1, dt * 30);
     drv.air += (air - drv.air) * Math.min(1, dt * 20);
@@ -844,9 +884,14 @@ export function RunnerPlay({ game, avatar, human, best, onEnd, onQuit, onRetry }
   }, [game]);
   // HUD는 초당 15번 갱신 (3D는 매 프레임)
   useEffect(() => { const id = window.setInterval(() => force((x) => x + 1), 66); return () => window.clearInterval(id); }, []);
-  const act = (a: RunnerAction) => {
+  /**
+   * 입력 시각 = 누른 순간의 음악 시각. 이벤트가 처리되기까지 밀린 시간(렌더링 중이면 한 프레임 가까이)을 빼서
+   * 화면이 느려도 판정이 늦어지지 않게 한다. (event.timeStamp는 performance.now 기준)
+   */
+  const act = (a: RunnerAction, evTs?: number) => {
     if (game.paused || game.ended) return;
-    const t = Math.round(game.player.now() - game.calib);
+    const lag = evTs !== undefined && evTs > 0 ? Math.min(100, Math.max(0, performance.now() - evTs)) : 0;
+    const t = Math.round(game.player.now() - lag - game.calib);
     // 같은 시각에 두 번 누르는 경우도 순서가 유지되게 (서버는 시각 순서를 확인)
     const lastT = game.inputs[game.inputs.length - 1]?.t ?? -Infinity;
     const tt = Math.max(t, lastT);
@@ -870,7 +915,7 @@ export function RunnerPlay({ game, avatar, human, best, onEnd, onQuit, onRetry }
       const a = map[e.code];
       if (!a) return;
       e.preventDefault();
-      if (!e.repeat) act(a);
+      if (!e.repeat) act(a, e.timeStamp);
     };
     window.addEventListener('keydown', down);
     // 다른 앱으로 전환하면 자동 일시정지
@@ -886,15 +931,21 @@ export function RunnerPlay({ game, avatar, human, best, onEnd, onQuit, onRetry }
   const prog = Math.max(0, Math.min(1, now / playEnd));
   const ev = game.lastEvent && game.lastEvent.e.grade !== 'miss' && performance.now() - game.lastEvent.at < 560 ? game.lastEvent : null;
   const intro = !!game.multi && now < -MR_COUNTDOWN_MS;
-  const countdown = now < 0 && !intro ? Math.ceil(-now / 1000) : 0;
+  // 카운트인: 곡 첫 박에 맞춘 3 · 2 · 1 → 첫 박에 '출발!' (음악 시계 기준이라 실제 음악과 정확히 이어짐)
+  const ci = countIn(game.song);
+  const ciIdx = ci.ticks.filter((t) => now >= t).length;
+  const countdown = !intro && now < ci.go && ciIdx > 0 ? 4 - ciIdx : 0;
+  const goShow = !intro && now >= ci.go && now < ci.go + 600;
   const finale = game.finaleAt !== undefined;
   const banner = race.banner && performance.now() - race.banner.at < 1600 ? race.banner : null;
   const myName = game.multi?.players.find((p) => p.id === game.multi!.myId)?.nickname ?? '';
   // 모바일 조작 버튼: 한 줄 4개, 화면 너비에 맞춰 같은 크기 (멀티터치: pointerdown 즉시 실행)
-  const Btn = ({ a, label, icon }: { a: RunnerAction; label: string; icon: string }) => (
-    <button aria-label={label} data-testid={`rb-${a}`}
+  // 주의: 컴포넌트(<Btn/>)로 만들면 화면 정보가 갱신될 때(초당 15번)마다 버튼이 새로 만들어져 그 순간의 터치가 사라질 수 있음
+  // → 함수로 불러 같은 <button>이 계속 유지되게 함
+  const btn = (a: RunnerAction, label: string, icon: string) => (
+    <button key={a} aria-label={label} data-testid={`rb-${a}`}
       className="aspect-square w-full max-w-[min(86px,19vh)] mx-auto rounded-full bg-[#fff8ef] border-[3px] border-white shadow-[0_4px_12px_rgba(90,64,51,.2)] flex flex-col items-center justify-center touch-none select-none active:scale-95 active:bg-[#fde3d6]"
-      onPointerDown={(e) => { e.preventDefault(); act(a); }} onContextMenu={(e) => e.preventDefault()}>
+      onPointerDown={(e) => { e.preventDefault(); act(a, e.timeStamp); }} onContextMenu={(e) => e.preventDefault()}>
       <span className="font-display leading-none text-[#e2604f]" style={{ fontSize: 'min(8vw, 30px)' }}>{icon}</span>
       <span className="font-display leading-none mt-0.5 text-cocoa" style={{ fontSize: 'min(3vw, 12px)' }}>{label}</span>
     </button>
@@ -905,12 +956,14 @@ export function RunnerPlay({ game, avatar, human, best, onEnd, onQuit, onRetry }
       <div className="relative flex-1 min-h-0">
       <Canvas shadows dpr={LOW_FPS ? 0.5 : [1, 1.75]} frameloop={LOW_FPS ? 'demand' : 'always'} camera={{ fov: 50, near: 0.1, far: 120, position: [0, 2.5, 4.4] }} gl={{ antialias: !LOW_FPS }}>
         {LOW_FPS && <LowFpsTicker />}
-        <color attach="background" args={['#fde4ea']} />
-        <fog attach="fog" args={['#fde4ea', 20, 52]} />
+        <GlInfo />
+        <color attach="background" args={[WORLD_V2 ? PARK_SKY : '#fde4ea']} />
+        <fog attach="fog" args={WORLD_V2 ? [PARK_FOG, 26, 88] : ['#fde4ea', 20, 52]} />
         <Lighting indoor={false} shadows={!touch} />
         <Judge game={game} onEnd={onEnd} />
         <RaceDriver game={game} />
-        <CherryWalk game={game} xs={race.racers.map((t) => t.x)} />
+        {WORLD_V2 ? <ThemePark game={game} xs={race.racers.map((t) => t.x)} /> : <CherryWalk game={game} xs={race.racers.map((t) => t.x)} />}
+        <BeatGuide game={game} />
         {race.racers.map((t) => <Obstacles key={t.id} game={game} r={t} />)}
         {human && !game.multi && <Cheer game={game} human={human} />}
         {race.racers.map((t, i) => {
@@ -980,18 +1033,21 @@ export function RunnerPlay({ game, avatar, human, best, onEnd, onQuit, onRetry }
       {countdown > 0 && !paused && (
         <div className="absolute left-1/2 top-[30%] -translate-x-1/2 text-center pointer-events-none">
           <div key={countdown} className="font-display text-6xl text-white drop-shadow-[0_3px_0_#f39a7b] pop" data-testid="runner-countdown">{countdown}</div>
-          <div className="panel !rounded-2xl px-4 py-2 mt-2 text-sm whitespace-nowrap">빛나는 띠가 강아지에 닿는 <b>박자</b>에 맞춰 조작!</div>
+          <div className="panel !rounded-2xl px-4 py-2 mt-2 text-sm whitespace-nowrap">빛나는 띠가 하얀 판정선에 닿는 <b>박자</b>에 맞춰 조작!</div>
         </div>
       )}
-      {/* 조작: 모바일은 한 줄 4버튼 (← 뛰기 숙이기 →), PC는 하단 안내 */}
+      {goShow && !paused && (
+        <div key="go" className="absolute left-1/2 top-[30%] -translate-x-1/2 font-display text-5xl text-white drop-shadow-[0_3px_0_#f39a7b] pop pointer-events-none" data-testid="runner-go">출발!</div>
+      )}
+      {/* 조작: 터치 화면은 한 줄 4버튼 (← 왼쪽 · ↓ 숙이기 · ↑ 뛰기 · → 오른쪽), 키보드 PC는 같은 순서의 하단 안내 */}
       {touch ? (
         <div className="shrink-0 px-3 pt-2 pb-[calc(8px+var(--safe-b))] bg-[linear-gradient(#f3d9d6,#fbe7e2)] border-t-2 border-white/70">
           <div className="mx-auto max-w-[460px] grid grid-cols-4 gap-2" data-testid="runner-controls">
-            <Btn a="L" label="왼쪽" icon="←" /><Btn a="R" label="오른쪽" icon="→" /><Btn a="J" label="뛰기" icon="↑" /><Btn a="D" label="숙이기" icon="↓" />
+            {btn('L', '왼쪽', '←')}{btn('D', '숙이기', '↓')}{btn('J', '뛰기', '↑')}{btn('R', '오른쪽', '→')}
           </div>
         </div>
       ) : !intro && !finale && (
-        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 name-tag !text-xs !px-3 !py-1.5 opacity-90 whitespace-nowrap">← → / A D 레인 이동 · ↑ / Space 뛰기 · ↓ / Ctrl 숙이기{game.multi ? ' · 함께 달리기는 멈출 수 없어요' : ' · Esc 일시정지'}</div>
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 name-tag !text-xs !px-3 !py-1.5 opacity-90 whitespace-nowrap">← / A 왼쪽 · ↓ / Ctrl 숙이기 · ↑ / Space 뛰기 · → / D 오른쪽{game.multi ? ' · 함께 달리기는 멈출 수 없어요' : ' · Esc 일시정지'}</div>
       )}
       {paused && (
         <div className="absolute inset-0 z-20 grid place-items-center bg-[#5a403344] p-4">

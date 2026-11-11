@@ -92,29 +92,58 @@ export class MusicPlayer {
     this.gain.gain.value = volume;
     this.gain.connect(this.ctx.destination);
   }
-  /** delaySec: 출발 카운트다운 동안 기다렸다가 재생 (그동안 now()는 음수) */
-  async play(buf: AudioBuffer, fromSec = 0, delaySec = 0) {
+  /**
+   * delaySec: 출발 카운트다운 동안 기다렸다가 재생 (그동안 now()는 음수)
+   * countIn: 카운트다운 숫자·'출발!' 시각(음악 시각 ms) — 같은 오디오 시계에 '틱' 소리를 예약해 박자와 정확히 맞춤
+   */
+  async play(buf: AudioBuffer, fromSec = 0, delaySec = 0, countIn?: { ticks: number[]; go: number }) {
     if (this.ctx.state !== 'running') await this.ctx.resume();
     this.src?.stop(); this.src?.disconnect();
     const s = this.ctx.createBufferSource();
     s.buffer = buf; s.connect(this.gain);
-    const when = this.ctx.currentTime + 0.1 + delaySec;
+    // 기다릴 시간이 있으면 그 시각에 정확히(함께 달리기: 서버 출발 시각), 바로 재생이면 오디오 준비 여유 0.1초
+    const when = this.ctx.currentTime + (delaySec > 0.1 ? delaySec : 0.1 + delaySec);
     s.start(when, fromSec);
     this.src = s;
     this.startAt = when - fromSec;
     this.frozen = null;
+    this.last = -Infinity;
+    if (countIn) {
+      countIn.ticks.forEach((ms) => this.tick(this.startAt + ms / 1000, 880));
+      this.tick(this.startAt + countIn.go / 1000, 1320);
+    }
   }
-  /** 실제로 들리고 있는 음악 위치 (ms) */
+  /** 카운트다운 틱 (오디오 시계에 예약 — 화면 프레임과 상관없이 정확한 시각에 울림) */
+  private tick(at: number, hz: number) {
+    if (at < this.ctx.currentTime) return;
+    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.type = 'sine'; o.frequency.value = hz;
+    g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(0.11, at + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, at + 0.12);
+    o.connect(g); g.connect(this.gain); o.start(at); o.stop(at + 0.15);
+  }
+  private last = -Infinity;
+  /**
+   * 실제로 들리고 있는 음악 위치 (ms) — 화면·판정 모두 이 값 하나를 기준으로 계산한다 (프레임 누적 시간을 쓰지 않음).
+   * 출력 타임스탬프가 오디오 시계와 크게 어긋나면(브라우저 버그·재개 직후) 오디오 시계 + 출력 지연으로 계산하고,
+   * 재생 중에는 뒤로 가지 않게 한다(지터 때문에 장애물이 뒤로 튀지 않도록).
+   */
   now(): number {
     if (this.frozen !== null) return this.frozen;
-    const c = this.ctx as AudioContext & { getOutputTimestamp?: () => AudioTimestamp };
-    let t = this.ctx.currentTime - ((this.ctx as unknown as { outputLatency?: number }).outputLatency || this.ctx.baseLatency || 0);
-    const ts = c.getOutputTimestamp?.();
-    if (ts && ts.contextTime && ts.performanceTime) t = ts.contextTime + (performance.now() - ts.performanceTime) / 1000;
-    return (t - this.startAt) * 1000;
+    const ctx = this.ctx as AudioContext & { getOutputTimestamp?: () => AudioTimestamp; outputLatency?: number };
+    const base = ctx.currentTime - (ctx.outputLatency || ctx.baseLatency || 0);
+    let t = base;
+    const ts = ctx.getOutputTimestamp?.();
+    if (ts && ts.contextTime && ts.performanceTime) {
+      const est = ts.contextTime + (performance.now() - ts.performanceTime) / 1000;
+      if (Math.abs(est - base) < 0.25) t = est;
+    }
+    let ms = (t - this.startAt) * 1000;
+    if (ms < this.last && this.last - ms < 80) ms = this.last;
+    this.last = ms;
+    return ms;
   }
   async pause() { this.frozen = this.now(); await this.ctx.suspend(); }
-  async resume() { await this.ctx.resume(); this.frozen = null; }
+  async resume() { const f = this.frozen; await this.ctx.resume(); this.frozen = null; if (f !== null) this.last = f; }
   stop() { try { this.src?.stop(); } catch { /* 이미 멈춤 */ } this.src = null; }
   /** 미리 듣기: 곡의 한 부분만 짧게 들려주고 부드럽게 줄어들며 끝남 */
   async preview(buf: AudioBuffer, fromSec: number, lenSec: number) {

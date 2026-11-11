@@ -38,7 +38,8 @@ export const DOG_SCALE = { small: 0.82, medium: 1, large: 1.2 } as const;
 /** 한 걸음(반 주기)당 이동 거리 (scale 1 기준) */
 export const DOG_STEP = { walk: 0.19, run: 0.42 };
 
-export function Dog({ avatar, driver, anchorRef, earBones }: { avatar: DogAvatar; driver: MutableRefObject<DogDriver>; anchorRef?: MutableRefObject<THREE.Object3D | null>; earBones?: boolean }) {
+/** harness: 산책용 목줄 세트 착용 (집 안에서는 false — 모델을 새로 만들지 않고 그 부분만 숨김) */
+export function Dog({ avatar, driver, anchorRef, earBones, harness = true }: { avatar: DogAvatar; driver: MutableRefObject<DogDriver>; anchorRef?: MutableRefObject<THREE.Object3D | null>; earBones?: boolean; harness?: boolean }) {
   const key = JSON.stringify(avatar);
   const rig = useMemo(() => createDog(avatar, { earBones }), [key, earBones]); // eslint-disable-line react-hooks/exhaustive-deps
   const sm = useRef({ move: 0, run: 0, sit: 0, greet: 0, lie: 0, poop: 0, happy: 0, sleep: 0, wag: 0 });
@@ -46,6 +47,10 @@ export function Dog({ avatar, driver, anchorRef, earBones }: { avatar: DogAvatar
   useLayoutEffect(() => {
     if (anchorRef) anchorRef.current = rig.anchor;
   }, [rig, anchorRef]);
+  // 그리기 전에 바로 반영 → 공간을 옮길 때 깜빡이거나 두 개로 보이지 않음
+  useLayoutEffect(() => {
+    if (rig.harness) rig.harness.visible = harness;
+  }, [rig, harness]);
 
   useFrame((state, dt) => {
     const d = driver.current;

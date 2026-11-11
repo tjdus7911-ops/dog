@@ -1,26 +1,30 @@
 // 멍글 아파트 — 입주(호실 선택) 화면 · 로비(3D 공간 + 호실 안내판)
 // 동·호실은 가상 공간 정보이며 실제 주소와 연결하지 않는다.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { residenceLabel, type BuildingInfo, type UnitInfo } from '@shared/apartment';
-import { HOME_VISIBILITY, PLANS, planOf, tierOfBuilding } from '@shared/home';
+import { HOME_VISIBILITY, PLANS, PLAN_TAGLINE, planOf, tierOfBuilding, type HomeTier } from '@shared/home';
 import { coinFmt, type CoinStatus } from '@shared/coins';
 import { loadCoins } from './Coins';
 import type { MyProfile, PublicProfile } from '@shared/protocol';
 import type { DogAvatar } from '@shared/avatar';
-import { api } from '../lib/api';
+import { api, ApiError } from '../lib/api';
 import { set, toast, useStore } from '../store';
 import { homeSpaceId } from '@shared/spaces';
 import { DEMO } from '../demo';
-import { joinPark, openProfile } from '../net/socket';
+import { joinPark, lastPark, openProfile } from '../net/socket';
+import { Icon } from './icons';
+import { CHIP, chipRowTop } from './layout';
+import { isTouchDevice } from '../game/input';
 import { Modal } from './common';
+import { Preview } from './Move';
 
 type BuildingData = BuildingInfo & { units: UnitInfo[] };
 
 function useApartment() {
-  const [data, setData] = useState<{ buildings: BuildingData[] } | null>(null);
+  const [data, setData] = useState<{ buildings: BuildingData[]; freeAccess?: boolean } | null>(null);
   const [error, setError] = useState('');
   const load = useCallback(() => {
-    api<{ buildings: BuildingData[] }>('/api/apartment').then((d) => { setData(d); setError(''); }).catch((e) => setError((e as Error).message));
+    api<{ buildings: BuildingData[]; freeAccess?: boolean }>('/api/apartment').then((d) => { setData(d); setError(''); }).catch((e) => setError((e as Error).message));
   }, []);
   const version = useStore((s) => s.visitRequestsVersion);
   useEffect(load, [load, version]);
@@ -80,31 +84,44 @@ function UnitGrid({ b, selected, onSelect, selectable, onVisit }: { b: BuildingD
 }
 
 /** 입주 화면: 빈 호실을 골라 입주 확정 */
+/** 둘러보기 방문자가 입주하려고 할 때 안내 */
+export const GUEST_MOVEIN_MSG = '아파트 입주는 회원만 가능해요!\n회원가입하면 500 멍글코인을 드려요.';
+
 export function MoveIn({ onDone, embedded }: { onDone: () => void; embedded?: boolean }) {
   const { data, error, reload } = useApartment();
-  const buildingId: string | null = null;
+  const [buildingId, setBuildingId] = useState('1');
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // 첫 입주는 1동 원룸만 (2동·3동은 코인을 모아 이사)
-  const b = data?.buildings.find((x) => x.id === (buildingId ?? '1'));
+  const busyRef = useRef(false);
+  const guest = useStore((s) => s.me?.role === 'guest');
+  // 원룸·투룸·쓰리룸 중에서 골라 입주 (유료: 고른 집 종류의 입주비 / 무료 이용 설정이면 0)
+  const freeAccess = !!data?.freeAccess;
+  const tier = tierOfBuilding(buildingId);
+  const b = data?.buildings.find((x) => x.id === buildingId);
   const free = b?.units.filter((u) => !u.occupied).length ?? 0;
   const coins = useStore((s) => s.coins);
-  useEffect(() => { void loadCoins(); }, []);
-  const price = PLANS[1].price;
+  useEffect(() => { if (!guest) void loadCoins(); }, [guest]);
+  const price = freeAccess ? 0 : PLANS[tier].price;
+  const short = !guest && !!coins && coins.balance < price;
 
   async function confirm() {
-    if (!b || !selected) return;
+    if (!b || !selected || busyRef.current) return;
+    // 둘러보기 방문자는 실제 입주 불가 → 가입 안내
+    if (guest) { set({ joinPrompt: GUEST_MOVEIN_MSG }); return; }
+    busyRef.current = true; // 연속 클릭으로 요청이 두 번 가지 않게 (서버도 한 번만 결제)
     setBusy(true);
     try {
       const r = await api<{ profile: MyProfile; coins?: CoinStatus }>('/api/apartment/move-in', { body: { building: b.id, unit: selected } });
       set({ me: r.profile, ...(r.coins ? { coins: r.coins } : {}) });
-      toast(`🎉 ${residenceLabel(r.profile.residence)}에 입주했어요! 이웃들과 친하게 지내요`);
+      toast(`🎉 ${residenceLabel(r.profile.residence)}에 입주했어요!${price > 0 ? ` (−${coinFmt(price)} 멍글코인)` : ''} 이웃들과 친하게 지내요`);
       onDone();
     } catch (e) {
-      toast((e as Error).message, 'error');
+      if (e instanceof ApiError && e.data?.code === 'members_only') set({ joinPrompt: GUEST_MOVEIN_MSG });
+      else toast((e as Error).message, 'error');
       setSelected(null);
       reload();
-    } finally { setBusy(false); }
+      void loadCoins();
+    } finally { busyRef.current = false; setBusy(false); }
   }
 
   const body = (
@@ -120,12 +137,34 @@ export function MoveIn({ onDone, embedded }: { onDone: () => void; embedded?: bo
       {!data && !error && <p className="text-center text-cocoa-soft py-8">호실 정보를 불러오는 중…</p>}
       {data && b && (
         <>
-          <div className="rounded-2xl bg-[linear-gradient(135deg,#fff4cf,#fde3d6)] px-3 py-2 mb-3 text-sm flex items-center gap-2" data-testid="movein-cost">
-            <span className="text-2xl">🔑</span>
-            <span className="flex-1 leading-tight"><b>{PLANS[1].name} · {PLANS[1].type}</b><br /><span className="text-xs text-cocoa-soft">입주비 {coinFmt(price)}코인 (가입 선물 {coinFmt(price)}코인으로 무료 입주)</span></span>
-            {coins && <span className="font-display text-[#e2a21c] whitespace-nowrap">🪙 {coinFmt(coins.balance)}</span>}
+          <div className="grid grid-cols-3 gap-2 mb-2" role="radiogroup" aria-label="집 종류" data-testid="movein-types">
+            {([1, 2, 3] as HomeTier[]).map((t) => {
+              const on = buildingId === PLANS[t].building;
+              const cost = freeAccess ? 0 : PLANS[t].price;
+              const can = guest || !coins || freeAccess || coins.balance >= cost;
+              return (
+                <button key={t} type="button" role="radio" aria-checked={on} data-testid={`movein-type-${t}`}
+                  onClick={() => { setBuildingId(PLANS[t].building); setSelected(null); }}
+                  className={`rounded-2xl border-2 px-2 py-2.5 text-left transition ${on ? 'border-[#E58D76] bg-[#FBE8E1]' : 'border-[#EAE3DC] bg-white'}`}>
+                  <span className="block font-display text-[15px]">{PLANS[t].type}</span>
+                  <span className="block text-[11px] text-cocoa-soft leading-snug mt-0.5">{PLAN_TAGLINE[t]}</span>
+                  {freeAccess
+                    ? <span className="inline-block mt-1.5 rounded-full bg-[#E58D76] text-white text-[10px] px-2 py-0.5">무료 이용</span>
+                    : <span className={`inline-block mt-1.5 rounded-full text-[11px] px-2 py-0.5 font-display ${can ? 'bg-[#fff4cf] text-[#b9851a]' : 'bg-cream-2 text-cocoa-soft'}`} data-testid={`movein-price-${t}`}>🪙 {coinFmt(cost)}</span>}
+                </button>
+              );
+            })}
           </div>
-          {coins && coins.balance < price && <p className="text-sm text-[#c4553a] bg-[#fff0ec] rounded-xl px-3 py-2 mb-2">입주까지 {coinFmt(price - coins.balance)}코인 남았어요! 출석 체크와 산책으로 코인을 모아 보세요.</p>}
+          {/* 고른 집 종류 내부 미리보기 (기본 가구 배치) */}
+          <div className="h-36 md:h-44 rounded-2xl overflow-hidden border border-[#EAE3DC] mb-2" data-testid="movein-preview"><Preview key={tier} tier={tier} /></div>
+          {!freeAccess && (
+            <div className="rounded-2xl bg-[linear-gradient(135deg,#fff4cf,#fde3d6)] px-3 py-2 mb-3 text-sm flex items-center gap-2" data-testid="movein-cost">
+              <span className="text-2xl">🔑</span>
+              <span className="flex-1 leading-tight"><b>{PLANS[tier].type} 입주비 {coinFmt(price)} 멍글코인</b><br /><span className="text-xs text-cocoa-soft">입주할 때 한 번 차감돼요</span></span>
+              {guest ? <span className="text-xs text-cocoa-soft whitespace-nowrap">둘러보기 중</span> : coins && <span className="font-display text-[#e2a21c] whitespace-nowrap" data-testid="movein-balance">보유 🪙 {coinFmt(coins.balance)}</span>}
+            </div>
+          )}
+          {short && <p className="text-sm text-[#c4553a] bg-[#fff0ec] rounded-xl px-3 py-2 mb-2" data-testid="movein-short">{PLANS[tier].type} 입주까지 {coinFmt(price - coins!.balance)}코인이 부족해요. 출석 체크와 산책·멍글런너로 코인을 모아 보세요!</p>}
           <div className="flex items-center justify-between mb-2">
             <span className="font-display">{b.name}</span>
             <span className="text-xs text-cocoa-soft">입주 가능 {free}/{b.units.length}호</span>
@@ -134,8 +173,8 @@ export function MoveIn({ onDone, embedded }: { onDone: () => void; embedded?: bo
           <p className="text-[11px] text-cocoa-soft mt-3">※ 동·호실은 멍글마을 안의 가상 주소예요. 실제 주소와는 관계없어요.</p>
           <div className="flex gap-2 mt-4">
             <button type="button" className="btn btn-ghost flex-1 py-3" onClick={onDone}>{embedded ? '닫기' : '나중에 하기'}</button>
-            <button type="button" className="btn btn-coral flex-[2] py-3 text-lg" disabled={!selected || busy || (!!coins && coins.balance < price)} onClick={confirm}>
-              {busy ? '입주 처리 중…' : selected ? `${selected}호로 입주하기 🏠 (🪙${coinFmt(price)})` : '호실을 골라 주세요'}
+            <button type="button" className="btn btn-coral flex-[2] py-3 text-lg" disabled={!selected || busy || short} onClick={confirm} data-testid="movein-confirm">
+              {busy ? '입주 처리 중…' : selected ? (freeAccess || guest ? `${b?.id}동 ${selected}호로 입주하기 🏠` : `${b?.id}동 ${selected}호 입주 (🪙${coinFmt(price)})`) : '호실을 골라 주세요'}
             </button>
           </div>
         </>
@@ -289,9 +328,9 @@ export function LobbyPanel() {
   return (
     <>
       {/* 로비 상단 버튼 */}
-      <div className="absolute z-20 left-2 md:left-3 top-[108px] md:top-[78px] flex gap-2">
-        <button className="btn btn-ghost px-4 min-h-[44px] text-sm" onClick={() => void joinPark('central-1', 'lobby')}>🌳 공원으로 나가기</button>
-        {!open && <button className="btn btn-coral px-4 min-h-[44px] text-sm" onClick={() => set({ lobbyPanel: true })}>📋 호실 안내판</button>}
+      <div className="absolute z-20 left-3 flex gap-1.5 pointer-events-none" style={{ top: chipRowTop(isTouchDevice()) }}>
+        <button className={CHIP} onClick={() => void joinPark(lastPark(), 'lobby')}><Icon name="tree" size={16} className="hud-icon" />광장으로 나가기</button>
+        {!open && <button className={CHIP} onClick={() => set({ lobbyPanel: true })} data-testid="lobby-board"><Icon name="building" size={16} className="hud-icon" />호실 안내판</button>}
       </div>
       {open && (
         <aside className="above-nav absolute z-30 inset-x-0 bottom-0 max-h-[min(72%,calc(100%-224px))] md:inset-x-auto md:right-3 md:top-[74px] md:bottom-3 md:w-[420px] md:max-h-none panel !rounded-b-none md:!rounded-[22px] p-4 overflow-y-auto scroll-soft pop"

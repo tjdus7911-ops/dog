@@ -70,13 +70,15 @@ function buildDog(a: DogAvatar, earBones = false): THREE.Group {
   }
 
   // 목걸이 + 금색 이름표 + 목줄 고리
+  // 산책용 목줄 세트(목걸이·이름표·고리)는 따로 묶어 둠 → 집 안에서는 이 묶음만 숨김 (모델·애니메이션은 그대로)
+  const hb = bone(body, 'harness', [0, 0, 0]);
   const h = a.harness;
-  part(body, shape.torus(0.1, 0.018), h, [0, 0.42, Z(0.17)], [w, 1, 1], [Math.PI / 2 - 0.6, 0, 0]);
-  const tag = group(body, [0, 0.355, Z(0.255)], [-0.35, 0, 0]);
+  part(hb, shape.torus(0.1, 0.018), h, [0, 0.42, Z(0.17)], [w, 1, 1], [Math.PI / 2 - 0.6, 0, 0]);
+  const tag = group(hb, [0, 0.355, Z(0.255)], [-0.35, 0, 0]);
   part(tag, shape.cyl(0.026, 0.026, 0.01, 20), GOLD, [0, 0, 0], 1, [Math.PI / 2, 0, 0]);
   part(tag, shape.ball(), shade(GOLD, -0.22), [0, -0.003, 0.006], [0.009, 0.007, 0.003]);
   for (const dx of [-0.008, 0, 0.008]) part(tag, shape.ball(), shade(GOLD, -0.22), [dx, 0.007, 0.006], 0.0035);
-  part(body, shape.torus(0.024, 0.007), '#c9c9cf', [0, 0.49, Z(0.1)], 1, [0, Math.PI / 2, 0]);
+  part(hb, shape.torus(0.024, 0.007), '#c9c9cf', [0, 0.49, Z(0.1)], 1, [0, Math.PI / 2, 0]);
   const anchor = new THREE.Object3D();
   anchor.name = 'anchor';
   anchor.position.set(0, 0.5, Z(0.1));
@@ -244,11 +246,12 @@ function buildCorgi(a: DogAvatar, earBones = false): THREE.Group {
 
 
   // 목걸이 + 금색 이름표 + 목줄 고리
-  part(body, shape.torus(0.105, 0.018), a.harness, [0, 0.43, Z(0.17)], [w, 1, 1], [Math.PI / 2 - 0.65, 0, 0]);
-  const tag = group(body, [0, 0.355, Z(0.265)], [-0.35, 0, 0]);
+  const hb = bone(body, 'harness', [0, 0, 0]);
+  part(hb, shape.torus(0.105, 0.018), a.harness, [0, 0.43, Z(0.17)], [w, 1, 1], [Math.PI / 2 - 0.65, 0, 0]);
+  const tag = group(hb, [0, 0.355, Z(0.265)], [-0.35, 0, 0]);
   part(tag, shape.cyl(0.026, 0.026, 0.01, 20), GOLD, [0, 0, 0], 1, [Math.PI / 2, 0, 0], { gloss: true });
   part(tag, shape.ball(), shade(GOLD, -0.22), [0, -0.003, 0.006], [0.009, 0.007, 0.003]);
-  part(body, shape.torus(0.024, 0.007), '#c9c9cf', [0, 0.5, Z(0.1)], 1, [0, Math.PI / 2, 0], { gloss: true });
+  part(hb, shape.torus(0.024, 0.007), '#c9c9cf', [0, 0.5, Z(0.1)], 1, [0, Math.PI / 2, 0], { gloss: true });
   const anchor = new THREE.Object3D();
   anchor.name = 'anchor';
   anchor.position.set(0, 0.51, Z(0.1));
@@ -359,6 +362,8 @@ export interface DogRig {
   baseY: number;
   /** 귀 관절 (createDog(a, { earBones: true })일 때만) */
   ears: THREE.Object3D[];
+  /** 산책용 목줄 세트(목걸이·이름표·고리) — visible 로 착용/해제 */
+  harness: THREE.Object3D | null;
 }
 
 export function createDog(a: DogAvatar, opts: { earBones?: boolean } = {}): DogRig {
@@ -370,5 +375,6 @@ export function createDog(a: DogAvatar, opts: { earBones?: boolean } = {}): DogR
     legs: [g('legFL'), g('legFR'), g('legBL'), g('legBR')], anchor: g('anchor'), lids: g('lids'),
     baseY: Number(root.userData.baseY) || 0,
     ears: earBones ? [root.getObjectByName('earL'), root.getObjectByName('earR')].filter((x): x is THREE.Object3D => !!x) : [],
+    harness: root.getObjectByName('harness') ?? null,
   };
 }

@@ -279,13 +279,13 @@ async function main() {
 
     console.log('\n[거리 경쟁 · 추월 (2명)]');
     // 두리: 처음 6초 PERFECT → 그 뒤 MISS / 다섯: 처음 6초 MISS → 그 뒤 PERFECT
-    const r3 = await emit(B, 'rm:create', { courseId: 'elise', difficulty: 'easy' });
+    const r3 = await emit(B, 'rm:create', { courseId: 'elise', difficulty: 'normal' });
     await emit(E, 'rm:join', { code: r3.room.code });
     await emit(B, 'rm:ready', { ready: true }); await emit(E, 'rm:ready', { ready: true });
     await sleep(300);
     const st3 = last(E, 'rm:start');
     check('2명 방 시작', st3?.round === 1 && last(E, 'rm:room').players.length === 2);
-    const ch3 = buildChart('elise', 'easy')!;
+    const ch3 = buildChart('elise', 'normal')!;
     const SPLIT = 6000;
     sendPlan(B, 1, st3.startAt, perfectPlan(ch3, (t) => t < SPLIT, DUR));
     sendPlan(E, 1, st3.startAt, perfectPlan(ch3, (t) => t >= SPLIT, DUR));

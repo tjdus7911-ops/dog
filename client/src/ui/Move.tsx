@@ -2,7 +2,7 @@
 // 코인 차감·호실 배정·새집 배치는 서버가 한 번에 처리하고, 화면은 결과만 반영한다.
 import { useEffect, useMemo, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { PLANS, itemKey, type HomeTier, type HomeView } from '@shared/home';
+import { PLANS, PLAN_TAGLINE, itemKey, type HomeTier, type HomeView } from '@shared/home';
 import { coinFmt, type CoinStatus } from '@shared/coins';
 import { homeSpaceId } from '@shared/spaces';
 import type { MyProfile } from '@shared/protocol';
@@ -16,10 +16,10 @@ import { DEMO } from '../demo';
 
 type Status = 'current' | 'available' | 'insufficient' | 'locked' | 'past' | 'full';
 interface PlanInfo { tier: HomeTier; building: string; name: string; type: string; rooms: number; price: number; features: string[]; capacity: number; free: number; status: Status; need: number }
-interface PlansRes { balance: number; current: HomeTier | null; residence: { building: string; unit: string } | null; plans: PlanInfo[] }
+interface PlansRes { balance: number; current: HomeTier | null; residence: { building: string; unit: string } | null; plans: PlanInfo[]; freeAccess?: boolean }
 
 /** 3D 내부 미리보기 (기본 가구 배치) — 한 번만 그리는 정지 화면이라 가볍다 */
-function Preview({ tier }: { tier: HomeTier }) {
+export function Preview({ tier }: { tier: HomeTier }) {
   const plan = PLANS[tier];
   const k = Math.max(plan.halfW / 3.6, plan.halfD / 3.0);
   return (
@@ -66,7 +66,7 @@ export function MoveModal() {
       set({ me: r.profile, coins: r.coins });
       setConfirmTier(null);
       setDone({ name: p.name, unit: r.residence.unit, building: r.residence.building });
-      showCoinFx(-p.price, `${p.name} 이사`);
+      if (!data?.freeAccess) showCoinFx(-p.price, `${p.name} 이사`);
       // 새집으로 바로 들어가기
       void joinPark(homeSpaceId(r.profile.id));
     } catch (e) {
@@ -88,7 +88,9 @@ export function MoveModal() {
           {data && <span className="rounded-full bg-[#fff4cf] px-3 py-1 font-display text-[#b9851a] whitespace-nowrap" data-testid="move-balance">🪙 {coinFmt(data.balance)}</span>}
           <button className="btn btn-ghost w-10 h-10" onClick={close} aria-label="닫기">✕</button>
         </div>
-        <p className="px-4 text-xs text-cocoa-soft mt-1">1동 원룸 → 2동 투룸 → 3동 쓰리룸 순서로 이사할 수 있어요. 가구·사진·친구·방명록·기록은 모두 그대로 옮겨져요.</p>
+        <p className="px-4 text-xs text-cocoa-soft mt-1">{data?.freeAccess
+          ? '지금은 원룸·투룸·쓰리룸 모두 무료로 이용할 수 있어요. 언제든 원하는 집으로 이사할 수 있고, 가구·사진·친구·방명록·기록은 모두 그대로 옮겨져요.'
+          : '1동 원룸 → 2동 투룸 → 3동 쓰리룸 순서로 이사할 수 있어요. 가구·사진·친구·방명록·기록은 모두 그대로 옮겨져요.'}</p>
         {DEMO && <p className="mx-4 mt-1 rounded-xl bg-[#eef5fb] text-[#4b6a86] px-3 py-1.5 text-[11px]">미리보기 코인은 이 기기에만 저장돼요. 실제 이사는 게임 서버에서 처리돼요.</p>}
         {done ? (
           <div className="p-6 text-center" data-testid="move-done">
@@ -119,7 +121,10 @@ export function MoveModal() {
                           <h3 className="font-display text-lg">{p.name}</h3>
                           <span className="text-sm text-cocoa-soft">{p.type} · 방 {p.rooms}개</span>
                         </div>
-                        <div className="font-display text-[#e2a21c] text-lg">{p.tier === 1 ? `입주비 🪙 ${coinFmt(p.price)}` : `이사 비용 🪙 ${coinFmt(p.price)}`}</div>
+                        <p className="text-[13px] text-cocoa-soft">{PLAN_TAGLINE[p.tier]}</p>
+                        {data.freeAccess
+                          ? <span className="self-start mt-1 rounded-full bg-[#E58D76] text-white text-[11px] px-2.5 py-0.5" data-testid={`plan-free-${p.tier}`}>무료 이용</span>
+                          : <div className="font-display text-[#e2a21c] text-lg">{p.tier === 1 ? `입주비 🪙 ${coinFmt(p.price)}` : `이사 비용 🪙 ${coinFmt(p.price)}`}</div>}
                         <ul className="text-[13px] mt-1 space-y-0.5 flex-1">
                           {p.features.map((f) => <li key={f}>· {f}</li>)}
                           <li className="text-cocoa-soft text-[12px]">· 친구 최대 {p.capacity}명 방문 · 빈 집 {p.free}호</li>
@@ -151,12 +156,14 @@ export function MoveModal() {
           <div className="panel p-5 w-full max-w-[380px] text-center pop" role="dialog" aria-modal="true" data-testid="move-confirm">
             <div className="text-5xl">🚚</div>
             <p className="font-display text-lg mt-2 leading-snug">
-              {confirmPlan.name}으로 이사하시겠어요? 이사 비용 {coinFmt(confirmPlan.price)}코인이 사용되며, 기존 가구와 소중한 추억은 모두 새집으로 옮겨집니다.
+              {data?.freeAccess
+                ? `${confirmPlan.name} ${confirmPlan.type}으로 이사하시겠어요? 지금은 무료예요. 기존 가구와 소중한 추억은 모두 새집으로 옮겨집니다.`
+                : `${confirmPlan.name}으로 이사하시겠어요? 이사 비용 ${coinFmt(confirmPlan.price)}코인이 사용되며, 기존 가구와 소중한 추억은 모두 새집으로 옮겨집니다.`}
             </p>
             <p className="text-[12px] text-cocoa-soft mt-2">새집에는 기본 가구가 놓이고, 사진 액자는 새 벽에 걸려요. 다른 가구는 보관함에서 꺼내 원하는 곳에 다시 놓을 수 있어요. 지금 사는 {data?.residence ? `${data.residence.building}동 ${data.residence.unit}호` : '집'}는 다른 주민이 입주할 수 있게 돼요.</p>
             <div className="grid grid-cols-2 gap-2 mt-4">
               <button className="btn btn-ghost py-3" disabled={busy} onClick={() => setConfirmTier(null)}>취소</button>
-              <button className="btn btn-coral py-3" disabled={busy} onClick={() => void move(confirmPlan)} data-testid="move-confirm-yes">{busy ? '이사하는 중…' : `🪙 ${coinFmt(confirmPlan.price)} 이사하기`}</button>
+              <button className="btn btn-coral py-3" disabled={busy} onClick={() => void move(confirmPlan)} data-testid="move-confirm-yes">{busy ? '이사하는 중…' : data?.freeAccess ? '무료로 이사하기' : `🪙 ${coinFmt(confirmPlan.price)} 이사하기`}</button>
             </div>
           </div>
         </div>

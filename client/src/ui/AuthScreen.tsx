@@ -1,8 +1,12 @@
 import { useState, type FormEvent } from 'react';
 import { api, tokenStore } from '../lib/api';
-import { set } from '../store';
+import { set, toast } from '../store';
+import { COIN_REWARDS } from '@shared/coins';
+import { showCoinFx } from './Coins';
 import type { MyProfile } from '@shared/protocol';
 import { LegalModal, type LegalDoc } from './Legal';
+import { LogoMark } from './Logo';
+import { InstallCard } from './Install';
 
 export function AuthScreen() {
   // 둘러보기 중 '회원가입하기'를 누르고 왔으면 가입 탭으로 시작
@@ -26,6 +30,8 @@ export function AuthScreen() {
       const r = await api<{ token: string; profile: MyProfile }>(`/api/auth/${mode}`, { body, token: null });
       tokenStore.set(r.token);
       set({ me: r.profile, onboarding: mode === 'signup' });
+      // 가입 선물 (서버가 계정당 한 번 지급 · 기록)
+      if (mode === 'signup') { showCoinFx(COIN_REWARDS.signup.amount, '가입 선물'); toast(`🎁 가입을 환영해요! 가입 선물 ${COIN_REWARDS.signup.amount} 멍글코인을 드렸어요`); }
     } catch (err) {
       setError((err as Error).message);
     } finally { setBusy(false); }
@@ -46,8 +52,8 @@ export function AuthScreen() {
       <div className="min-h-full grid place-items-center p-5">
         <div className="w-full max-w-[420px]">
           <div className="text-center mb-6">
-            <div className="text-5xl">🐾</div>
-            <h1 className="font-display text-4xl mt-2">멍글마을</h1>
+            <div className="inline-block"><LogoMark size={96} /></div>
+            <h1 className="font-display text-4xl mt-1">멍글마을</h1>
             <p className="text-cocoa-soft mt-1 text-sm">우리 강아지와 함께 걷고, 만나고, 자랑하는 3D 커뮤니티</p>
           </div>
           <form onSubmit={submit} className="panel p-6 space-y-3">
@@ -75,6 +81,7 @@ export function AuthScreen() {
                 </label>
               </div>
             )}
+            {mode === 'signup' && <p className="text-sm rounded-xl bg-[#fff4cf] text-[#9a6f12] px-3 py-1.5" data-testid="signup-gift">🎁 가입하면 <b>500 멍글코인</b>을 드려요 · 원룸 입주비 500코인</p>}
             {mode === 'signup' && <p className="text-xs text-cocoa-soft">아이디는 로그인에만 쓰이고 다른 사용자에게는 닉네임과 강아지 정보만 보여요.</p>}
             {mode === 'signup' && (
               <label className="flex items-start gap-2 text-sm bg-cream-2 rounded-2xl px-3 py-2.5 cursor-pointer">
@@ -92,6 +99,7 @@ export function AuthScreen() {
             </button>
           </form>
           <button type="button" className="btn btn-ghost w-full py-3 mt-3 border border-[#f1e2d2]" onClick={() => setBrowse(true)}>👀 그냥 둘러보기</button>
+          <InstallCard />
           <p className="text-center text-xs text-cocoa-soft mt-4">
             <button type="button" className="underline" onClick={() => setLegal('terms')}>이용약관</button>
             {' · '}

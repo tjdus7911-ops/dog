@@ -57,6 +57,9 @@ export function FriendsPanel() {
 function FriendRow({ f }: { f: FriendEntry }) {
   const [menu, setMenu] = useState(false);
   const here = useStore((s) => s.park?.id === f.parkId && !!f.parkId);
+  // 친구가 있는 광장의 현재 인원 (서버 집계) — 가득 찼으면 따라가기 대신 '만원'
+  const fp = useStore((s) => (f.parkId ? s.parks.find((x) => x.id === f.parkId) : undefined));
+  const full = !!fp && fp.kind === 'park' && fp.count >= fp.capacity;
   const p = f.profile;
   const status = f.online === null ? '접속 상태 비공개' : f.online ? (f.parkName ? `${f.parkName}에서 산책 중` : '온라인') : '오프라인';
   return (
@@ -68,7 +71,7 @@ function FriendRow({ f }: { f: FriendEntry }) {
         </button>
         <div className="flex-1 min-w-0">
           <div className="font-display truncate">{p.nickname} <span className="text-xs text-cocoa-soft font-body">· 🐶 {p.dogName}</span></div>
-          <div className="text-xs text-cocoa-soft truncate">{here ? '🌸 같은 공원에 있어요' : status}</div>
+          <div className="text-xs text-cocoa-soft truncate">{here ? '🌸 같은 곳에 있어요' : status}</div>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-1.5 mt-2">
@@ -78,7 +81,9 @@ function FriendRow({ f }: { f: FriendEntry }) {
         <button className="btn btn-ghost py-2 text-sm border border-[#f1e2d2] !shadow-none" onClick={() => visitFriendHome(p)}>🏠 집 놀러 가기</button>
         <button className="btn btn-ghost py-2 text-sm border border-[#f1e2d2] !shadow-none" onClick={() => set({ dogSheet: p.id, panel: 'none' })}>🐶 강아지 보기</button>
         <button className={`btn py-2 text-sm !shadow-none border border-[#f1e2d2] ${menu ? 'btn-peach' : 'btn-ghost'}`} onClick={() => setMenu(!menu)}>🤝 친구 관계 관리</button>
-        {f.parkId && !here && <button className="btn btn-sage col-span-2 py-2 text-sm !shadow-none" onClick={() => goToFriend(p.id)}>📍 {f.parkName}에서 함께 산책하기</button>}
+        {f.parkId && !here && (full
+          ? <button className="btn btn-ghost col-span-2 py-2 text-sm !shadow-none border border-[#f1e2d2] opacity-60" disabled>📍 {f.parkName}은(는) 지금 만원이에요 ({fp!.count}/{fp!.capacity}명)</button>
+          : <button className="btn btn-sage col-span-2 py-2 text-sm !shadow-none" onClick={() => goToFriend(p.id)} data-testid={`follow-${p.id}`}>📍 {f.parkName}(으)로 따라가기</button>)}
       </div>
       {menu && (
         <div className="flex gap-1.5 mt-2">

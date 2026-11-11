@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { drawBinsAndPoops } from './MiniMap';
 import { get, set, toast, useStore } from '../store';
+import { canOfferInstall, usePwa } from '../pwa';
+import { installFromButton } from './Install';
 import { joinPark, warpTo } from '../net/socket';
 import { api } from '../lib/api';
 import { local } from '../game/local';
@@ -10,6 +12,8 @@ import { isTouchDevice, setMoveLocked } from '../game/input';
 import { rendered } from '../net/remote';
 import { DEMO, resetDemo } from '../demo';
 import { homeSpaceId } from '@shared/spaces';
+import { FLOORINGS, HOME_VISIBILITY, WALLPAPERS, planOf } from '@shared/home';
+import { residenceLabel } from '@shared/apartment';
 import {
   APARTMENT_ENTRANCE, BIG_SCREEN, BUILDINGS, CAFE_ENTRANCE, FOUNTAIN_RADIUS, MEETING_BOARD, PATH_WIDTH, PHOTO_ZONE,
   PLAZA_RADIUS, RADIAL_ANGLES, RING_RADIUS, SHOP_ENTRANCE, TREES, WORLD_RADIUS,
@@ -22,22 +26,17 @@ import { PlacePicker } from './TopBar';
 import { openCommunity, fmtWhen } from './Community';
 import { Modal, PanelHeader } from './common';
 import { logout } from './App';
-import { Icon } from './icons';
+import { Icon, type IconName } from './icons';
 import { closeMenu, fromMenu, toggleMenu } from './menus';
 import { FEATURES } from '@shared/features';
-import { MOBILE_TOP_ROWS, NAV_H } from './layout';
+import { MOBILE_TOP_ROWS, NAV_H, PLACE_ROW_TOP } from './layout';
 
 // ---------------------------------------------------------------- 장소 줄 (모바일 상단 두 번째 줄)
 export function PlaceBar() {
-  const park = useStore((s) => s.park);
+  // 두 번째 줄: 위치 드롭다운 하나 (인원은 드롭다운 안에 표시 — 따로 띄우던 '산책 중 n명'은 합침)
   return (
-    <div className="absolute z-20 left-2 right-2 flex items-center gap-1.5 pointer-events-none" style={{ top: 'calc(var(--safe-t) + 60px)' }}>
+    <div className="absolute z-20 left-3 right-3 flex items-center pointer-events-none" style={{ top: `calc(var(--safe-t) + ${PLACE_ROW_TOP}px)` }}>
       <PlacePicker />
-      {park && (
-        <span className="name-tag !text-[12px] !px-3 !py-1.5 shrink-0" aria-label="지금 이곳 인원">
-          🐾 {park.kind === 'park' ? '산책 중' : '함께 있는 사람'} {park.count}명
-        </span>
-      )}
     </div>
   );
 }
@@ -63,33 +62,35 @@ export function BottomNav() {
   const park = useStore((s) => s.park);
   const panel = useStore((s) => s.panel);
   const chatOpen = useStore((s) => s.chatOpen);
-  const moreOpen = useStore((s) => s.activeMenu === 'more');
+  const activeMenu = useStore((s) => s.activeMenu);
   const unread = useStore((s) => s.chatUnread);
   const friendBadge = useStore((s) => s.incoming.length + s.friends.reduce((a, f) => a + f.unread, 0));
-  const items: { id: string; icon: string; label: string; active: boolean; badge?: number; onClick: () => void }[] = [
-    { id: 'home', icon: '🏠', label: '내 집', active: park?.kind === 'home' && park.ownerId === me.id, onClick: () => void goHome() },
-    { id: 'shop', icon: '🛍️', label: '상점', active: park?.kind === 'shop', onClick: () => void goShop() },
+  const atMyHome = park?.kind === 'home' && park.ownerId === me.id;
+  const items: { id: string; icon: IconName; label: string; active: boolean; badge?: number; trigger?: 'home' | 'more'; onClick: () => void }[] = [
+    // 내 집: 집 밖이면 집으로, 이미 내 집이면 '내 집' 시트(꾸미기·집 정보·이사·로비)
+    { id: 'home', icon: 'home', label: '내 집', active: atMyHome || activeMenu === 'home', trigger: atMyHome ? 'home' : undefined, onClick: () => (atMyHome ? toggleMenu('home') : void goHome()) },
+    { id: 'shop', icon: 'cart', label: '상점', active: park?.kind === 'shop', onClick: () => void goShop() },
     {
-      id: 'friends', icon: '🐾', label: '친구', active: panel === 'friends', badge: friendBadge,
+      id: 'friends', icon: 'paw', label: '친구', active: panel === 'friends', badge: friendBadge,
       onClick: () => (DEMO ? toast('미리보기에서는 친구 기능을 쓸 수 없어요. (게임 서버에서 동작)') : me.role === 'guest' ? set({ joinPrompt: true }) : set({ panel: panel === 'friends' ? 'none' : 'friends', activeMenu: null, chatOpen: false })),
     },
     {
-      id: 'chat', icon: '💬', label: '채팅', active: chatOpen, badge: unread,
+      id: 'chat', icon: 'chat', label: '채팅', active: chatOpen, badge: unread,
       onClick: () => (DEMO ? toast('미리보기에서는 채팅을 쓸 수 없어요. (게임 서버에서 동작)') : set({ chatOpen: !chatOpen, activeMenu: null, panel: 'none' })),
     },
-    { id: 'more', icon: '☰', label: '더보기', active: moreOpen, onClick: () => toggleMenu('more') },
+    { id: 'more', icon: 'menu', label: '더보기', active: activeMenu === 'more', trigger: 'more', onClick: () => toggleMenu('more') },
   ];
   return (
-    <nav aria-label="주 메뉴" className="absolute z-20 inset-x-0 bottom-0 bg-[#fffaf4]/92 backdrop-blur-md rounded-t-[22px] border-t-2 border-white shadow-[0_-6px_22px_rgba(90,64,51,.14)]"
+    <nav aria-label="주 메뉴" className="absolute z-20 inset-x-0 bottom-0 bg-[#FFFCF8]/95 backdrop-blur-md rounded-t-[20px] border-t border-[#EAE3DC] shadow-[0_-4px_16px_rgba(81,71,63,.08)]"
       style={{ paddingBottom: 'var(--safe-b)' }}>
       <ul className="grid grid-cols-5" style={{ height: NAV_H }}>
         {items.map((it) => (
           <li key={it.id} className="flex">
-            <button onClick={it.onClick} aria-pressed={it.active} data-menu-trigger={it.id === 'more' ? 'more' : undefined} data-testid={`nav-${it.id}`}
-              className={`relative flex-1 flex flex-col items-center justify-center gap-0.5 select-none transition ${it.active ? 'text-peach-deep' : 'text-cocoa'}`}>
-              <span className={`grid place-items-center w-11 h-7 rounded-full text-[19px] leading-none transition ${it.active ? 'bg-peach-soft' : ''}`}>{it.icon}</span>
-              <span className={`text-[11px] font-display leading-none ${it.active ? 'text-peach-deep' : ''}`}>{it.label}</span>
-              {!!it.badge && <span className="absolute top-1.5 left-1/2 ml-2.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#ef6b5b] text-white text-[10px] grid place-items-center font-sans">{it.badge > 9 ? '9+' : it.badge}</span>}
+            <button onClick={it.onClick} aria-pressed={it.active} aria-label={it.label} data-menu-trigger={it.trigger} data-testid={`nav-${it.id}`}
+              className={`relative flex-1 flex flex-col items-center justify-center gap-1 select-none transition ${it.active ? 'text-[#E58D76]' : 'text-[#756B63]'}`}>
+              <span className={`grid place-items-center w-11 h-7 rounded-full transition ${it.active ? 'bg-[#FBE8E1]' : ''}`}><Icon name={it.icon} size={21} /></span>
+              <span className={`text-[11px] leading-none ${it.active ? 'text-[#E58D76]' : 'text-[#8A8078]'}`}>{it.label}</span>
+              {!!it.badge && <span className="absolute top-1 left-1/2 ml-2 min-w-[17px] h-[17px] px-1 rounded-full bg-[#E86A5A] text-white text-[10px] leading-none grid place-items-center font-sans border-[1.5px] border-white">{it.badge > 9 ? '9+' : it.badge}</span>}
             </button>
           </li>
         ))}
@@ -104,14 +105,16 @@ export function BottomNav() {
 export function MoreSheet() {
   const me = useStore((s) => s.me)!;
   const open = useStore((s) => s.activeMenu === 'more');
+  const pwa = usePwa();
   useEffect(() => { setMoveLocked(open, 'more'); return () => setMoveLocked(false, 'more'); }, [open]);
   if (!open) return null;
   const guest = me.role === 'guest';
-  const sections: { title: string; items: { label: string; onClick: () => void; hide?: boolean; soft?: boolean }[] }[] = [
+  const sections: { title: string; items: { label: string; onClick: () => void; hide?: boolean; soft?: boolean; hint?: boolean }[] }[] = [
     { title: '마을 생활', items: [
       { label: '동네 일정', onClick: fromMenu(() => set({ eventsOpen: true })) },
-      { label: '아파트 로비', onClick: fromMenu(() => void joinPark('lobby-1')), hide: guest },
+      { label: '아파트 로비', onClick: fromMenu(() => void joinPark('lobby-1')) },
       { label: '이사하기', onClick: fromMenu(() => set({ moveOpen: true })), hide: !me.residence },
+      { label: '출석 체크는 위쪽 코인에서', onClick: fromMenu(() => set({ wallet: 'attendance' })), hide: guest, hint: true },
     ] },
     { title: '동네', items: [
       { label: '산책 모임', onClick: fromMenu(() => openCommunity('meetups')) },
@@ -125,6 +128,7 @@ export function MoreSheet() {
     ] },
     { title: '설정', items: [
       { label: '개인정보·차단 설정', onClick: fromMenu(() => set({ panel: 'settings' })), hide: DEMO || guest },
+      { label: '홈 화면에 추가', onClick: fromMenu(() => void installFromButton()), hide: !canOfferInstall(pwa) },
       { label: '운영 관리', onClick: fromMenu(() => set({ panel: 'admin' })), hide: DEMO || me.role !== 'admin' },
       DEMO ? { label: '처음부터 다시 만들기', onClick: fromMenu(resetDemo), soft: true } : { label: guest ? '둘러보기 끝내기' : '로그아웃', onClick: fromMenu(logout), soft: true },
     ] },
@@ -149,7 +153,7 @@ export function MoreSheet() {
               <h3 className="text-[12px] text-[#8A8078] pt-2.5 pb-0.5 px-0.5 font-normal">{sec.title}</h3>
               <div className="grid grid-cols-2 gap-x-4">
                 {items.map((it) => (
-                  <button key={it.label} onClick={it.onClick} className={`min-h-[46px] px-0.5 text-left text-[14px] border-b border-[#EAE3DC] active:bg-[#F7F1EA] ${it.soft ? 'text-[#8A8078]' : ''}`}>{it.label}</button>
+                  <button key={it.label} onClick={it.onClick} className={`min-h-[46px] px-0.5 text-left border-b border-[#EAE3DC] active:bg-[#F7F1EA] ${it.hint ? 'text-[12px] text-[#8A8078]' : 'text-[14px]'} ${it.soft ? 'text-[#8A8078]' : ''}`}>{it.label}</button>
                 ))}
               </div>
             </div>
@@ -160,36 +164,139 @@ export function MoreSheet() {
   );
 }
 
+// ---------------------------------------------------------------- 내 집 시트 (승인 시안 ③)
+// 집 상단에 있던 로비로 나가기 · 집 정보 · 꾸미기 버튼을 모은 곳. 모바일: 하단 '내 집' 탭(집 안에서) / PC: 왼쪽 위 '내 집 메뉴'
+const SheetRow = ({ label, value, badge, onClick, testid }: { label: string; value?: string; badge?: number; onClick: () => void; testid?: string }) => (
+  <button onClick={onClick} data-testid={testid} className="w-full min-h-[48px] flex items-center gap-2 border-b border-[#EAE3DC] text-left active:bg-[#F7F1EA] hover:bg-[#F7F1EA]/60">
+    <span className="flex-1 text-[14px]">{label}</span>
+    {value && <span className="text-[12px] text-[#8A8078] truncate max-w-[50%]">{value}</span>}
+    {!!badge && <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-[#E86A5A] text-white text-[11px] grid place-items-center">{badge}</span>}
+    <Icon name="chevronRight" size={16} className="text-[#756B63] shrink-0" />
+  </button>
+);
+const SheetTitle = ({ children }: { children: ReactNode }) => <h3 className="text-[12px] text-[#8A8078] pt-3 pb-0.5 font-normal">{children}</h3>;
+
+export function HomeSheet() {
+  const me = useStore((s) => s.me)!;
+  const open = useStore((s) => s.activeMenu === 'home');
+  const home = useStore((s) => s.home);
+  const version = useStore((s) => s.visitRequestsVersion);
+  const touch = isTouchDevice();
+  const [requests, setRequests] = useState(0);
+  const [free, setFree] = useState<boolean | null>(null);
+  useEffect(() => { if (touch) { setMoveLocked(open, 'home'); return () => setMoveLocked(false, 'home'); } }, [open, touch]);
+  useEffect(() => {
+    if (!open) return;
+    if (!DEMO) api<{ requests: unknown[] }>('/api/home/me/visit-requests').then((r) => setRequests(r.requests.length)).catch(() => {});
+    api<{ freeAccess?: boolean }>('/api/apartment/plans').then((r) => setFree(!!r.freeAccess)).catch(() => {});
+  }, [open, version]);
+  if (!open || !home?.isOwner) return null;
+  const wall = WALLPAPERS.find((w) => w.id === home.style.wall)?.label ?? '';
+  const floor = FLOORINGS.find((f) => f.id === home.style.floor)?.label ?? '';
+  const vis = HOME_VISIBILITY.find((v) => v.id === home.visibility)?.label ?? '';
+  const plan = planOf(home.tier);
+  const next = home.tier < 3 ? planOf(home.tier + 1) : null;
+  const moveValue = free ? '원룸 · 투룸 · 쓰리룸 무료' : next ? `${next.building}동 ${next.type} · ${next.price.toLocaleString('ko-KR')}코인` : '가장 넓은 집';
+  const body = (
+    <>
+      <div className="flex items-center gap-2 min-h-[48px]">
+        <div className="flex-1 min-w-0">
+          <h2 className="font-display text-[16px] leading-tight">내 집</h2>
+          <p className="text-[12px] text-[#8A8078] truncate">{me.nickname}네 집 · {residenceLabel(home.residence)} · {plan.type}</p>
+        </div>
+        <button className="w-11 h-11 -mr-2 rounded-full grid place-items-center text-[#756B63]" onClick={closeMenu} aria-label="내 집 메뉴 닫기"><Icon name="x" size={20} /></button>
+      </div>
+      <SheetTitle>꾸미기</SheetTitle>
+      <button onClick={fromMenu(() => set({ homeEdit: true, homePanel: false }))} data-testid="home-edit"
+        className="w-full mt-1 rounded-2xl border border-[#F2C3B3] bg-[#FBE8E1] px-3.5 py-2.5 flex items-center gap-2 text-left active:scale-[.99]">
+        <span className="flex-1 min-w-0"><span className="block text-[15px]">가구 배치하기</span><span className="block text-[11px] text-[#8A8078]">끌어서 옮기기 · 회전 · 보관함 · 액자 사진</span></span>
+        <Icon name="chevronRight" size={18} className="text-[#E58D76]" />
+      </button>
+      <SheetRow label="벽지 · 바닥 바꾸기" value={`${wall} · ${floor}`} testid="home-style" onClick={fromMenu(() => set({ homeEdit: true, homeEditStyle: true, homePanel: false }))} />
+      <SheetTitle>우리 집</SheetTitle>
+      <SheetRow label="집 정보 · 방명록" value={`좋아요 ${home.likes} · 방명록 ${home.guestbook.length}`} testid="home-info" onClick={fromMenu(() => set({ homePanel: true }))} />
+      {!DEMO && <SheetRow label="방문 신청" badge={requests} value={requests ? undefined : '없음'} onClick={fromMenu(() => set({ homePanel: true }))} />}
+      <SheetRow label="공개 범위" value={vis} onClick={fromMenu(() => set({ homePanel: true }))} />
+      <SheetRow label="이사하기" value={free === null ? '' : moveValue} testid="home-move" onClick={fromMenu(() => set({ moveOpen: true }))} />
+      <SheetTitle>이동</SheetTitle>
+      <SheetRow label="아파트 로비로 나가기" testid="home-lobby" onClick={fromMenu(() => void joinPark('lobby-1'))} />
+    </>
+  );
+  if (!touch) {
+    return (
+      <section aria-label="내 집" data-menu-root="home" data-testid="home-sheet"
+        className="absolute z-30 left-3 top-[118px] w-[340px] max-h-[calc(100%-140px)] overflow-y-auto scroll-soft rounded-[20px] bg-[#FFFCF8] border border-[#EAE3DC] shadow-[0_10px_28px_rgba(81,71,63,0.14)] px-4 pb-3 pt-1 text-[#51473F] pop">
+        {body}
+      </section>
+    );
+  }
+  return (
+    <>
+      <div className="absolute inset-x-0 top-0 z-20 bg-[#51473F24]" style={{ bottom: `calc(var(--safe-b) + ${NAV_H}px)` }} data-menu-backdrop onPointerDown={closeMenu} />
+      <section aria-label="내 집" data-menu-root="home" data-testid="home-sheet"
+        className="absolute z-20 inset-x-0 bg-[#FFFCF8] rounded-t-[20px] border-t border-[#EAE3DC] px-4 pt-2 pb-2.5 overflow-y-auto overscroll-contain scroll-soft text-[#51473F]"
+        style={{ bottom: `calc(var(--safe-b) + ${NAV_H}px)`, maxHeight: `min(560px, calc(100% - var(--safe-t) - ${NAV_H + 70}px))` }}>
+        <div className="mx-auto w-9 h-1 rounded-full bg-[#EAE3DC]" />
+        {body}
+      </section>
+    </>
+  );
+}
+
 // ---------------------------------------------------------------- 우측 빠른 메뉴
+/** 진행 중인 이벤트가 있는지 (운영 공지 또는 2주 안 모임) — 있을 때만 오른쪽에 '이벤트' 버튼 */
+function useActiveEvents() {
+  const [st, setSt] = useState<{ active: boolean; key: string }>({ active: false, key: '' });
+  useEffect(() => {
+    let alive = true;
+    const load = () => Promise.all([
+      api<{ meetups: MeetupView[] }>('/api/meetups?scope=upcoming').catch(() => ({ meetups: [] as MeetupView[] })),
+      DEMO ? Promise.resolve({ slides: [] as ScreenSlide[] }) : api<{ slides: ScreenSlide[] }>('/api/screen').catch(() => ({ slides: [] as ScreenSlide[] })),
+    ]).then(([m, s]) => {
+      if (!alive) return;
+      const now = Date.now();
+      const ids = [...s.slides.filter((x) => x.kind === 'notice').map((x) => `n${x.id}`), ...m.meetups.filter((x) => x.startsAt > now - 3600_000 && x.startsAt < now + 14 * 86400_000).map((x) => `m${x.id}`)];
+      setSt({ active: ids.length > 0, key: ids.sort().join(',') });
+    });
+    void load();
+    const t = window.setInterval(load, 5 * 60_000);
+    return () => { alive = false; window.clearInterval(t); };
+  }, []);
+  return st;
+}
+
 function prefersCollapsed() {
   try { const v = localStorage.getItem('mungle.quick'); if (v) return v === 'closed'; } catch { /* 무시 */ }
   return typeof window !== 'undefined' && window.innerHeight < 640;
 }
 export function QuickMenu() {
   const touch = isTouchDevice();
-  // 실내(로비·집·카페·샵)는 왼쪽 위에 장소 버튼 줄이 있어 그 아래로 내림
-  const indoor = useStore((s) => s.park?.kind !== 'park');
+  // 실내(로비·카페·샵)는 위치 줄 아래에 작은 버튼 줄이 있어 그 아래로 내림 (집은 버튼 줄 없음)
+  const chipRow = useStore((s) => { const k = s.park?.kind; return k === 'lobby' || k === 'cafe' || k === 'shop' || (k === 'home' && !!s.home && !s.home.isOwner); });
   const [closed, setClosed] = useState(prefersCollapsed);
+  const ev = useActiveEvents();
+  const [seen, setSeen] = useState(() => { try { return localStorage.getItem('mungle.eventsSeen') ?? ''; } catch { return ''; } });
   const toggle = () => { setClosed(!closed); try { localStorage.setItem('mungle.quick', closed ? 'open' : 'closed'); } catch { /* 무시 */ } };
-  const items = [
-    { icon: '🗺️', label: '마을 지도', onClick: () => set({ mapOpen: true }) },
-    { icon: '👥', label: '동네 모임', onClick: () => openCommunity('meetups') },
-    { icon: '🐾', label: '강아지 자랑', onClick: () => openCommunity('posts') },
-    { icon: '📅', label: '이벤트', onClick: () => set({ eventsOpen: true }) },
+  const openEvents = () => { set({ eventsOpen: true }); setSeen(ev.key); try { localStorage.setItem('mungle.eventsSeen', ev.key); } catch { /* 무시 */ } };
+  // 승인 시안: 마을 지도 + (진행 중일 때만) 이벤트. 동네 모임·강아지 자랑은 더보기 '동네'로
+  const items: { icon: IconName; label: string; onClick: () => void; dot?: boolean; testid: string }[] = [
+    { icon: 'map', label: '마을 지도', onClick: () => set({ mapOpen: true }), testid: 'quick-map' },
+    ...(ev.active ? [{ icon: 'calendar' as IconName, label: '이벤트', onClick: openEvents, dot: ev.key !== seen, testid: 'quick-events' }] : []),
   ];
   return (
-    <div className="absolute z-10 right-2 md:right-3 flex flex-col items-center gap-2"
-      style={{ top: touch ? `calc(var(--safe-t) + ${MOBILE_TOP_ROWS + (indoor ? 58 : 0)}px)` : 78 }}>
+    <div className="absolute z-10 right-3 flex flex-col items-center gap-2"
+      style={{ top: touch ? `calc(var(--safe-t) + ${MOBILE_TOP_ROWS + (chipRow ? 44 : 0)}px)` : 70 }}>
       {!closed && items.map((it) => (
-        <button key={it.label} onClick={it.onClick} aria-label={it.label}
-          className="w-[54px] h-[54px] rounded-[18px] bg-[#fffaf4]/92 border-2 border-white shadow-[0_3px_10px_rgba(90,64,51,.16)] flex flex-col items-center justify-center gap-0.5 active:scale-95 transition">
-          <span className="text-[19px] leading-none">{it.icon}</span>
-          <span className="text-[9.5px] font-display leading-none whitespace-nowrap">{it.label}</span>
+        <button key={it.label} onClick={it.onClick} aria-label={it.label} data-testid={it.testid}
+          className="hud relative w-12 h-12 rounded-[16px] flex flex-col items-center justify-center gap-0.5 transition">
+          <Icon name={it.icon} size={19} className="hud-icon" />
+          <span className="text-[10px] leading-none whitespace-nowrap">{it.label}</span>
+          {it.dot && <span className="dot-new" />}
         </button>
       ))}
-      <button onClick={toggle} aria-label={closed ? '빠른 메뉴 펼치기' : '빠른 메뉴 접기'} aria-expanded={!closed}
-        className="w-[34px] h-[26px] rounded-full bg-[#fffaf4]/92 border-2 border-white shadow-sm text-[11px] text-cocoa-soft grid place-items-center">
-        {closed ? '◂ ☰' : '▴'}
+      <button onClick={toggle} aria-label={closed ? '빠른 메뉴 펼치기' : '빠른 메뉴 접기'} aria-expanded={!closed} data-testid="quick-toggle"
+        className="hud w-9 h-9 rounded-full grid place-items-center">
+        <Icon name={closed ? 'chevronDown' : 'chevronUp'} size={16} className="hud-icon" />
       </button>
     </div>
   );
@@ -261,7 +368,7 @@ export function VillageMap() {
   const k = (size / 2 - 6) / (WORLD_RADIUS + 1);
   const walkTo = (x: number, z: number) => { local.moveTarget = { x, z }; local.seatGoal = null; close(); toast('🐾 그쪽으로 걸어가요'); };
   const places = [
-    ...(inPark ? [] : [{ icon: '🌳', label: '중앙 공원으로', go: () => void warpTo('plaza') }]),
+    ...(inPark ? [] : [{ icon: '🌳', label: '중앙 광장으로', go: () => void warpTo('plaza') }]),
     { icon: '🏢', label: '아파트 입구', go: () => void warpTo('apartment') },
     { icon: '☕', label: '애견카페 입구', go: () => void warpTo('cafe') },
     { icon: '🛍️', label: '애견샵 입구', go: () => void warpTo('shop') },

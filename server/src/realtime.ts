@@ -268,17 +268,29 @@ export function setupRealtime(io: Server) {
       if (data?.parkId) {
         const sp = parseSpace(data.parkId);
         if (!sp) return fail(ack, '존재하지 않는 장소예요.');
-        if (session.guest && sp.kind !== 'park') { memberOnly(ack); return; }
+        // 둘러보기 방문자: 공원과 아파트 로비(건물·호실 안내판 구경)만 — 입주·집 방문 등은 회원 전용
+        if (session.guest && sp.kind !== 'park' && sp.kind !== 'lobby') { memberOnly(ack); return; }
         if (sp.kind === 'home') {
           const c = canVisit(userId, sp.ownerId!);
           if (!c.ok) return fail(ack, c.error);
         }
         room = getOrCreateRoom(data.parkId) ?? undefined;
         if (!room) return fail(ack, '존재하지 않는 장소예요.');
-        if (room.id !== session.parkId && room.players.size >= capacityOf(room)) return fail(ack, `${room.name}은(는) 정원(${capacityOf(room)}명)이 가득 찼어요.`);
+        if (room.id !== session.parkId && room.players.size >= capacityOf(room)) {
+          if (typeof ack === 'function') ack({ ok: false, error: `${room.name}은(는) 정원(${capacityOf(room)}명)이 가득 찼어요.`, code: 'full' });
+          return;
+        }
       } else {
-        room = [...rooms.values()].find((r) => r.kind === 'park' && r.players.size < CAPACITY);
-        if (!room) return fail(ack, '모든 공원이 가득 찼어요. 잠시 후 다시 시도해 주세요.');
+        // 자동 배정: 자리가 있는 광장 중 사람이 가장 많은 곳 (빈 광장이 여러 개 생기지 않게) · 같으면 앞 번호
+        // 이미 광장에 있으면 그 광장 그대로 (새로고침·재접속 중복 입장 방지)
+        const cur = session.parkId ? rooms.get(session.parkId) : undefined;
+        room = cur?.kind === 'park' ? cur : [...rooms.values()]
+          .filter((r) => r.kind === 'park' && r.players.size < CAPACITY)
+          .sort((x, y) => y.players.size - x.players.size)[0];
+        if (!room) {
+          if (typeof ack === 'function') ack({ ok: false, error: `모든 광장이 가득 찼어요 (광장마다 ${CAPACITY}명). 자리가 나면 바로 들어갈게요.`, code: 'all_full' });
+          return;
+        }
       }
       if (room.id === session.parkId) {
         // 같은 장소 재입장: 중복 입장 없이 현재 상태만 돌려줌

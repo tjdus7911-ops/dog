@@ -84,7 +84,7 @@ async function main() {
     }
     check('5곡 × 3난이도 패턴 모두 생성 · 검증 통과 · 음표 위 배치', COURSES.length === 5 && COURSES.every((c) => c.available) && bad.length === 0, bad);
     check('난이도가 오를수록 장애물이 많아짐 (EASY < NORMAL < HARD)', Object.values(counts).every(([e, n, h]) => e < n && n < h), counts);
-    check('기존 엘리제 NORMAL 패턴 그대로 (기존 기록 유지)', buildChart('elise', 'normal')!.obstacles.length === 46 && JSON.stringify(buildChart('elise')) === JSON.stringify(buildChart('elise', 'normal')));
+    check('NORMAL은 기본 난이도 · 새 패턴 버전(2)', JSON.stringify(buildChart('elise')) === JSON.stringify(buildChart('elise', 'normal')) && COURSES.every((c) => c.patternVersion === 2));
 
     console.log('\n[시작]');
     check('없는 코스 거부', (await start(a.token, 'nope')).status === 400);

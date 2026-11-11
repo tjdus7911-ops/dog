@@ -2,6 +2,10 @@ import { lazy, StrictMode, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
 import { App } from './ui/App';
+import { initPwa } from './pwa';
+
+// 홈 화면 앱: 브라우저의 설치 창 이벤트가 화면보다 먼저 올 수 있어 가장 먼저 준비
+initPwa();
 
 // 모델 작업대: 자동 화면 테스트 표시(mungle.e2e)가 있을 때만 ?lab 으로 열림
 let lab = false;
