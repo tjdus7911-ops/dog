@@ -39,8 +39,8 @@ export function trackLayout(game: { multi?: { myId: number; players: MRPlayer[] 
  */
 /** 자동 화면 테스트 전용: 내 강아지를 옆에서 가까이 보는 카메라 (삐끗·귀 자세 확인) — mungle.e2e + mungle.e2e.sidecam */
 const SIDE_CAM = (() => { try { return localStorage.getItem('mungle.e2e') === '1' && localStorage.getItem('mungle.e2e.sidecam') === '1'; } catch { return false; } })();
-/** 새 3D 공간(파스텔 테마파크) 시안: 승인 전까지는 mungle.runnerWorld=v2 일 때만 */
-const WORLD_V2 = (() => { try { return localStorage.getItem('mungle.runnerWorld') === 'v2'; } catch { return false; } })();
+/** 3D 공간: 파스텔 테마파크(승인된 새 디자인)가 기본. 예전 벚꽃 산책길은 mungle.runnerWorld=old 일 때만 (비교·되돌리기용) */
+const WORLD_V2 = (() => { try { return localStorage.getItem('mungle.runnerWorld') !== 'old'; } catch { return true; } })();
 const LOW_FPS = (() => { try { return localStorage.getItem('mungle.e2e') === '1' && localStorage.getItem('mungle.e2e.lowfps') === '1'; } catch { return false; } })();
 /** 자동 화면 테스트 전용: 그리기 횟수·삼각형 수 확인 (mungle.e2e) */
 function GlInfo() {
@@ -82,7 +82,7 @@ export interface PlayGame {
   live: RunResult | null;
   lastEvent: { e: JudgeEvent; at: number; points: number } | null;
   /** 함께 달리기: 판 번호 · 나 · 참가자 (없으면 혼자 달리기) */
-  multi?: { round: number; myId: number; players: MRPlayer[] };
+  multi?: { round: number; myId: number; players: MRPlayer[]; startAt?: number };
   /** 거리 경쟁·삐끗·추월 상태 (플레이 화면이 만듦) */
   race?: Race;
   /** 함께 달리기: 음악이 끝난 시각 (performance.now) → 마무리 연출 */
@@ -940,8 +940,10 @@ export function RunnerPlay({ game, avatar, human, best, onEnd, onQuit, onRetry }
   const banner = race.banner && performance.now() - race.banner.at < 1600 ? race.banner : null;
   const myName = game.multi?.players.find((p) => p.id === game.multi!.myId)?.nickname ?? '';
   // 모바일 조작 버튼: 한 줄 4개, 화면 너비에 맞춰 같은 크기 (멀티터치: pointerdown 즉시 실행)
-  const Btn = ({ a, label, icon }: { a: RunnerAction; label: string; icon: string }) => (
-    <button aria-label={label} data-testid={`rb-${a}`}
+  // 주의: 컴포넌트(<Btn/>)로 만들면 화면 정보가 갱신될 때(초당 15번)마다 버튼이 새로 만들어져 그 순간의 터치가 사라질 수 있음
+  // → 함수로 불러 같은 <button>이 계속 유지되게 함
+  const btn = (a: RunnerAction, label: string, icon: string) => (
+    <button key={a} aria-label={label} data-testid={`rb-${a}`}
       className="aspect-square w-full max-w-[min(86px,19vh)] mx-auto rounded-full bg-[#fff8ef] border-[3px] border-white shadow-[0_4px_12px_rgba(90,64,51,.2)] flex flex-col items-center justify-center touch-none select-none active:scale-95 active:bg-[#fde3d6]"
       onPointerDown={(e) => { e.preventDefault(); act(a, e.timeStamp); }} onContextMenu={(e) => e.preventDefault()}>
       <span className="font-display leading-none text-[#e2604f]" style={{ fontSize: 'min(8vw, 30px)' }}>{icon}</span>
@@ -1037,15 +1039,15 @@ export function RunnerPlay({ game, avatar, human, best, onEnd, onQuit, onRetry }
       {goShow && !paused && (
         <div key="go" className="absolute left-1/2 top-[30%] -translate-x-1/2 font-display text-5xl text-white drop-shadow-[0_3px_0_#f39a7b] pop pointer-events-none" data-testid="runner-go">출발!</div>
       )}
-      {/* 조작: 모바일은 한 줄 4버튼 (← 뛰기 숙이기 →), PC는 하단 안내 */}
+      {/* 조작: 모바일은 한 줄 4버튼 (← 왼쪽 · ↑ 뛰기 · ↓ 숙이기 · → 오른쪽), PC는 같은 순서의 하단 안내 */}
       {touch ? (
         <div className="shrink-0 px-3 pt-2 pb-[calc(8px+var(--safe-b))] bg-[linear-gradient(#f3d9d6,#fbe7e2)] border-t-2 border-white/70">
           <div className="mx-auto max-w-[460px] grid grid-cols-4 gap-2" data-testid="runner-controls">
-            <Btn a="L" label="왼쪽" icon="←" /><Btn a="R" label="오른쪽" icon="→" /><Btn a="J" label="뛰기" icon="↑" /><Btn a="D" label="숙이기" icon="↓" />
+            {btn('L', '왼쪽', '←')}{btn('J', '뛰기', '↑')}{btn('D', '숙이기', '↓')}{btn('R', '오른쪽', '→')}
           </div>
         </div>
       ) : !intro && !finale && (
-        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 name-tag !text-xs !px-3 !py-1.5 opacity-90 whitespace-nowrap">← → / A D 레인 이동 · ↑ / Space 뛰기 · ↓ / Ctrl 숙이기{game.multi ? ' · 함께 달리기는 멈출 수 없어요' : ' · Esc 일시정지'}</div>
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 name-tag !text-xs !px-3 !py-1.5 opacity-90 whitespace-nowrap">← / A 왼쪽 · ↑ / Space 뛰기 · ↓ / Ctrl 숙이기 · → / D 오른쪽{game.multi ? ' · 함께 달리기는 멈출 수 없어요' : ' · Esc 일시정지'}</div>
       )}
       {paused && (
         <div className="absolute inset-0 z-20 grid place-items-center bg-[#5a403344] p-4">

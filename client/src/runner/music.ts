@@ -101,7 +101,8 @@ export class MusicPlayer {
     this.src?.stop(); this.src?.disconnect();
     const s = this.ctx.createBufferSource();
     s.buffer = buf; s.connect(this.gain);
-    const when = this.ctx.currentTime + 0.1 + delaySec;
+    // 기다릴 시간이 있으면 그 시각에 정확히(함께 달리기: 서버 출발 시각), 바로 재생이면 오디오 준비 여유 0.1초
+    const when = this.ctx.currentTime + (delaySec > 0.1 ? delaySec : 0.1 + delaySec);
     s.start(when, fromSec);
     this.src = s;
     this.startAt = when - fromSec;
