@@ -24,6 +24,7 @@ import { DOORS } from './Places';
 import { startPhotoMode } from './Photo';
 import { openCommunity } from './Community';
 import { Modal } from './common';
+import { Icon } from './icons';
 import { logout } from './App';
 
 interface Act { key: string; icon: string; label: string; run: () => void }
@@ -603,19 +604,45 @@ export function openScreenSlide(s: ScreenSlide | 'empty') {
 }
 
 // ---------- 둘러보기 방문자 가입 안내 ----------
+/**
+ * 회원 전용 기능을 누른 둘러보기 방문자에게 보여 주는 가입 안내.
+ * 다른 패널(호실 안내판·바텀시트) 위에 떠도 또렷하게: 화면 전체를 덮는 어두운 배경 + 살짝 흐림, 가운데 카드 하나.
+ * joinPrompt가 문자열이면 첫 줄 = 제목, 둘째 줄 = 혜택 안내 (예: 아파트 입주 안내)
+ */
 export function JoinPrompt() {
   const open = useStore((s) => s.joinPrompt);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') set({ joinPrompt: false }); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
   if (!open) return null;
   const close = () => set({ joinPrompt: false });
+  const [title, sub] = typeof open === 'string' ? open.split('\n') : ['멍글마을 주민만 이용할 수 있어요', '회원가입하고 우리 강아지와 함께 시작해 보세요.'];
+  const apt = typeof open === 'string' && open.includes('아파트');
+  const coin = !!sub && /멍글코인/.test(sub);
   return (
-    <Modal onClose={close} className="max-w-[380px] p-6 text-center">
-      <div className="text-5xl">🐶</div>
-      <p className="font-display text-lg mt-2 leading-snug whitespace-pre-line" data-testid="join-prompt">{typeof open === 'string' ? open : <>이 기능은 멍글마을 주민만 이용할 수 있어요!<br />회원가입하고 우리 강아지와 함께 시작해 보세요.</>}</p>
-      <div className="grid gap-2 mt-5">
-        <button className="btn btn-coral py-3" onClick={() => { close(); void goSignup(); }}>회원가입하기</button>
-        <button className="btn btn-ghost py-3 border border-[#f1e2d2]" onClick={close}>계속 둘러보기</button>
+    <div className="fixed inset-0 z-[80] grid place-items-center px-5 bg-[#3b2c22]/45 backdrop-blur-[3px]"
+      style={{ paddingTop: 'calc(var(--safe-t, 0px) + 20px)', paddingBottom: 'calc(var(--safe-b, 0px) + 20px)' }}
+      onPointerDown={(e) => e.target === e.currentTarget && close()} role="dialog" aria-modal="true" aria-labelledby="join-prompt-title">
+      <div className="pop w-full max-w-[340px] rounded-[28px] bg-[#FFFCF8] border border-[#EAE3DC] shadow-[0_18px_48px_rgba(59,44,34,.28)] px-5 sm:px-6 pt-7 pb-5 text-center">
+        <div className="mx-auto w-16 h-16 rounded-full bg-[#FBE8E1] grid place-items-center text-[#E58D76]">
+          <Icon name={apt ? 'building' : 'paw'} size={30} strokeWidth={1.9} />
+        </div>
+        <h2 id="join-prompt-title" className="font-display text-[20px] leading-snug text-[#51473F] mt-4 break-keep" data-testid="join-prompt">{title}</h2>
+        {sub && (coin ? (
+          <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[#FFF4D6] px-3 py-2 text-[13.5px] max-[380px]:text-[12px] text-[#8A6414] whitespace-nowrap" data-testid="join-prompt-sub">
+            <span className="w-[18px] h-[18px] rounded-full shrink-0 bg-[radial-gradient(circle_at_35%_30%,#ffe9a8,#f2c14e_60%,#d99a1e)] border border-[#d99a1e]" aria-hidden />
+            <span>{sub.replace(/\.$/, '')}</span>
+          </div>
+        ) : <p className="mt-2 text-[14px] leading-relaxed text-[#8A8078] break-keep" data-testid="join-prompt-sub">{sub}</p>)}
+        <div className="grid gap-1.5 mt-6">
+          <button className="btn btn-coral h-12 text-[16px] rounded-full" onClick={() => { close(); void goSignup(); }}>회원가입하기</button>
+          <button className="h-11 rounded-full text-[15px] text-[#8A8078] hover:bg-[#F6F0EA] active:bg-[#F1E9E1] transition" onClick={close}>계속 둘러보기</button>
+        </div>
       </div>
-    </Modal>
+    </div>
   );
 }
 /** 둘러보기를 마치고 가입 화면으로 (가입 후 아바타 → 강아지 → 입주 순서) */
