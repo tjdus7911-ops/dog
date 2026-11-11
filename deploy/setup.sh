@@ -21,6 +21,8 @@ ADMINS="${4:-}"
 GH_REPO="${MUNGLE_GITHUB_REPO:-}"
 GH_TOKEN="${MUNGLE_GITHUB_TOKEN:-}"
 REPO="${MUNGLE_REPO:-https://github.com/tjdus7911-ops/dog.git}"
+# 설치·자동 업데이트에 쓸 브랜치 (이전 작업 중에는 oracle-move, 그 브랜치가 없어지면 자동으로 main)
+BRANCH="${MUNGLE_BRANCH:-main}"
 APP=/opt/mungle
 DATA=/var/lib/mungle
 ENVFILE=/etc/mungle.env
@@ -59,9 +61,9 @@ say "4/8 코드 내려받기·빌드"
 id mungle >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/mungle --shell /usr/sbin/nologin mungle
 mkdir -p "$DATA" && chown mungle:mungle "$DATA"
 # 코드 폴더는 mungle 사용자 소유 — git 도 그 사용자로 실행 (root 로 하면 소유자 불일치로 거부됨)
-if [ ! -d "$APP/.git" ]; then git clone "$REPO" "$APP"; fi
+if [ ! -d "$APP/.git" ]; then git clone -b "$BRANCH" "$REPO" "$APP"; fi
 chown -R mungle:mungle "$APP"
-sudo -u mungle -H git -C "$APP" pull --ff-only
+sudo -u mungle -H git -C "$APP" pull --ff-only origin "$BRANCH"
 sudo -u mungle -H bash -c "cd '$APP' && npm ci --include=dev --no-audit --no-fund && npm run build"
 
 say "5/8 서비스 등록"
@@ -89,6 +91,7 @@ else
 fi
 # 서버 밖 백업(선택): 값이 들어온 경우에만 기록. 이 서버는 디스크가 남으므로 '서버 DB가 없을 때만' 저장소에서 되살림
 setenv() { if grep -q "^$1=" "$ENVFILE"; then sed -i "s|^$1=.*|$1=$2|" "$ENVFILE"; else echo "$1=$2" >> "$ENVFILE"; fi; }
+setenv MUNGLE_BRANCH "$BRANCH"
 if [ -n "$GH_REPO" ] && [ -n "$GH_TOKEN" ]; then
   setenv MUNGLE_GITHUB_REPO "$GH_REPO"
   setenv MUNGLE_GITHUB_TOKEN "$GH_TOKEN"
@@ -146,6 +149,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+EnvironmentFile=$ENVFILE
 ExecStart=/bin/bash $APP/deploy/autoupdate.sh
 UNIT
 cat > /etc/systemd/system/mungle-update.timer <<UNIT

@@ -14,5 +14,8 @@ DOMAIN=""                    # 내 도메인이 있으면 예: "mungle.kr" (비�
 export MUNGLE_GITHUB_REPO=""   # 예: "tjdus7911-ops/mungle-data"
 export MUNGLE_GITHUB_TOKEN=""  # 그 저장소 하나만 쓸 수 있는 토큰 (github_pat_...)
 
-curl -fsSL https://raw.githubusercontent.com/tjdus7911-ops/dog/main/deploy/setup.sh -o /root/mungle-setup.sh
+# 설치할 브랜치 (이전 작업 중에는 oracle-move — 작업이 끝나면 자동으로 main 을 따라감)
+export MUNGLE_BRANCH="oracle-move"
+
+curl -fsSL "https://raw.githubusercontent.com/tjdus7911-ops/dog/$MUNGLE_BRANCH/deploy/setup.sh" -o /root/mungle-setup.sh
 bash /root/mungle-setup.sh "$DOMAIN" "$OPERATOR" "$CONTACT" "$ADMINS" > /var/log/mungle-setup.log 2>&1
