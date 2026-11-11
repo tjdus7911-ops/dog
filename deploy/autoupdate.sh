@@ -6,6 +6,25 @@ set -euo pipefail
 APP="${MUNGLE_APP:-/opt/mungle}"
 BRANCH="${MUNGLE_BRANCH:-main}"
 git_app() { sudo -u mungle -H git "$@"; }
+
+# 추가 주소(도메인): 저장소의 deploy/domains (한 줄에 하나) 를 Caddy 에 반영 — 5분마다 확인, 바뀐 경우에만 적용
+apply_domains() {
+  local list="$APP/deploy/domains" cf=/etc/caddy/Caddyfile base names tmp
+  [ -f "$list" ] || return 0
+  base="$(sed -n 's|^https://||p' /root/mungle-url.txt 2>/dev/null | head -1)"
+  names="$( { [ -n "$base" ] && echo "$base"; grep -Eo '^[a-z0-9.-]+\.[a-z]{2,}' "$list"; } | awk '!seen[$0]++' | paste -sd, - | sed 's/,/, /g')"
+  [ -n "$names" ] || return 0
+  tmp="$(mktemp)"
+  printf '%s {\n  encode gzip\n  reverse_proxy 127.0.0.1:3001\n}\n' "$names" > "$tmp"
+  if cmp -s "$tmp" "$cf"; then rm -f "$tmp"; return 0; fi
+  cp "$cf" "$cf.bak"
+  if caddy validate --adapter caddyfile --config "$tmp" >/dev/null 2>&1; then
+    install -m 644 "$tmp" "$cf"
+    if systemctl reload caddy; then echo "주소 반영: $names"; else cp "$cf.bak" "$cf"; systemctl reload caddy || true; echo "주소 반영 실패 — 이전 설정으로 되돌림"; fi
+  else echo "주소 설정 검사 실패 — 그대로 둠"; fi
+  rm -f "$tmp"
+}
+apply_domains || true
 LOCAL="$(git_app -C "$APP" rev-parse HEAD)"
 REMOTE="$(git_app -C "$APP" ls-remote --quiet origin "refs/heads/$BRANCH" | cut -f1 || true)"
 if [ -z "$REMOTE" ] && [ "$BRANCH" != main ]; then
