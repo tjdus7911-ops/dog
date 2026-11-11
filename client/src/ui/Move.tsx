@@ -13,6 +13,7 @@ import { FurnitureModel } from '../game/Furniture';
 import { joinPark } from '../net/socket';
 import { showCoinFx } from './Coins';
 import { DEMO } from '../demo';
+import { backdropClose } from './common';
 
 type Status = 'current' | 'available' | 'insufficient' | 'locked' | 'past' | 'full';
 interface PlanInfo { tier: HomeTier; building: string; name: string; type: string; rooms: number; price: number; features: string[]; capacity: number; free: number; status: Status; need: number }
@@ -81,7 +82,7 @@ export function MoveModal() {
   const prevName = (t: HomeTier) => (t > 1 ? PLANS[(t - 1) as HomeTier].name : '');
   const confirmPlan = data?.plans.find((p) => p.tier === confirmTier) ?? null;
   return (
-    <div className="fixed inset-0 z-50 bg-[#5a403355] grid place-items-center p-2 md:p-4" onPointerDown={(e) => e.target === e.currentTarget && close()} data-testid="move-modal">
+    <div className="fixed inset-0 z-50 bg-[#5a403355] grid place-items-center p-2 md:p-4" {...backdropClose(close)} data-testid="move-modal">
       <div className="panel pop w-full max-w-[1000px] max-h-[94vh] flex flex-col overflow-hidden">
         <div className="flex items-center gap-2 px-4 pt-4">
           <h2 className="font-display text-xl md:text-2xl flex-1 whitespace-nowrap">🚚 <span className="hidden sm:inline">멍글아파트 </span>이사하기</h2>
@@ -152,7 +153,7 @@ export function MoveModal() {
         )}
       </div>
       {confirmPlan && (
-        <div className="fixed inset-0 z-[55] grid place-items-center bg-[#5a403355] p-4" onPointerDown={(e) => e.target === e.currentTarget && !busy && setConfirmTier(null)}>
+        <div className="fixed inset-0 z-[55] grid place-items-center bg-[#5a403355] p-4" {...backdropClose(() => { if (!busy) setConfirmTier(null); })}>
           <div className="panel p-5 w-full max-w-[380px] text-center pop" role="dialog" aria-modal="true" data-testid="move-confirm">
             <div className="text-5xl">🚚</div>
             <p className="font-display text-lg mt-2 leading-snug">

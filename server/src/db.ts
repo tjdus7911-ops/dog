@@ -151,6 +151,9 @@ CREATE TABLE IF NOT EXISTS screen_items (
   created_at INTEGER NOT NULL
 );
 `);
+// 마이그레이션: 스크린 신청 처리 기록 (누가·언제 승인/반려/내림) — 기존 신청은 비어 있음(처리 기록 없음)
+try { db.exec('ALTER TABLE screen_items ADD COLUMN decided_at INTEGER'); } catch { /* 이미 있음 */ }
+try { db.exec('ALTER TABLE screen_items ADD COLUMN decided_by INTEGER'); } catch { /* 이미 있음 */ }
 // 마이그레이션: 약관 동의 시각 (기존 계정은 0 = 동의 기록 없음)
 try { db.exec('ALTER TABLE users ADD COLUMN agreed_at INTEGER NOT NULL DEFAULT 0'); } catch { /* 이미 있음 */ }
 
@@ -182,7 +185,11 @@ export function transaction<T>(fn: () => T): T {
 
 // ---------- users / sessions ----------
 export function createUser(username: string, passHash: string, salt: string, nickname: string, dogName: string) {
-  const role = (process.env.MUNGLE_ADMINS ?? '').split(',').map((s) => s.trim().toLowerCase()).includes(username.toLowerCase()) ? 'admin' : 'user';
+  // 가입할 때 아이디만 같다고 운영자가 되지 않음. (MUNGLE_ADMINS 는 자동 테스트용: MUNGLE_ADMINS_ON_SIGNUP=1 일 때만)
+  // 실제 운영자 지정은 deploy/admins.txt (admins.ts 참고)
+  const signupAdmin = process.env.MUNGLE_ADMINS_ON_SIGNUP === '1'
+    && (process.env.MUNGLE_ADMINS ?? '').split(',').map((s) => s.trim().toLowerCase()).includes(username.toLowerCase());
+  const role = signupAdmin ? 'admin' : 'user';
   const now = Date.now();
   const r = run('INSERT INTO users (username, pass_hash, salt, role, created_at, agreed_at) VALUES (?,?,?,?,?,?)', username, passHash, salt, role, now, now);
   const id = Number(r.lastInsertRowid);
@@ -289,7 +296,16 @@ export const listScreen = (status: string, limit: number) => all(`${SCREEN_SELEC
 export const listScreenByAuthor = (id: number) => all(`${SCREEN_SELECT} WHERE s.author_id = ? AND s.kind = 'dog' ORDER BY s.created_at DESC LIMIT 20`, id);
 export const countPendingScreen = (id: number) => Number(one(`SELECT COUNT(*) AS n FROM screen_items WHERE author_id = ? AND status = 'pending'`, id)?.n ?? 0);
 export const getScreen = (id: number) => one('SELECT * FROM screen_items WHERE id = ?', id);
-export const setScreenStatus = (id: number, status: string) => run('UPDATE screen_items SET status = ? WHERE id = ?', status, id);
+export const setScreenStatus = (id: number, status: string, by?: number) =>
+  by ? run('UPDATE screen_items SET status = ?, decided_at = ?, decided_by = ? WHERE id = ?', status, Date.now(), by, id)
+    : run('UPDATE screen_items SET status = ? WHERE id = ?', status, id);
+/** 운영 화면: 강아지 신청(공지 제외)을 상태별로 — 신청자 아이디·닉네임, 처리한 운영자 닉네임 포함 */
+export const listScreenAdmin = (statuses: string[], limit: number) => all(
+  `SELECT s.*, p.nickname, p.dog_name, u.username, dp.nickname AS decided_by_name FROM screen_items s
+   JOIN profiles p ON p.user_id = s.author_id JOIN users u ON u.id = s.author_id
+   LEFT JOIN profiles dp ON dp.user_id = s.decided_by
+   WHERE s.kind = 'dog' AND s.status IN (${statuses.map(() => '?').join(',')})
+   ORDER BY COALESCE(s.decided_at, s.created_at) DESC LIMIT ?`, ...statuses, limit);
 export const deleteScreen = (id: number) => run('DELETE FROM screen_items WHERE id = ?', id);
 export function addScreen(i: { kind: string; authorId: number; title: string; text: string; image: string | null; status: string; ownsImage: boolean }) {
   run('INSERT INTO screen_items (kind, author_id, title, text, image, owns_image, status, created_at) VALUES (?,?,?,?,?,?,?,?)',

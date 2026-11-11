@@ -28,6 +28,11 @@ html, body, #root {
 
 canvas { touch-action: none; }
 
+/* 한글 줄바꿈: 단어(띄어쓰기) 단위로 바꾸고, 띄어쓰기 없는 아주 긴 글자(링크·아이디)만 넘칠 때 잘라서 줄바꿈 */
+body { word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }
+/* 제목·버튼·짧은 안내는 여러 줄일 때 줄 길이를 고르게 (마지막 줄에 한 단어만 남지 않게) */
+h1, h2, h3, button, .text-balance { text-wrap: balance; }
+
 /* 모바일 하단 안전 영역(홈 바·브라우저 하단 UI) 여백 */
 :root { --safe-b: env(safe-area-inset-bottom, 0px); --safe-t: env(safe-area-inset-top, 0px); }
 .mobile-sheet { animation: sheet-up .22s ease-out; }

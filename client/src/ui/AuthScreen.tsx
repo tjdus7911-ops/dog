@@ -7,6 +7,7 @@ import type { MyProfile } from '@shared/protocol';
 import { LegalModal, type LegalDoc } from './Legal';
 import { LogoMark } from './Logo';
 import { InstallCard } from './Install';
+import { backdropClose } from './common';
 
 export function AuthScreen() {
   // 둘러보기 중 '회원가입하기'를 누르고 왔으면 가입 탭으로 시작
@@ -108,7 +109,7 @@ export function AuthScreen() {
         </div>
         {legal && <LegalModal doc={legal} onClose={() => setLegal(null)} />}
         {browse && (
-          <div className="fixed inset-0 z-40 grid place-items-center bg-[#5a403333] p-4" onPointerDown={(e) => e.target === e.currentTarget && setBrowse(false)}>
+          <div className="fixed inset-0 z-40 grid place-items-center bg-[#5a403333] p-4" {...backdropClose(() => setBrowse(false))}>
             <div className="panel pop w-full max-w-[400px] p-6 text-center" role="dialog" aria-label="둘러보기 안내">
               <h2 className="font-display text-2xl">🐾 멍글마을을 먼저 구경해 볼까요?</h2>
               <p className="mt-3 text-sm leading-relaxed">둘러보기 모드에서는 마을을 자유롭게 구경할 수 있지만, 아바타 생성과 아파트 입주는 할 수 없어요.</p>

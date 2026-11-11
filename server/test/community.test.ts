@@ -39,7 +39,7 @@ const got = (c: Client, ev: string, pred: (d: any) => boolean = () => true) => c
 async function main() {
   const proc = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
     cwd: path.resolve(import.meta.dirname, '..'),
-    env: { ...process.env, PORT: String(PORT), MUNGLE_DATA_DIR: dataDir, MUNGLE_ADMINS: 'admin_user', MUNGLE_BACKUP_HOURS: '0', MUNGLE_MEETUP_MIN_LEAD_MS: '0', MUNGLE_MEETUP_TICK_MS: '300' },
+    env: { ...process.env, PORT: String(PORT), MUNGLE_DATA_DIR: dataDir, MUNGLE_ADMINS_ON_SIGNUP: '1', MUNGLE_ADMINS: 'admin_user', MUNGLE_BACKUP_HOURS: '0', MUNGLE_MEETUP_MIN_LEAD_MS: '0', MUNGLE_MEETUP_TICK_MS: '300' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   proc.stderr.on('data', (d) => { const t = String(d); if (!t.includes('ExperimentalWarning') && !t.includes('--trace-warnings')) process.stderr.write(t); });

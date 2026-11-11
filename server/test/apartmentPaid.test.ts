@@ -28,7 +28,7 @@ async function startServer(env: Record<string, string> = {}) {
   proc = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
     cwd: path.resolve(import.meta.dirname, '..'),
     // MUNGLE_APARTMENT_FREE 를 주지 않음 → 기본값(유료)
-    env: { ...process.env, PORT: String(PORT), MUNGLE_DATA_DIR: dataDir, MUNGLE_BACKUP_HOURS: '0', MUNGLE_TEST_HOOKS: '1', MUNGLE_APARTMENT_FREE: '', MUNGLE_ADMINS: 'paidadmin', ...env },
+    env: { ...process.env, PORT: String(PORT), MUNGLE_DATA_DIR: dataDir, MUNGLE_BACKUP_HOURS: '0', MUNGLE_TEST_HOOKS: '1', MUNGLE_APARTMENT_FREE: '', MUNGLE_ADMINS_ON_SIGNUP: '1', MUNGLE_ADMINS: 'paidadmin', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   proc.stderr!.on('data', (d) => { const t = String(d); if (!/ExperimentalWarning|trace-warnings/.test(t)) process.stderr.write(t); });

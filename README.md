@@ -42,7 +42,7 @@ npm run test:ai      # AI 사진 분석기 테스트 (13개) — 가짜 API 응�
 |---|---|---|
 | `PORT` | `3001` | 서버 포트 |
 | `MUNGLE_PARK_CAPACITY` | `30` | 공원 1곳당 동시 접속 인원 제한 |
-| `MUNGLE_ADMINS` | (없음) | 운영자 권한을 줄 **로그인 아이디** 목록(쉼표 구분). 해당 아이디로 **가입할 때** 운영자 권한이 부여됩니다 |
+| `MUNGLE_ADMINS` | (없음) | 자동 테스트용: `MUNGLE_ADMINS_ON_SIGNUP=1`일 때만 이 아이디로 **가입할 때** 운영자가 됩니다. 실제 운영자 지정은 저장소의 `deploy/admins.txt`(이미 가입한 아이디를 적으면 서버가 1분 안에 반영, `-아이디`는 회수)로 합니다 |
 | `MUNGLE_DATA_DIR` | `server/data` | DB·업로드 사진 저장 위치 |
 | `ANTHROPIC_API_KEY` | (없음) | **AI 강아지 사진 분석** 키 (Claude API). 없으면 분석 기능이 '사용 불가'로 표시되고 수동 선택만 가능 |
 | `MUNGLE_AI_MODEL` | `claude-sonnet-5-5` | 사진 분석에 쓸 Claude 모델 |

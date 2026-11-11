@@ -14,6 +14,7 @@ import {
   CLUB_CATEGORIES, COMMENT_MAX_LEN, POST_MAX_LEN, SIDO, SIZE_RULES, TEMPER_RULES,
   type AuthorSummary, type ClubDetail, type ClubView, type CommentView, type MeetupDetail, type MeetupMessage, type MeetupView, type PostView,
 } from '@shared/community';
+import { backdropClose } from './common';
 
 const TABS: { id: CommunityTab; icon: string; label: string }[] = [
   { id: 'meetups', icon: '🐾', label: '산책 모임' },
@@ -67,7 +68,7 @@ export function Community() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
   return (
-    <div className="absolute inset-0 z-30 flex items-stretch md:items-center justify-center md:p-6 bg-[#5a403322]" onPointerDown={(e) => e.target === e.currentTarget && closeCommunity()}>
+    <div className="absolute inset-0 z-30 flex items-stretch md:items-center justify-center md:p-6 bg-[#5a403322]" {...backdropClose(closeCommunity)}>
       <section aria-label="멍글 동네" className="panel !rounded-none md:!rounded-[26px] w-full md:max-w-[760px] h-full md:h-[min(88vh,820px)] flex flex-col pop !bg-[#fffaf4]"
         style={{ paddingTop: 'var(--safe-t)', paddingBottom: 'var(--safe-b)' }}>
         <header className="flex items-center gap-2 px-4 pt-3 pb-2">
@@ -675,7 +676,7 @@ function ReportPost({ post, onClose }: { post: PostView; onClose: () => void }) 
   const [reason, setReason] = useState('');
   const [detail, setDetail] = useState('');
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-[#5a403333] p-4" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[#5a403333] p-4" {...backdropClose(onClose)}>
       <div className="panel pop w-full max-w-[360px] p-4">
         <h3 className="font-display text-xl mb-2">🚨 게시글 신고</h3>
         <p className="text-xs text-cocoa-soft mb-2">운영자가 확인 후 글을 숨기거나 이용을 제한해요. 작성자는 누가 신고했는지 알 수 없어요.</p>

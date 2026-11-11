@@ -1,9 +1,10 @@
 // 홈 화면에 추가 — 버튼과 기기별 안내 시트
-import { useEffect, type ReactNode } from 'react';
-import { canOfferInstall, closeInstallGuide, device, externalOpenUrl, inApp, IN_APP_NAME, startInstall, usePwa } from '../pwa';
+import { useEffect, useState, type ReactNode } from 'react';
+import { canOfferInstall, closeInstallGuide, device, externalOpenUrl, inApp, IN_APP_NAME, mobile, startInstall, usePwa } from '../pwa';
 import { toast } from '../store';
 import { LogoMark } from './Logo';
 import { Icon } from './icons';
+import { backdropClose } from './common';
 
 /** 설치 버튼을 누른 뒤 결과 알림 */
 export async function installFromButton() {
@@ -25,6 +26,34 @@ export function InstallCard() {
       </span>
       <span className="text-[#756B63]"><Icon name="download" size={20} /></span>
     </button>
+  );
+}
+
+// ---------------------------------------------------------------- 게임 화면 상단의 '홈 화면에 추가' 칩 (모바일)
+// 처음 온 사람도 찾기 쉽게 장소 선택 옆에 작게 띄움. 이미 홈 화면 앱으로 열었거나 설치했으면 안 보임.
+// ✕로 닫으면 14일 동안 숨김 (더보기 → 설정 → '홈 화면에 추가'는 언제든 그대로). 닫아도 게임에는 영향 없음.
+const HINT_KEY = 'mungle.installHint';
+const HINT_DAYS = 14;
+function hintHidden() {
+  try { const until = Number(localStorage.getItem(HINT_KEY) ?? 0); return until > Date.now(); } catch { return false; }
+}
+export function InstallChip() {
+  const pwa = usePwa();
+  const [hidden, setHidden] = useState(hintHidden);
+  if (hidden || !(mobile || inApp) || !canOfferInstall(pwa)) return null;
+  const dismiss = () => {
+    try { localStorage.setItem(HINT_KEY, String(Date.now() + HINT_DAYS * 86400_000)); } catch { /* 저장 불가: 이번 접속 동안만 숨김 */ }
+    setHidden(true);
+  };
+  return (
+    <div className="hud rounded-full h-9 flex items-center shrink-0 pointer-events-auto ml-2 pl-1 pr-0.5" data-testid="install-chip">
+      <button type="button" className="h-9 flex items-center gap-1 pl-1.5 pr-1 text-[13px] whitespace-nowrap" onClick={() => void installFromButton()} aria-label="홈 화면에 멍글마을 추가">
+        <Icon name="download" size={16} className="text-[#E58D76] shrink-0" />홈 화면에 추가
+      </button>
+      <button type="button" className="w-7 h-9 grid place-items-center text-[#8A8078]" onClick={dismiss} aria-label="홈 화면 추가 안내 닫기" data-testid="install-chip-close">
+        <Icon name="x" size={14} />
+      </button>
+    </div>
   );
 }
 
@@ -57,7 +86,7 @@ export function InstallGuideSheet() {
   const ext = guide === 'inapp' ? externalOpenUrl() : null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-[#51473F40]" onPointerDown={(e) => e.target === e.currentTarget && closeInstallGuide()}>
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-[#51473F40]" {...backdropClose(closeInstallGuide)}>
       <section role="dialog" aria-label="홈 화면에 추가하는 방법" data-testid="install-guide"
         className="w-full sm:max-w-[400px] bg-[#FFFCF8] text-[#51473F] rounded-t-[22px] sm:rounded-[22px] border border-[#EAE3DC] px-5 pt-4 max-h-[85dvh] overflow-y-auto overscroll-contain"
         style={{ paddingBottom: 'calc(var(--safe-b) + 18px)' }}>

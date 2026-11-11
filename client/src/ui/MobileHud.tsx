@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { drawBinsAndPoops } from './MiniMap';
 import { get, set, toast, useStore } from '../store';
 import { canOfferInstall, usePwa } from '../pwa';
-import { installFromButton } from './Install';
+import { InstallChip, installFromButton } from './Install';
 import { joinPark, warpTo } from '../net/socket';
 import { api } from '../lib/api';
 import { local } from '../game/local';
@@ -37,6 +37,7 @@ export function PlaceBar() {
   return (
     <div className="absolute z-20 left-3 right-3 flex items-center pointer-events-none" style={{ top: `calc(var(--safe-t) + ${PLACE_ROW_TOP}px)` }}>
       <PlacePicker />
+      <InstallChip />
     </div>
   );
 }

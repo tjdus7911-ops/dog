@@ -21,6 +21,7 @@ import { MusicPlayer, renderSong } from './music';
 import { countdownSec, GRADE_COLOR, GRADE_LABEL, RunnerPlay, type PlayGame } from './RunnerPlay';
 import { MultiResultScreen, MultiScreen } from './MultiLobby';
 import { clearResults, joinRoom, leaveRoom, serverNow, useMulti, type StartSignal } from './multi';
+import { warpTo } from '../net/socket';
 
 interface Bests { course: string; score: number; accuracy: number; maxCombo: number; points: number; rank: number; achievedAt: number }
 interface RankEntry { rank: number; userId: number; nickname: string; dogName: string; dogPhoto: string | null; coat: string; score: number; accuracy: number; maxCombo: number; points: number; course: string | null; achievedAt: number }
@@ -230,7 +231,15 @@ export default function RunnerApp() {
       {screen === 'play' && game && (
         <RunnerPlay game={game} avatar={avatar} human={human} best={myBest?.score ?? null} onEnd={finish}
           onQuit={() => { game.player.close(); setGame(null); if (game.multi) { void leaveRoom(); } setScreen('lobby'); }}
-          onRetry={() => { game.player.close(); setGame(null); void start(); }} />
+          onRetry={() => { game.player.close(); setGame(null); void start(); }}
+          onPlaza={() => {
+            // 광장으로: 음악·타이머를 끝내고(기록 저장 없음) 멍글런너를 닫은 뒤 중앙 광장 분수 앞으로.
+            // 함께 달리기였다면 방만 나감 → 서버가 '나간 사람'으로 표시하고 다른 사람의 경기는 그대로 계속
+            game.player.close(); setGame(null);
+            if (game.multi) void leaveRoom();
+            set({ runner: false });
+            void warpTo('plaza');
+          }} />
       )}
       {screen === 'lobby' && (
         <div className="h-full flex flex-col pt-[calc(8px+var(--safe-t,0px))] pb-[calc(8px+var(--safe-b))] bg-[radial-gradient(circle_at_15%_0%,#fde4ea,transparent_55%),radial-gradient(circle_at_90%_95%,#e3efdc,transparent_45%)]" data-testid="runner-lobby">

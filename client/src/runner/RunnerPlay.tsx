@@ -466,7 +466,12 @@ function poseAt(now: number, live: RunResult | null) {
     if (e < JUMP_MS) { jy = jumpHeight(e); air = Math.sin((e / JUMP_MS) * Math.PI); }
     else crouch = 1 - (e - JUMP_MS) / 120;
   }
-  const slide = dk !== undefined ? duckAmount(now - dk) : 0;
+  // 숙이기: 방금 숙이기와 그 전 숙이기 중 더 깊은 쪽 (연속으로 숙일 때 일어서던 자세에서 끊기지 않게)
+  let slide = 0;
+  if (dk !== undefined && live) {
+    let seen = 0;
+    for (let i = live.ducks.length - 1; i >= 0 && seen < 2; i--) if (live.ducks[i] <= now) { slide = Math.max(slide, duckAmount(now - live.ducks[i])); seen++; }
+  }
   return { lane, laneT, jy, crouch, air, slide, j };
 }
 const laneAt = (live: RunResult, t: number) => { let l: Lane = 0; for (const x of live.lanes) { if (x.t <= t) l = x.lane; else break; } return l; };
@@ -703,7 +708,7 @@ function RaceDog({ game, r, avatar, label, color }: { game: PlayGame; r: Racer; 
     const drv = d.current;
     drv.crouch += (crouch - drv.crouch) * Math.min(1, dt * 30);
     drv.air += (air - drv.air) * Math.min(1, dt * 20);
-    drv.slide += (slide - drv.slide) * Math.min(1, dt * 25);
+    drv.slide = slide; // 숙이기 곡선 자체가 부드러워서 따로 늦추지 않음 → 누르는 즉시 숙이기 시작, 약 0.07초에 완전히 엎드림
     // 삐끗 (블렌딩된 세기) · 귀 처짐 (실수가 이어지면 살짝 처진 채) · 추월 꼬리 흔들기
     const tr = tripLevel(r, v);
     drv.trip = tr.k; drv.tripKind = tr.kind; drv.tripSide = tr.side; drv.tripT = tr.t;
@@ -868,8 +873,8 @@ function Judge({ game, onEnd }: { game: PlayGame; onEnd: () => void }) {
 }
 
 // ---------------------------------------------------------------- 화면 + 조작
-export function RunnerPlay({ game, avatar, human, best, onEnd, onQuit, onRetry }: {
-  game: PlayGame; avatar: DogAvatar; human: HumanAvatar | null; best: number | null; onEnd: () => void; onQuit: () => void; onRetry: () => void;
+export function RunnerPlay({ game, avatar, human, best, onEnd, onQuit, onRetry, onPlaza }: {
+  game: PlayGame; avatar: DogAvatar; human: HumanAvatar | null; best: number | null; onEnd: () => void; onQuit: () => void; onRetry: () => void; onPlaza: () => void;
 }) {
   const [, force] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -1057,6 +1062,7 @@ export function RunnerPlay({ game, avatar, human, best, onEnd, onQuit, onRetry }
               <button className="btn btn-coral py-3" onClick={() => void togglePause()}>계속하기</button>
               <button className="btn btn-ghost py-3 border border-[#f1e2d2]" onClick={onRetry}>처음부터 다시</button>
               <button className="btn btn-ghost py-3 border border-[#f1e2d2]" onClick={onQuit}>곡 선택으로</button>
+              <button className="btn btn-ghost py-3 border border-[#f1e2d2]" onClick={onPlaza} data-testid="pause-plaza">광장으로</button>
             </div>
           </div>
         </div>

@@ -37,6 +37,8 @@ export const newDogDriver = (): DogDriver => ({ anim: DogAnim.Stand, phase: 0, l
 export const DOG_SCALE = { small: 0.82, medium: 1, large: 1.2 } as const;
 /** 한 걸음(반 주기)당 이동 거리 (scale 1 기준) */
 export const DOG_STEP = { walk: 0.19, run: 0.42 };
+/** 멍글런너 숙이기: 몸통을 내리는 높이 (다리 길이 보정값과 별개로 — 배가 거의 바닥에 닿을 만큼) */
+const DUCK_DROP = 0.105;
 
 /** harness: 산책용 목줄 세트 착용 (집 안에서는 false — 모델을 새로 만들지 않고 그 부분만 숨김) */
 export function Dog({ avatar, driver, anchorRef, earBones, harness = true }: { avatar: DogAvatar; driver: MutableRefObject<DogDriver>; anchorRef?: MutableRefObject<THREE.Object3D | null>; earBones?: boolean; harness?: boolean }) {
@@ -130,7 +132,10 @@ export function Dog({ avatar, driver, anchorRef, earBones, harness = true }: { a
       rig.tail.rotation.y = THREE.MathUtils.lerp(rig.tail.rotation.y, 1.1, s.sleep);
       rig.tail.rotation.x = THREE.MathUtils.lerp(rig.tail.rotation.x, -0.5, s.sleep);
     } else { rig.body.rotation.z = 0; rig.body.rotation.y = 0; }
-    // 멍글런너: 도약 준비·착지(몸 낮춤) → 공중(앞다리 접고 뒷다리 뻗기) / 숙여 미끄러지기(앞다리 앞으로, 뒷다리 뒤로)
+    // 멍글런너: 도약 준비·착지(몸 낮춤) → 공중(앞다리 접고 뒷다리 뻗기) / 숙이기(바닥에 납작 엎드리기) / 삐끗(헛디뎌 휘청)
+    const head0 = (rig.head.userData.p0 ??= rig.head.position.clone()) as THREE.Vector3;
+    rig.head.position.copy(head0);
+    fl.rotation.z = 0; fr.rotation.z = 0; // 뒷다리 z는 배변 자세에서 정함
     if (d.crouch > 0.001) {
       rig.body.position.y -= d.crouch * 0.035;
       bl.rotation.x = THREE.MathUtils.lerp(bl.rotation.x, -0.45, d.crouch);
@@ -145,54 +150,79 @@ export function Dog({ avatar, driver, anchorRef, earBones, harness = true }: { a
       br.rotation.x = THREE.MathUtils.lerp(br.rotation.x, 0.6, d.air);
     }
     if (d.slide > 0.001) {
-      rig.body.position.y -= d.slide * Math.min(0.09, rig.baseY * 0.55);
-      fl.rotation.x = THREE.MathUtils.lerp(fl.rotation.x, -1.15, d.slide);
-      fr.rotation.x = THREE.MathUtils.lerp(fr.rotation.x, -1.15, d.slide);
-      bl.rotation.x = THREE.MathUtils.lerp(bl.rotation.x, 1.05, d.slide);
-      br.rotation.x = THREE.MathUtils.lerp(br.rotation.x, 1.05, d.slide);
-      rig.head.rotation.x += d.slide * 0.12;
-      rig.tail.rotation.x = THREE.MathUtils.lerp(rig.tail.rotation.x, -0.3, d.slide);
+      // 숙이기: 낮은 장애물 밑을 지나가려고 바닥에 납작 엎드린 자세 (모델을 통째로 내리거나 찌그러뜨리지 않고 관절로)
+      // (예전에는 몸 낮춤이 '다리 길이 보정값'에 비례해서, 짧은 다리 강아지는 몸이 전혀 내려가지 않았음)
+      const k = d.slide;
+      // 달리기 반동·몸 흔들림은 숙인 만큼 지움 → 숙인 채 들썩이지 않음
+      rig.body.position.y -= (bob + hop) * k;
+      rig.body.rotation.x -= runPitch * k;
+      // 몸통(가슴·배·엉덩이)을 함께 바닥 가까이: 배가 거의 닿게, 앞쪽이 아주 조금 더 낮게
+      rig.body.position.y -= k * (DUCK_DROP + rig.baseY);
+      rig.body.rotation.x += k * 0.05;
+      // 앞다리: 앞으로 쭉 뻗어 바닥을 짚음 · 뒷다리: 뒤로 쭉 뻗음 · 네 다리를 양옆으로 벌려 뒤에서 봐도 납작하게
+      fl.rotation.x = THREE.MathUtils.lerp(fl.rotation.x, -1.45, k);
+      fr.rotation.x = THREE.MathUtils.lerp(fr.rotation.x, -1.45, k);
+      bl.rotation.x = THREE.MathUtils.lerp(bl.rotation.x, 1.4, k);
+      br.rotation.x = THREE.MathUtils.lerp(br.rotation.x, 1.4, k);
+      fl.rotation.z = 0.2 * k; fr.rotation.z = -0.2 * k;
+      bl.rotation.z = THREE.MathUtils.lerp(bl.rotation.z, 0.32, k); br.rotation.z = THREE.MathUtils.lerp(br.rotation.z, -0.32, k);
+      // 머리: 목을 앞으로 빼며 바닥 가까이 확 낮추고 턱을 당김 (좌우로 두리번거리지 않음)
+      rig.head.position.y -= 0.13 * k;
+      rig.head.position.z += 0.07 * k;
+      rig.head.rotation.x = THREE.MathUtils.lerp(rig.head.rotation.x, 0.2, k);
+      rig.head.rotation.y *= 1 - k; rig.head.rotation.z *= 1 - k;
+      // 꼬리: 흔들지 않고 뒤로 낮게 눕힘
+      rig.tail.rotation.y *= 1 - k;
+      rig.tail.rotation.x = THREE.MathUtils.lerp(rig.tail.rotation.x, -0.55, k);
     }
-    // 멍글런너 삐끗: 짧게(0.3~0.6초) 휘청였다가 다시 달리기 자세로 (관절을 과하게 꺾지 않음)
-    fl.rotation.z = 0; fr.rotation.z = 0;
-    if (d.trip > 0.001) {
-      const k = d.trip, e = d.tripT / 1000;
-      const settle = Math.max(0, 1 - e / 0.5);
-      const wob = Math.sin(e * 26) * settle; // 빠르게 잦아드는 흔들림
-      if (d.tripKind === 0) {
-        // 뛰기 실패: 앞발이 걸려 몸이 앞으로 쏠리고, 앞발이 엇갈리며 헛디딤 (놀라서 고개는 살짝 듦)
-        rig.body.rotation.x += 0.26 * k;
-        rig.body.position.y -= 0.025 * k;
-        fl.rotation.x = THREE.MathUtils.lerp(fl.rotation.x, 0.5 + wob * 0.35, k);
-        fr.rotation.x = THREE.MathUtils.lerp(fr.rotation.x, 0.15 - wob * 0.35, k);
-        bl.rotation.x = THREE.MathUtils.lerp(bl.rotation.x, -0.3, k * 0.7);
-        br.rotation.x = THREE.MathUtils.lerp(br.rotation.x, -0.15, k * 0.7);
-        rig.head.rotation.x -= 0.14 * k;
-      } else if (d.tripKind === 1) {
-        // 숙이기 실패: 고개를 움츠리고 몸이 살짝 낮아졌다 흔들리고, 고개를 작게 도리도리
-        rig.head.rotation.x += 0.32 * k;
-        rig.head.rotation.y += Math.sin(e * 30) * 0.26 * k * Math.min(1, e / 0.12) * settle;
-        rig.body.position.y -= 0.04 * k;
-        rig.body.rotation.z += wob * 0.1 * k;
-        fl.rotation.x = THREE.MathUtils.lerp(fl.rotation.x, 0.1, k * 0.6);
-        fr.rotation.x = THREE.MathUtils.lerp(fr.rotation.x, 0.1, k * 0.6);
-      } else {
-        // 옆 충돌: 몸이 옆으로 기우뚱, 다리가 엇박자로 버팀
-        rig.body.rotation.z += d.tripSide * 0.22 * k + wob * 0.05 * k;
-        rig.body.position.y -= 0.015 * k;
-        fl.rotation.z = d.tripSide * 0.22 * k; fr.rotation.z = d.tripSide * 0.22 * k;
-        fl.rotation.x = THREE.MathUtils.lerp(fl.rotation.x, wob * 0.4, k * 0.8);
-        fr.rotation.x = THREE.MathUtils.lerp(fr.rotation.x, -wob * 0.4, k * 0.8);
-        rig.head.rotation.z -= d.tripSide * 0.12 * k;
+    // 멍글런너 삐끗: 앞발을 헛디뎌 몸이 앞으로 푹 쏠리고 좌우로 휘청 → 귀·꼬리가 흔들림 → 곧바로 달리기로 복귀
+    // (달리기의 일정한 리듬, 숙이기의 납작한 자세와 한눈에 구별되게)
+    const tk = d.trip > 0.001 ? d.trip : 0;
+    const te = d.tripT / 1000;
+    const settle = Math.max(0, 1 - te / 0.45);
+    const wob = Math.sin(te * 24) * settle; // 빠르게 잦아드는 휘청임
+    if (tk > 0) {
+      const lurch = Math.sin(Math.min(1, te / 0.16) * (Math.PI / 2)); // 처음 0.16초에 앞으로 쏠림
+      rig.body.rotation.x += 0.42 * lurch * tk;
+      rig.body.position.z += 0.06 * lurch * tk;
+      rig.body.position.y -= 0.04 * tk;
+      rig.body.rotation.z += wob * 0.3 * tk;
+      // 앞발 헛디딤: 한 발은 앞으로 허우적, 다른 발은 꺾여 접힘 (번갈아 엇갈림)
+      fl.rotation.x = THREE.MathUtils.lerp(fl.rotation.x, -0.95 + wob * 0.55, tk);
+      fr.rotation.x = THREE.MathUtils.lerp(fr.rotation.x, 0.8 - wob * 0.55, tk);
+      fl.rotation.z += 0.14 * wob * tk; fr.rotation.z += 0.14 * wob * tk;
+      // 뒷다리는 버팀
+      bl.rotation.x = THREE.MathUtils.lerp(bl.rotation.x, -0.35, tk * 0.8);
+      br.rotation.x = THREE.MathUtils.lerp(br.rotation.x, -0.15, tk * 0.8);
+      // 머리: 놀라서 들렸다가 흔들림
+      rig.head.rotation.x -= 0.3 * tk;
+      rig.head.rotation.z += wob * 0.22 * tk;
+      if (d.tripKind === 1) {
+        // 숙이기 실패(막대에 머리를 부딪힘): 고개가 뒤로 젖혀지고 몸이 한 번 더 움츠러듦
+        rig.head.rotation.x -= 0.2 * tk;
+        rig.head.rotation.y += Math.sin(te * 30) * 0.22 * tk * settle;
+        rig.body.position.y -= 0.025 * tk;
+      } else if (d.tripKind === 2) {
+        // 옆 충돌: 부딪힌 반대쪽으로 크게 기우뚱, 다리가 엇박자로 버팀
+        rig.body.rotation.z += d.tripSide * 0.26 * tk;
+        for (const leg of rig.legs) leg.rotation.z += d.tripSide * 0.2 * tk;
+        rig.head.rotation.z -= d.tripSide * 0.14 * tk;
       }
-      rig.tail.rotation.x = THREE.MathUtils.lerp(rig.tail.rotation.x, -0.25, k);
+      // 꼬리: 놀라서 빠르게 파닥
+      rig.tail.rotation.y += Math.sin(te * 32) * 0.7 * tk * settle;
+      rig.tail.rotation.x = THREE.MathUtils.lerp(rig.tail.rotation.x, -0.1, tk);
     }
-    // 귀: 달릴 때 살짝 들썩이고, 실수하면 뒤로 살짝 처짐 (귀 관절이 있을 때만)
+    // 귀: 달릴 때 살짝 들썩 · 실수하면 처짐 · 숙이면 뒤로 착 젖혀짐 · 삐끗하면 파닥 (귀 관절이 있을 때만)
     for (let i = 0; i < rig.ears.length; i++) {
       const ear = rig.ears[i], base = ear.userData.baseRot as [number, number, number];
       const side = ear.name === 'earL' ? 1 : -1;
-      const flap = Math.sin(p * 2 + 0.8) * 0.07 * s.run;
-      ear.rotation.set(base[0] - 0.45 * d.earDown + flap, base[1], base[2] - side * 0.4 * d.earDown);
+      const flap = Math.sin(p * 2 + 0.8) * 0.07 * s.run * (1 - d.slide);
+      const tripFlap = tk > 0 ? Math.sin(te * 38 + side) * 0.45 * tk * settle : 0;
+      ear.rotation.set(
+        base[0] - 0.45 * d.earDown + flap - 1.0 * d.slide + tripFlap,
+        base[1],
+        base[2] - side * (0.4 * d.earDown + 0.3 * d.slide) + tripFlap * 0.5 * side,
+      );
     }
     // 눈 감기: 쓰다듬기를 받을 때(기분 좋게) · 잠잘 때
     rig.lids.visible = s.happy > 0.5 || d.anim === DogAnim.Sleep;

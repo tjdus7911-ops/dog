@@ -1,13 +1,16 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, type ReactNode, type PointerEvent as RPointerEvent, type MouseEvent as RMouseEvent } from 'react';
 import type { PublicProfile } from '@shared/protocol';
 import { useStore } from '../store';
 
 export function Toasts() {
   const toasts = useStore((s) => s.toasts);
   return (
-    <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] flex flex-col items-center gap-2 pointer-events-none px-4">
+    // 화면 전체 폭을 기준으로 가운데 정렬 (예전에는 left:50% 기준이라 화면 절반 폭 안에서만 늘어나 짧은 문장도 두 줄이 됐음)
+    // 글자 길이에 맞춰 폭이 늘고 줄며, 화면(좌우 16px 여백)을 넘지 않음 · 한글은 단어 단위로 줄바꿈 · 여러 줄이면 줄 길이를 고르게
+    <div className="fixed inset-x-0 z-[60] flex flex-col items-center gap-2 pointer-events-none px-4" style={{ top: 'calc(var(--safe-t, 0px) + 80px)' }} role="status" aria-live="polite">
       {toasts.map((t) => (
-        <div key={t.id} className={`pop panel !rounded-full px-4 py-2 text-sm font-display ${t.tone === 'error' ? '!bg-[#fff0ec] text-[#c4553a]' : ''}`}>
+        <div key={t.id} data-testid="toast"
+          className={`pop panel !rounded-[20px] w-fit max-w-[min(560px,100%)] px-4 py-2 text-sm leading-snug text-center font-display break-keep [overflow-wrap:break-word] [text-wrap:balance] ${t.tone === 'error' ? '!bg-[#fff0ec] text-[#c4553a]' : ''}`}>
           {t.text}
         </div>
       ))}
@@ -24,6 +27,21 @@ export function DogBadge({ profile, size = 40 }: { profile: PublicProfile; size?
   );
 }
 
+/**
+ * 어두운 바깥을 눌러 닫기: 누른 곳과 뗀 곳이 모두 바깥일 때만 닫는다.
+ * 누르는 순간(pointerdown) 닫으면 같은 터치의 클릭이 아래 3D 화면(광장 스크린 등)에 떨어져 엉뚱한 창이 열리기 때문.
+ */
+export function backdropClose(close: () => void) {
+  return {
+    onPointerDown: (e: RPointerEvent<HTMLElement>) => { e.currentTarget.dataset.downOut = e.target === e.currentTarget ? '1' : ''; },
+    onClick: (e: RMouseEvent<HTMLElement>) => {
+      const out = e.currentTarget.dataset.downOut === '1' && e.target === e.currentTarget;
+      e.currentTarget.dataset.downOut = '';
+      if (out) close();
+    },
+  };
+}
+
 export function Modal({ children, onClose, className = '' }: { children: ReactNode; onClose: () => void; className?: string }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -31,7 +49,8 @@ export function Modal({ children, onClose, className = '' }: { children: ReactNo
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-40 grid place-items-center bg-[#5a403333] p-4" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-40 grid place-items-center bg-[#5a403333] p-4"
+      {...backdropClose(onClose)}>
       <div className={`panel pop w-full max-h-[90vh] overflow-y-auto scroll-soft ${className}`}>{children}</div>
     </div>
   );

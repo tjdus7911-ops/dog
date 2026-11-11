@@ -65,7 +65,9 @@ Render 대시보드 → 서비스 → **Environment** 에서
 | 서버 상태 / 로그 | `sudo systemctl status mungle` / `sudo journalctl -u mungle -n 100` |
 | 다시 시작 | `sudo systemctl restart mungle` |
 | 설치 기록 (처음 설치 문제 확인) | `sudo tail -n 80 /var/log/mungle-setup.log` |
-| 설정 바꾸기 (운영자 아이디, 정원, AI 키 등) | `sudo nano /etc/mungle.env` 후 다시 시작 |
+| 운영자 지정·회수 | GitHub에서 `deploy/admins.txt`에 **이미 가입한** 아이디 적기 (`-아이디`는 회수) → 5~10분 안에 반영 |
+| 운영자 확인 (서버 접속 시) | `sudo -u mungle bash -c 'set -a; . /etc/mungle.env; cd /opt/mungle/server && npm run admin -- list'` |
+| 설정 바꾸기 (정원, AI 키 등) | `sudo nano /etc/mungle.env` 후 다시 시작 |
 | 내 주소 확인 | `sudo cat /root/mungle-url.txt` |
 
 SSH 프로그램이 없으면 오라클 콘솔 오른쪽 위 **Cloud Shell** 에서 같은 명령으로 접속할 수 있습니다.

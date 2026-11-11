@@ -326,7 +326,7 @@ function enterSpace(park: ParkInfo, spawn: NetState) {
   const moved = get().park?.id !== park.id;
   local.action = null; local.poopStart = 0; local.petHold = null;
   resetFurniture();
-  set({ park, activeMenu: null, players: {}, poops: {}, dogMenu: null, furnMenu: null, chat: [], chatUnread: 0, bubbles: {}, seats: {}, seated: null, benchMenu: null, home: null, homeEdit: false, lobbyPanel: park.kind === 'lobby', shopOpen: false, ...(moved ? { community: null } : {}) });
+  set({ park, activeMenu: null, players: {}, poops: {}, dogMenu: null, furnMenu: null, chat: [], chatUnread: 0, bubbles: {}, seats: {}, seated: null, benchMenu: null, home: null, homeEdit: false, lobbyPanel: park.kind === 'lobby', shopOpen: false, ...(moved ? { community: null, screenDetail: null } : {}) });
   if (park.kind === 'home' && park.ownerId) void loadHome(park.ownerId);
 }
 

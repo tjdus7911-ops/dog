@@ -12,6 +12,7 @@ import { PALETTE, geo, mat } from './lowpoly';
 import { lathe, smoothProfile } from './models/sculpt';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { set } from '../store';
+import { joinPark } from '../net/socket';
 
 interface Inst { p: [number, number, number]; r?: [number, number, number]; s?: [number, number, number] | number; c: string }
 
@@ -431,6 +432,9 @@ function Building({ b }: { b: BuildingDef }) {
   return <SmallBuilding b={b} />;
 }
 
+/** 아파트 선택: 로비로 들어가면 호실 안내판(호실 선택·입주)이 열림. 로비에 들어가지 못하면 안내만 (스크린 등 다른 창은 열지 않음) */
+function openApartment() { void joinPark('lobby-1'); }
+
 /** 멍글 아파트 1동 — 둥근 모서리의 4층 파스텔 건물, 층마다 4호실 창문·발코니, 1층 로비 입구 */
 function Apartment({ b }: { b: BuildingDef }) {
   const FLOORS = 4, FH = 1.55, BASE = 0.3;
@@ -440,7 +444,10 @@ function Apartment({ b }: { b: BuildingDef }) {
   const W = b.w, D = b.d;
   const cols = [-3.6, -1.2, 1.2, 3.6];
   return (
-    <group position={[b.x, 0, b.z]} rotation={[0, b.rot, 0]}>
+    <group position={[b.x, 0, b.z]} rotation={[0, b.rot, 0]}
+      // 아파트 건물(보이는 부분)을 누르면 로비로 → 호실 안내판(호실 선택·입주)이 바로 열림
+      onClick={(e) => { if (e.delta > 8) return; e.stopPropagation(); openApartment(); }}
+      onPointerOver={(e) => { e.stopPropagation(); document.body.style.cursor = 'pointer'; }} onPointerOut={() => { document.body.style.cursor = ''; }}>
       {/* 기단 */}
       <mesh geometry={geo.box(W + 0.4, BASE, D + 0.4)} material={mat(PALETTE.stoneDark)} position={[0, BASE / 2, 0]} />
       {/* 본체 + 둥근 모서리 기둥 */}
@@ -511,7 +518,11 @@ function Apartment({ b }: { b: BuildingDef }) {
         ))}
       </group>
       <Html position={[0, BASE + 2.75, D / 2 + 0.6]} center distanceFactor={22} zIndexRange={[5, 0]}>
-        <div className="name-tag" style={{ fontSize: 13 }}>🏢 멍글 아파트 1동 · 로비 입구</div>
+        {/* 광장에서 보면 이 이름표가 광장 스크린 위에 겹쳐 보임 → 이름표를 누르면 아파트 로비(호실 안내판)로 가고,
+            그 터치가 뒤의 스크린(사진 신청 안내)으로 새지 않게 막는다 */}
+        <button type="button" className="name-tag" style={{ fontSize: 13, pointerEvents: 'auto', cursor: 'pointer' }} data-testid="apartment-tag"
+          onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); openApartment(); }}>🏢 멍글 아파트 1동 · 로비 입구</button>
       </Html>
     </group>
   );

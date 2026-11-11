@@ -6,6 +6,7 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/main.ts",
     "typecheck": "tsc --noEmit",
+    "admin": "tsx scripts/admin.ts",
     "test:multi": "tsx test/multiplayer.test.ts",
     "test:ai": "tsx test/dogAnalyzer.test.ts",
     "test:persist": "tsx test/persist.test.ts",
@@ -17,7 +18,8 @@
     "test:channels": "tsx test/channels.test.ts",
     "test:apartment-free": "tsx test/apartmentFree.test.ts",
     "test:runner-charts": "tsx test/runnerCharts.test.ts",
-    "test:apartment-paid": "tsx test/apartmentPaid.test.ts"
+    "test:apartment-paid": "tsx test/apartmentPaid.test.ts",
+    "test:admin": "tsx test/admin.test.ts"
   },
   "dependencies": {
     "express": "^4.21.0",

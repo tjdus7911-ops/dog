@@ -23,7 +23,7 @@ import { ABOVE_CTRL } from './layout';
 import { DOORS } from './Places';
 import { startPhotoMode } from './Photo';
 import { openCommunity } from './Community';
-import { Modal } from './common';
+import { Modal, backdropClose } from './common';
 import { Icon } from './icons';
 import { logout } from './App';
 
@@ -544,7 +544,7 @@ export function PhotoViewer() {
   const go = (d: number) => setI((x) => Math.max(0, Math.min(n - 1, x + d)));
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1e1712e6] md:bg-[#2b211bcc] md:p-8" data-testid="photo-viewer"
-      onPointerDown={(e) => e.target === e.currentTarget && closeViewer()} role="dialog" aria-label="사진 크게 보기">
+      {...backdropClose(closeViewer)} role="dialog" aria-label="사진 크게 보기">
       <div className="relative w-full h-full md:h-auto md:max-w-[880px] md:rounded-[22px] md:overflow-hidden md:bg-[#2b211b] flex flex-col">
         <div className="flex items-center gap-2 px-3 pt-[calc(10px+var(--safe-t,0px))] pb-2 text-white">
           <div className="flex-1 min-w-0">
@@ -625,7 +625,7 @@ export function JoinPrompt() {
   return (
     <div className="fixed inset-0 z-[80] grid place-items-center px-5 bg-[#3b2c22]/45 backdrop-blur-[3px]"
       style={{ paddingTop: 'calc(var(--safe-t, 0px) + 20px)', paddingBottom: 'calc(var(--safe-b, 0px) + 20px)' }}
-      onPointerDown={(e) => e.target === e.currentTarget && close()} role="dialog" aria-modal="true" aria-labelledby="join-prompt-title">
+      {...backdropClose(close)} role="dialog" aria-modal="true" aria-labelledby="join-prompt-title">
       <div className="pop w-full max-w-[340px] rounded-[28px] bg-[#FFFCF8] border border-[#EAE3DC] shadow-[0_18px_48px_rgba(59,44,34,.28)] px-5 sm:px-6 pt-7 pb-5 text-center">
         <div className="mx-auto w-16 h-16 rounded-full bg-[#FBE8E1] grid place-items-center text-[#E58D76]">
           <Icon name={apt ? 'building' : 'paw'} size={30} strokeWidth={1.9} />

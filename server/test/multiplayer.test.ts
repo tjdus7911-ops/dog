@@ -48,7 +48,7 @@ const clear = (...cs: Client[]) => cs.forEach((c) => (c.events.length = 0));
 async function main() {
   const proc = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
     cwd: path.resolve(import.meta.dirname, '..'),
-    env: { ...process.env, PORT: String(PORT), MUNGLE_DATA_DIR: dataDir, MUNGLE_PARK_CAPACITY: '3', MUNGLE_ADMINS: 'admin_user', MUNGLE_BACKUP_HOURS: '0', MUNGLE_OPERATOR: '멍글마을 운영팀', MUNGLE_CONTACT: 'help@example.com' },
+    env: { ...process.env, PORT: String(PORT), MUNGLE_DATA_DIR: dataDir, MUNGLE_PARK_CAPACITY: '3', MUNGLE_ADMINS_ON_SIGNUP: '1', MUNGLE_ADMINS: 'admin_user', MUNGLE_BACKUP_HOURS: '0', MUNGLE_OPERATOR: '멍글마을 운영팀', MUNGLE_CONTACT: 'help@example.com' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   proc.stderr.on('data', (d) => { const t = String(d); if (!t.includes('ExperimentalWarning') && !t.includes('--trace-warnings')) process.stderr.write(t); });

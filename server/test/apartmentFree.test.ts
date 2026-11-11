@@ -25,7 +25,7 @@ async function main() {
   const proc = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
     cwd: path.resolve(import.meta.dirname, '..'),
     // 무료 이용 설정을 켠 상태(MUNGLE_APARTMENT_FREE=1)의 동작 — 기본값은 유료
-    env: { ...process.env, PORT: String(PORT), MUNGLE_DATA_DIR: dataDir, MUNGLE_BACKUP_HOURS: '0', MUNGLE_ADMINS: 'freeadmin', MUNGLE_APARTMENT_FREE: '1' },
+    env: { ...process.env, PORT: String(PORT), MUNGLE_DATA_DIR: dataDir, MUNGLE_BACKUP_HOURS: '0', MUNGLE_ADMINS_ON_SIGNUP: '1', MUNGLE_ADMINS: 'freeadmin', MUNGLE_APARTMENT_FREE: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   proc.stderr.on('data', (d) => { const t = String(d); if (!/ExperimentalWarning|trace-warnings/.test(t)) process.stderr.write(t); });

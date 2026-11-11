@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { Server } from 'socket.io';
 import * as repo from './db';
 import * as persist from './persist';
+import { startAdminSync } from './admins';
 import { canVisit } from './access';
 import { APARTMENT_BUILDINGS, isValidUnit, unitsOf, type UnitInfo } from '../../shared/apartment';
 import { FURNITURE, GUESTBOOK_MAX_LEN, HOME_VISIBILITY, PLANS, movedLayout, tierOfBuilding, validateLayout, validateStyle, type HomeTier, type HomeView, type HomeVisibility } from '../../shared/home';
@@ -666,13 +667,22 @@ app.delete('/api/screen/:id', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 app.get('/api/admin/screen', requireAuth, requireAdmin, (_req, res) => {
-  res.json({ items: [...repo.listScreen('pending', 50), ...repo.listScreen('approved', 50)].map((r) => ({ ...toScreen(r), status: r.status })) });
+  // 승인 대기(오래된 것부터) + 처리 이력(승인·반려·내림, 최근 처리 순) + 운영 공지
+  const admin = (r: Record<string, any>) => ({ ...toScreen(r), status: r.status as string, username: (r.username as string) ?? '',
+    decidedAt: (r.decided_at as number | null) ?? null, decidedBy: (r.decided_by_name as string | null) ?? null });
+  const pending = repo.listScreenAdmin(['pending'], 100).reverse().map(admin);
+  const history = repo.listScreenAdmin(['approved', 'rejected', 'hidden'], 100).map(admin);
+  const notices = repo.listScreen('approved', 50).filter((r) => r.kind === 'notice').map((r) => ({ ...toScreen(r), status: r.status }));
+  res.json({ pending, history, notices, items: [...pending, ...history.filter((h) => h.status === 'approved'), ...notices] });
 });
 app.post('/api/admin/screen/:id', requireAuth, requireAdmin, (req, res) => {
   const it = repo.getScreen(Number(req.params.id));
   const action = req.body?.action;
   if (!it || !['approve', 'reject', 'hide'].includes(action)) return res.status(400).json({ error: '잘못된 요청' });
-  repo.setScreenStatus(it.id, action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : 'hidden');
+  // 같은 신청을 두 운영자가 동시에 처리하지 않게: 대기 중인 것만 승인·반려, 노출 중인 것만 내리기
+  const from = action === 'hide' ? ['approved'] : ['pending'];
+  if (!from.includes(it.status)) return res.status(409).json({ error: '이미 처리된 신청이에요. 목록을 새로고침해 주세요.' });
+  repo.setScreenStatus(it.id, action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : 'hidden', (req as AuthedRequest).userId);
   rt.screenUpdated();
   if (it.kind === 'dog') rt.notify(it.author_id, 'screen:decided', { title: it.title, approved: action === 'approve' });
   res.json({ ok: true });
@@ -774,4 +784,5 @@ if (!MOVED_TO) {
   if (persist.enabled) console.log('💾 GitHub 저장소에 데이터 자동 저장 사용 중');
 }
 
+startAdminSync();
 server.listen(PORT, () => console.log(`🐾 멍글마을 서버 실행 중: http://localhost:${PORT}`));
