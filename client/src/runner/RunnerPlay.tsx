@@ -1039,15 +1039,15 @@ export function RunnerPlay({ game, avatar, human, best, onEnd, onQuit, onRetry }
       {goShow && !paused && (
         <div key="go" className="absolute left-1/2 top-[30%] -translate-x-1/2 font-display text-5xl text-white drop-shadow-[0_3px_0_#f39a7b] pop pointer-events-none" data-testid="runner-go">출발!</div>
       )}
-      {/* 조작: 모바일은 한 줄 4버튼 (← 왼쪽 · ↑ 뛰기 · ↓ 숙이기 · → 오른쪽), PC는 같은 순서의 하단 안내 */}
+      {/* 조작: 터치 화면은 한 줄 4버튼 (← 왼쪽 · ↓ 숙이기 · ↑ 뛰기 · → 오른쪽), 키보드 PC는 같은 순서의 하단 안내 */}
       {touch ? (
         <div className="shrink-0 px-3 pt-2 pb-[calc(8px+var(--safe-b))] bg-[linear-gradient(#f3d9d6,#fbe7e2)] border-t-2 border-white/70">
           <div className="mx-auto max-w-[460px] grid grid-cols-4 gap-2" data-testid="runner-controls">
-            {btn('L', '왼쪽', '←')}{btn('J', '뛰기', '↑')}{btn('D', '숙이기', '↓')}{btn('R', '오른쪽', '→')}
+            {btn('L', '왼쪽', '←')}{btn('D', '숙이기', '↓')}{btn('J', '뛰기', '↑')}{btn('R', '오른쪽', '→')}
           </div>
         </div>
       ) : !intro && !finale && (
-        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 name-tag !text-xs !px-3 !py-1.5 opacity-90 whitespace-nowrap">← / A 왼쪽 · ↑ / Space 뛰기 · ↓ / Ctrl 숙이기 · → / D 오른쪽{game.multi ? ' · 함께 달리기는 멈출 수 없어요' : ' · Esc 일시정지'}</div>
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 name-tag !text-xs !px-3 !py-1.5 opacity-90 whitespace-nowrap">← / A 왼쪽 · ↓ / Ctrl 숙이기 · ↑ / Space 뛰기 · → / D 오른쪽{game.multi ? ' · 함께 달리기는 멈출 수 없어요' : ' · Esc 일시정지'}</div>
       )}
       {paused && (
         <div className="absolute inset-0 z-20 grid place-items-center bg-[#5a403344] p-4">

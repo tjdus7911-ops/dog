@@ -268,7 +268,8 @@ export function setupRealtime(io: Server) {
       if (data?.parkId) {
         const sp = parseSpace(data.parkId);
         if (!sp) return fail(ack, '존재하지 않는 장소예요.');
-        if (session.guest && sp.kind !== 'park') { memberOnly(ack); return; }
+        // 둘러보기 방문자: 공원과 아파트 로비(건물·호실 안내판 구경)만 — 입주·집 방문 등은 회원 전용
+        if (session.guest && sp.kind !== 'park' && sp.kind !== 'lobby') { memberOnly(ack); return; }
         if (sp.kind === 'home') {
           const c = canVisit(userId, sp.ownerId!);
           if (!c.ok) return fail(ack, c.error);

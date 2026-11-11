@@ -112,7 +112,7 @@ export function MoreSheet() {
   const sections: { title: string; items: { label: string; onClick: () => void; hide?: boolean; soft?: boolean; hint?: boolean }[] }[] = [
     { title: '마을 생활', items: [
       { label: '동네 일정', onClick: fromMenu(() => set({ eventsOpen: true })) },
-      { label: '아파트 로비', onClick: fromMenu(() => void joinPark('lobby-1')), hide: guest },
+      { label: '아파트 로비', onClick: fromMenu(() => void joinPark('lobby-1')) },
       { label: '이사하기', onClick: fromMenu(() => set({ moveOpen: true })), hide: !me.residence },
       { label: '출석 체크는 위쪽 코인에서', onClick: fromMenu(() => set({ wallet: 'attendance' })), hide: guest, hint: true },
     ] },

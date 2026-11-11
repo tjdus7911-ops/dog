@@ -6,7 +6,7 @@ export interface BuildingInfo { id: string; name: string; floors: number; unitsP
 export const APARTMENT_BUILDINGS: BuildingInfo[] = [
   { id: '1', name: '멍글 아파트 1동', floors: 4, unitsPerFloor: 4, color: '#f39a7b' },
   { id: '2', name: '멍글 아파트 2동', floors: 4, unitsPerFloor: 3, color: '#a9cfa0' },
-  { id: '3', name: '멍글 아파트 3동', floors: 3, unitsPerFloor: 3, color: '#b9a6e6' },
+  { id: '3', name: '멍글 아파트 3동', floors: 4, unitsPerFloor: 3, color: '#b9a6e6' },
 ];
 
 /** 호실 번호: 층 + 두 자리 (예: 3층 2호 → "302") */

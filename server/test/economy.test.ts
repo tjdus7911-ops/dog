@@ -91,7 +91,7 @@ async function main() {
     const a = await signup('ecoa01', '코인A', '콩떡');
     check('신규 가입 500코인', (await coins(a.token)).balance === 500);
     const tooHigh = await api('/api/apartment/move-in', { building: '2', unit: '101' }, a.token);
-    check('처음부터 2동 입주 불가 (1동부터)', tooHigh.status === 400 && tooHigh.body.code === 'order');
+    check('잔액 부족 → 투룸(1,000코인) 입주 불가, 차감 없음', tooHigh.status === 400 && tooHigh.body.code === 'insufficient' && tooHigh.body.need === 500 && (await coins(a.token)).balance === 500, tooHigh.body);
     const mi = await api('/api/apartment/move-in', { building: '1', unit: '101' }, a.token);
     const ca = await coins(a.token);
     check('1동 원룸 입주 → 500코인 차감 (실질 무료)', mi.status === 200 && ca.balance === 0 && ca.spent[0]?.amount === -500 && mi.body.profile.residence.unit === '101', mi.body);
@@ -123,8 +123,10 @@ async function main() {
 
     // ================= 4) 이사 =================
     console.log('\n[이사]');
-    const short = await api('/api/apartment/move', { building: '2', requestId: rid() }, a.token);
-    check('코인 부족 시 이사 제한 + 남은 코인 안내', short.status === 400 && short.body.code === 'insufficient' && /1,900코인 남았어요/.test(short.body.error), short.body);
+    const c0 = await signup('ecoc01', '코인C', '호두');
+    await api('/api/apartment/move-in', { building: '1', unit: '104' }, c0.token);
+    const short = await api('/api/apartment/move', { building: '2', requestId: rid() }, c0.token);
+    check('코인 부족 시 이사 제한 + 남은 코인 안내', short.status === 400 && short.body.code === 'insufficient' && /1,000코인 남았어요/.test(short.body.error), short.body);
     const skip = await api('/api/apartment/move', { building: '3', requestId: rid() }, a.token);
     check('1동 → 3동 건너뛰기 불가', skip.status === 400 && skip.body.code === 'order');
     grant(a.id, 2400, 'g1'); // 1100 + 2400 = 3500
@@ -153,9 +155,9 @@ async function main() {
     ]);
     const okCount = [m1, m2, m3].filter((r) => r.status === 200).length;
     const afterMove = await coins(a.token);
-    check('중복 클릭해도 한 번만 이사·결제', okCount === 1 && afterMove.balance === 500 && afterMove.spent.filter((t: any) => t.kind === 'move').length === 1, [m1.status, m2.status, m3.status, afterMove.balance]);
+    check('중복 클릭해도 한 번만 이사·결제', okCount === 1 && afterMove.balance === 2500 && afterMove.spent.filter((t: any) => t.kind === 'move').length === 1, [m1.status, m2.status, m3.status, afterMove.balance]);
     const moved = [m1, m2, m3].find((r) => r.status === 200)!.body;
-    check('이사 비용 정확히 3,000코인 차감', afterMove.spent[0].amount === -3000 && afterMove.spent[0].balance === 500);
+    check('이사 비용: 투룸 가격 1,000코인 차감 (기존 이사 규칙)', afterMove.spent[0].amount === -1000 && afterMove.spent[0].balance === 2500);
     check('2동으로 이사 + 새 호수 배정', moved.residence.building === '2' && /^\d{3}$/.test(moved.residence.unit) && moved.profile.residence.building === '2');
     const nh = moved.home;
     const photoFrame = nh.layout.find((i: PlacedItem) => i.type === 'frame' && i.photo === ph.body.photo.url);
@@ -176,10 +178,9 @@ async function main() {
     const bMove = await api('/api/apartment/move', { building: '2', requestId: rid() }, b.token);
     check('같은 동으로 이사한 두 사용자의 호수가 다름', bMove.status === 200 && bMove.body.residence.unit !== moved.residence.unit, [bMove.body.residence, moved.residence]);
     const plans = (await api('/api/apartment/plans', undefined, a.token)).body;
-    check('이사 선택 정보: 현재 2동 · 1동은 지난 집 · 3동은 코인 부족', plans.current === 2 && plans.plans[0].status === 'past' && plans.plans[1].status === 'current' && plans.plans[2].status === 'insufficient' && plans.plans[2].need === 9500, plans.plans.map((p: any) => [p.status, p.need]));
-    grant(a.id, 9500, 'g3');
+    check('이사 선택 정보: 현재 2동 · 1동은 지난 집 · 3동 이사 가능(1,500코인)', plans.current === 2 && plans.plans[0].status === 'past' && plans.plans[1].status === 'current' && plans.plans[2].status === 'available' && plans.plans[2].need === 0 && plans.plans[2].price === 1500, plans.plans.map((p: any) => [p.status, p.need]));
     const to3 = await api('/api/apartment/move', { building: '3', requestId: rid() }, a.token);
-    check('2동 → 3동 이사 (10,000코인) + 놀이방 시설 선물', to3.status === 200 && to3.body.coins.balance === 0 && to3.body.home.tier === 3 && ['play_tunnel', 'ball_pit', 'play_steps'].every((t) => to3.body.home.owned.includes(t)));
+    check('2동 → 3동 이사 (1,500코인) + 놀이방 시설 선물', to3.status === 200 && to3.body.coins.balance === 1000 && to3.body.home.tier === 3 && ['play_tunnel', 'ball_pit', 'play_steps'].every((t) => to3.body.home.owned.includes(t)));
     check('3동에서도 액자 사진 유지', to3.body.home.layout.some((i: PlacedItem) => i.photo === ph.body.photo.url));
 
     // ================= 5) 새집 내부 이동 · 방문 =================
@@ -257,12 +258,13 @@ async function main() {
 
     // ================= 7) 재로그인 후 유지 =================
     console.log('\n[재로그인]');
+    const balBefore = (await coins(a.token)).balance;
     await stopServer();
     await startServer();
     const re = await login('ecoa01');
     const rc = await coins(re.token);
     const rh = (await api('/api/home/me', undefined, re.token)).body.home;
-    check('서버 재시작·재로그인 후 코인·거래 내역·집 정보 유지', rc.balance === 0 && rc.spent.length === 3 && re.profile.residence.building === '3' && rh.tier === 3 && rh.layout.some((i: PlacedItem) => i.photo === ph.body.photo.url));
+    check('서버 재시작·재로그인 후 코인·거래 내역·집 정보 유지', rc.balance === balBefore && rc.spent.length === 3 && re.profile.residence.building === '3' && rh.tier === 3 && rh.layout.some((i: PlacedItem) => i.photo === ph.body.photo.url));
     const hist = new DatabaseSync(path.join(dataDir, 'mungle.db'));
     const hrows = hist.prepare('SELECT building FROM residence_history WHERE user_id=? ORDER BY id').all(a.id) as any[];
     hist.close();

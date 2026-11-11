@@ -610,7 +610,7 @@ export function JoinPrompt() {
   return (
     <Modal onClose={close} className="max-w-[380px] p-6 text-center">
       <div className="text-5xl">🐶</div>
-      <p className="font-display text-lg mt-2 leading-snug" data-testid="join-prompt">이 기능은 멍글마을 주민만 이용할 수 있어요!<br />회원가입하고 우리 강아지와 함께 시작해 보세요.</p>
+      <p className="font-display text-lg mt-2 leading-snug whitespace-pre-line" data-testid="join-prompt">{typeof open === 'string' ? open : <>이 기능은 멍글마을 주민만 이용할 수 있어요!<br />회원가입하고 우리 강아지와 함께 시작해 보세요.</>}</p>
       <div className="grid gap-2 mt-5">
         <button className="btn btn-coral py-3" onClick={() => { close(); void goSignup(); }}>회원가입하기</button>
         <button className="btn btn-ghost py-3 border border-[#f1e2d2]" onClick={close}>계속 둘러보기</button>

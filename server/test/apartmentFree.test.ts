@@ -24,8 +24,8 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
 async function main() {
   const proc = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
     cwd: path.resolve(import.meta.dirname, '..'),
-    // MUNGLE_APARTMENT_FREE 를 주지 않음 → 기본값(무료)
-    env: { ...process.env, PORT: String(PORT), MUNGLE_DATA_DIR: dataDir, MUNGLE_BACKUP_HOURS: '0', MUNGLE_ADMINS: 'freeadmin', MUNGLE_APARTMENT_FREE: '' },
+    // 무료 이용 설정을 켠 상태(MUNGLE_APARTMENT_FREE=1)의 동작 — 기본값은 유료
+    env: { ...process.env, PORT: String(PORT), MUNGLE_DATA_DIR: dataDir, MUNGLE_BACKUP_HOURS: '0', MUNGLE_ADMINS: 'freeadmin', MUNGLE_APARTMENT_FREE: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   proc.stderr.on('data', (d) => { const t = String(d); if (!/ExperimentalWarning|trace-warnings/.test(t)) process.stderr.write(t); });
@@ -37,7 +37,7 @@ async function main() {
 
     console.log('\n[처음부터 원룸·투룸·쓰리룸 무료]');
     const ap = await api('/api/apartment', undefined, a.token);
-    check('기본 운영 설정: 무료 이용', ap.body.freeAccess === true);
+    check('운영 설정이 켜지면 무료 이용', ap.body.freeAccess === true);
     const plans0 = (await api('/api/apartment/plans', undefined, a.token)).body;
     check('입주 전에도 세 종류 모두 선택 가능', plans0.freeAccess && plans0.plans.every((p: any) => p.status === 'available' && p.need === 0), plans0.plans.map((p: any) => p.status));
     const mi = await api('/api/apartment/move-in', { building: '3', unit: '201' }, a.token);

@@ -19,13 +19,13 @@ CREATE TABLE IF NOT EXISTS move_requests (
 `);
 
 export interface AppSettings {
-  /** 아파트(원룸·투룸·쓰리룸) 무료 이용 — 입주·이사 코인 차감 없음, 순서·횟수 제한 없음 */
+  /** 아파트(원룸·투룸·쓰리룸) 무료 이용 — 입주·이사 코인 차감 없음, 순서·횟수 제한 없음 (기본: 꺼짐 = 유료 입주) */
   apartmentFreeAccess: boolean;
 }
 
 const envBool = (v: string | undefined, dflt: boolean) => (v === undefined || v === '' ? dflt : !/^(0|false|no|off)$/i.test(v));
 const DEFAULTS: AppSettings = {
-  apartmentFreeAccess: envBool(process.env.MUNGLE_APARTMENT_FREE, true),
+  apartmentFreeAccess: envBool(process.env.MUNGLE_APARTMENT_FREE, false),
 };
 
 export function getSettings(): AppSettings {

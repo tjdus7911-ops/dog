@@ -29,6 +29,41 @@ export function onCoinEarned(e: CoinEarned) {
 
 const compact = (n: number) => (n >= 100000 ? `${Math.floor(n / 10000)}만` : n >= 10000 ? `${(n / 10000).toFixed(1)}만` : coinFmt(n));
 
+/** 한국 날짜 (YYYY-MM-DD) */
+const kstToday = () => new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
+/**
+ * 매일 출석 자동 지급: 그날(한국 시간 자정 기준) 처음 들어오면 서버에 출석 요청 → +100 멍글코인 안내.
+ * 서버가 계정·날짜별로 한 번만 기록하므로 새로고침·재로그인·여러 탭에서도 중복 지급되지 않는다.
+ * 앱을 켜 둔 채 자정이 지나면 화면으로 돌아올 때 다시 확인한다. (둘러보기 방문자는 제외)
+ */
+export function useAutoAttendance() {
+  const me = useStore((s) => s.me);
+  useEffect(() => {
+    if (!me || me.role === 'guest' || DEMO) return;
+    let done = '';
+    let alive = true;
+    const run = async () => {
+      const day = kstToday();
+      if (done === day || !alive) return;
+      done = day;
+      try {
+        const r = await api<{ streak: number; got: CoinEarned[]; coins: CoinStatus }>('/api/coins/attendance', { body: {} });
+        set({ coins: r.coins });
+        r.got.forEach((g, i) => window.setTimeout(() => showCoinFx(g.amount, g.kind === 'attendance' ? `출석 완료 · ${g.label}` : g.label), 600 + i * 900));
+        toast(`📅 출석 완료! +${r.got[0]?.amount ?? 100} 멍글코인`);
+      } catch (e) {
+        const c = e instanceof ApiError ? (e.data?.coins as CoinStatus | undefined) : undefined;
+        if (c) set({ coins: c }); // 이미 출석함(409) — 조용히 넘어감
+        else done = ''; // 네트워크 오류 → 다음에 다시 시도
+      }
+    };
+    void run();
+    const vis = () => { if (!document.hidden) void run(); };
+    document.addEventListener('visibilitychange', vis);
+    return () => { alive = false; document.removeEventListener('visibilitychange', vis); };
+  }, [me?.id, me?.role]);
+}
+
 /** 상단 코인 칩: 잔액 + 오늘 출석 전이면 빨간 점 (큰 버튼을 늘리지 않음) */
 export function CoinChip() {
   const coins = useStore((s) => s.coins);

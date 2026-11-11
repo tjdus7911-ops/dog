@@ -19,7 +19,7 @@ interface PlanInfo { tier: HomeTier; building: string; name: string; type: strin
 interface PlansRes { balance: number; current: HomeTier | null; residence: { building: string; unit: string } | null; plans: PlanInfo[]; freeAccess?: boolean }
 
 /** 3D 내부 미리보기 (기본 가구 배치) — 한 번만 그리는 정지 화면이라 가볍다 */
-function Preview({ tier }: { tier: HomeTier }) {
+export function Preview({ tier }: { tier: HomeTier }) {
   const plan = PLANS[tier];
   const k = Math.max(plan.halfW / 3.6, plan.halfD / 3.0);
   return (

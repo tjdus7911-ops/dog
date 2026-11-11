@@ -11,7 +11,7 @@ import { demoClaimed, demoCommunity } from './demoCommunity';
 
 export const DEMO = import.meta.env.VITE_DEMO === '1';
 /** 미리보기도 서버 기본 운영 설정과 같게: 아파트 무료 이용 */
-const DEMO_FREE = true;
+const DEMO_FREE = false;
 
 const KEY = 'mungle.demo.profile';
 
@@ -86,9 +86,9 @@ export async function demoApi(path: string, opts: { method?: string; body?: any 
     if (cur.residence) throw new Error('이미 입주한 집이 있어요.');
     const w = wallet();
     if (!DEMO_FREE) {
-      if (tierOfBuilding(String(building)) !== 1) throw new Error('처음에는 1동 원룸에 입주할 수 있어요.');
-      if (w.balance < PLANS[1].price) throw new Error(`입주까지 ${(PLANS[1].price - w.balance).toLocaleString('ko-KR')}코인 남았어요!`);
-      addTx(w, -PLANS[1].price, 'movein', `${PLANS[1].name} ${unit}호 입주`);
+      const pl = PLANS[tierOfBuilding(String(building))];
+      if (w.balance < pl.price) throw new Error(`입주까지 ${(pl.price - w.balance).toLocaleString('ko-KR')}코인 남았어요!`);
+      addTx(w, -pl.price, 'movein', `${pl.name} ${unit}호 입주`);
     }
     const next = { ...cur, residence: { building: String(building), unit: String(unit) } };
     saveDemoProfile(next);
@@ -115,7 +115,7 @@ export async function demoApi(path: string, opts: { method?: string; body?: any 
       balance: w.balance, current: t, residence: cur.residence, freeAccess: DEMO_FREE,
       plans: ([1, 2, 3] as HomeTier[]).map((k) => {
         const p = PLANS[k];
-        const status = t === k ? 'current' : DEMO_FREE ? 'available' : t !== null && k < t ? 'past' : t === null ? (k === 1 ? 'available' : 'locked') : t + 1 === k ? (w.balance >= p.price ? 'available' : 'insufficient') : 'locked';
+        const status = t === k ? 'current' : DEMO_FREE ? 'available' : t !== null && k < t ? 'past' : t === null ? (w.balance >= p.price ? 'available' : 'insufficient') : t + 1 === k ? (w.balance >= p.price ? 'available' : 'insufficient') : 'locked';
         return { tier: k, building: p.building, name: p.name, type: p.type, rooms: p.rooms, price: p.price, features: p.features, capacity: p.capacity, free: 12, status, need: DEMO_FREE ? 0 : Math.max(0, p.price - w.balance) };
       }),
     };

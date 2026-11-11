@@ -72,6 +72,7 @@ export function TopBar() {
             <div className="h-px bg-[#EAE3DC] mx-2 my-1" />
             <MenuItem onClick={() => openCommunity('meetups')}>멍글 동네 (모임·자랑)</MenuItem>
             {guest ? <>
+              <MenuItem onClick={() => { set({ panel: 'none', benchMenu: null }); void joinPark('lobby-1'); }}>아파트 구경하기 (로비)</MenuItem>
               <MenuItem onClick={() => set({ joinPrompt: true })}>회원가입하고 입주하기</MenuItem>
               <MenuItem onClick={() => void goSignup()}>둘러보기 끝내기</MenuItem>
             </> : <>

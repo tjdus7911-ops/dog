@@ -109,7 +109,8 @@ interface State {
   /** 사진 크게 보기 */
   viewer: ViewerState | null;
   /** 둘러보기 방문자가 주민 전용 기능을 눌렀을 때 가입 안내 */
-  joinPrompt: boolean;
+  /** true = 기본 안내, 문자열 = 그 안내 문구 */
+  joinPrompt: boolean | string;
   /** 친구 집 놀러 가기: 로비에 도착하면 이 집 문 앞 안내를 바로 띄움 */
   lobbyFocus: number | null;
   /** 멍글런너 화면 (로비·게임·결과) 열림 / 랭킹 갱신 신호 */

@@ -266,9 +266,10 @@ function grantMoveGifts(me: number, tier: HomeTier, ts: number) {
 }
 
 /**
- * 첫 입주. 코인 차감과 입주를 한 트랜잭션으로.
- *  · 무료 이용(apartmentFreeAccess): 1·2·3동 아무 곳이나, 코인 차감 없음
- *  · 유료: 1동 원룸만, 입주비 500코인 (가입 선물로 실질 무료)
+ * 첫 입주. 잔액 확인 · 코인 차감 · 호실 저장을 한 트랜잭션으로.
+ *  · 유료(기본): 원룸 500 · 투룸 1,000 · 쓰리룸 1,500코인 — 고른 집 종류의 입주비 (shared/home PLANS)
+ *  · 무료 이용(운영 설정 apartmentFreeAccess): 코인 차감 없음
+ *  · 중복 결제 방지: 입주비 기록의 ref가 'first'로 고정(계정당 1번) + 이미 입주했으면 거부 + 호실 UNIQUE
  */
 app.post('/api/apartment/move-in', requireAuth, (req, res) => {
   const me = (req as AuthedRequest).userId;
@@ -277,8 +278,7 @@ app.post('/api/apartment/move-in', requireAuth, (req, res) => {
   const free = apartmentFree();
   if (!isValidUnit(building, unit)) return res.status(400).json({ error: '존재하지 않는 호실이에요.' });
   const tier = tierOfBuilding(building);
-  if (!free && tier !== 1) return res.status(400).json({ error: '처음에는 1동 원룸에 입주할 수 있어요. 코인을 모아 2동·3동으로 이사해 보세요!', code: 'order' });
-  const price = free ? 0 : PLANS[1].price;
+  const price = free ? 0 : PLANS[tier].price;
   if (repo.getResidence(me)) return res.status(409).json({ error: '이미 입주한 집이 있어요.' });
   const bal = balanceOf(me);
   if (bal < price) return res.status(400).json({ error: `입주까지 ${(price - bal).toLocaleString('ko-KR')}코인 남았어요! 출석과 산책으로 코인을 모아 보세요.`, code: 'insufficient', need: price - bal });
@@ -286,7 +286,7 @@ app.post('/api/apartment/move-in', requireAuth, (req, res) => {
     transaction(() => {
       const r = repo.moveIn(me, building, unit);
       if (!r.ok) throw new MoveError(r.reason === 'already' ? '이미 입주한 집이 있어요.' : '방금 다른 주민이 입주한 호실이에요. 다른 호실을 골라 주세요.', 409);
-      if (price > 0) applyTx(me, -price, 'movein', 'first', Date.now(), `${PLANS[1].name} ${unit}호 입주`);
+      if (price > 0) applyTx(me, -price, 'movein', 'first', Date.now(), `${PLANS[tier].name} ${unit}호 입주`);
       if (tier > 1) grantMoveGifts(me, tier, Date.now());
       // 예전에 살던 기록이 있으면(다시 입주) 가구는 보관함에 그대로 — 새집 기본 배치만
       const prev = rawLayout(me);
@@ -322,7 +322,7 @@ app.get('/api/apartment/plans', requireAuth, (req, res) => {
       // 무료 이용: 지금 사는 동만 빼고 모두 이사 가능 (순서·되돌아가기·횟수 제한 없음)
       const status = cur === t ? 'current' : freeAccess ? (free <= 0 ? 'full' : 'available')
         : lived.has(t) || (cur !== null && t < cur) ? 'past'
-        : cur === null ? (t === 1 ? 'available' : 'locked') : nextTier(cur) === t ? (free <= 0 ? 'full' : bal >= p.price ? 'available' : 'insufficient') : 'locked';
+        : cur === null ? (free <= 0 ? 'full' : bal >= p.price ? 'available' : 'insufficient') : nextTier(cur) === t ? (free <= 0 ? 'full' : bal >= p.price ? 'available' : 'insufficient') : 'locked';
       return { tier: t, building: p.building, name: p.name, type: p.type, rooms: p.rooms, price: p.price, features: p.features, capacity: p.capacity, free, status, need: freeAccess ? 0 : Math.max(0, p.price - bal) };
     }),
   });
