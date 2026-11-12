@@ -120,6 +120,8 @@ const isAdmin = (id: number) => repo.findUser(id)?.role === 'admin';
 /** 모임은 최소 이만큼 뒤에 시작해야 함 (테스트에서는 환경변수로 줄임) */
 const MIN_LEAD_MS = Number(process.env.MUNGLE_MEETUP_MIN_LEAD_MS ?? 10 * 60_000);
 const TICK_MS = Number(process.env.MUNGLE_MEETUP_TICK_MS ?? 30_000);
+/** 게시글 신고 사유 (예전 앱의 사유도 계속 받음) */
+const POST_REPORT_REASONS = ['욕설 및 괴롭힘', '광고 및 도배', '부적절한 이미지', '개인정보 노출', '기타', '부적절한 사진', '욕설/비하', '스팸·광고', '동물 학대 의심'];
 
 export function registerCommunity(app: express.Express, deps: CommunityDeps) {
   const postLimiter = new RateLimiter(10, 600_000);
@@ -146,7 +148,7 @@ export function registerCommunity(app: express.Express, deps: CommunityDeps) {
       likes: Number(one('SELECT COUNT(*) n FROM post_likes WHERE post_id=?', r.id)?.n ?? 0),
       likedByMe: !!one('SELECT 1 FROM post_likes WHERE post_id=? AND user_id=?', r.id, viewer),
       savedByMe: !!one('SELECT 1 FROM post_saves WHERE post_id=? AND user_id=?', r.id, viewer),
-      comments: Number(one('SELECT COUNT(*) n FROM post_comments WHERE post_id=?', r.id)?.n ?? 0),
+      comments: Number(one('SELECT COUNT(*) n FROM post_comments WHERE post_id=? AND hidden=0', r.id)?.n ?? 0),
       screen: (s?.status as PostView['screen']) ?? 'none',
       canDelete: r.author_id === viewer || isAdmin(viewer),
     };
@@ -224,7 +226,7 @@ export function registerCommunity(app: express.Express, deps: CommunityDeps) {
     const uid = me(req);
     const p = visiblePost(Number(req.params.id), uid);
     if (!p) return res.status(404).json({ error: '글을 찾을 수 없어요.' });
-    const rows = all('SELECT * FROM post_comments WHERE post_id=? ORDER BY id LIMIT 200', p.id).filter((c) => c.author_id === uid || !repo.eitherBlocked(uid, c.author_id));
+    const rows = all('SELECT * FROM post_comments WHERE post_id=? AND hidden=0 ORDER BY id LIMIT 200', p.id).filter((c) => c.author_id === uid || !repo.eitherBlocked(uid, c.author_id));
     res.json({ comments: rows.map((c) => commentView(c, uid, p.author_id)) });
   });
   app.post('/api/posts/:id/comments', requireAuth, (req, res) => {
@@ -236,7 +238,7 @@ export function registerCommunity(app: express.Express, deps: CommunityDeps) {
     if (!text) return res.status(400).json({ error: '댓글을 입력해 주세요.' });
     run('INSERT INTO post_comments (post_id, author_id, text, created_at) VALUES (?,?,?,?)', p.id, uid, text, Date.now());
     if (p.author_id !== uid) deps.notify(p.author_id, 'community:notice', { text: `${author(uid).nickname}님이 내 자랑 글에 댓글을 남겼어요` });
-    const rows = all('SELECT * FROM post_comments WHERE post_id=? ORDER BY id LIMIT 200', p.id).filter((c) => c.author_id === uid || !repo.eitherBlocked(uid, c.author_id));
+    const rows = all('SELECT * FROM post_comments WHERE post_id=? AND hidden=0 ORDER BY id LIMIT 200', p.id).filter((c) => c.author_id === uid || !repo.eitherBlocked(uid, c.author_id));
     res.json({ comments: rows.map((c) => commentView(c, uid, p.author_id)) });
   });
   app.delete('/api/comments/:id', requireAuth, (req, res) => {
@@ -256,7 +258,9 @@ export function registerCommunity(app: express.Express, deps: CommunityDeps) {
     if (p.author_id === uid) return res.status(400).json({ error: '내 글은 신고할 수 없어요.' });
     if (!reportLimiter.allow(String(uid))) return res.status(429).json({ error: '잠시 후 다시 시도해 주세요.' });
     const reason = sanitize(req.body?.reason, 20);
-    if (!reason) return res.status(400).json({ error: '신고 사유를 골라 주세요.' });
+    if (!reason || !POST_REPORT_REASONS.includes(reason)) return res.status(400).json({ error: '신고 사유를 골라 주세요.' });
+    // 같은 사람이 같은 글을 처리 전에 다시 신고하면 새로 쌓지 않음
+    if (one("SELECT 1 FROM reports WHERE reporter_id=? AND target_type='post' AND target_ref=? AND status='open'", uid, p.id)) return res.json({ ok: true, duplicate: true });
     run(`INSERT INTO reports (reporter_id, target_id, reason, detail, context, created_at, target_type, target_ref) VALUES (?,?,?,?,?,?,'post',?)`,
       uid, p.author_id, reason, sanitize(req.body?.detail ?? '', 300) ?? '', `[자랑 글 #${p.id}] ${p.text}${p.image ? `\n사진: ${p.image}` : ''}`, Date.now(), p.id);
     res.json({ ok: true });
@@ -282,7 +286,8 @@ export function registerCommunity(app: express.Express, deps: CommunityDeps) {
       ended: r.starts_at + 3 * 3600_000 < Date.now(), reviewCount: Number(rv?.n ?? 0), avgRating: rv?.a ? Math.round(rv.a * 10) / 10 : null,
     };
   }
-  const getMeetup = (id: number) => one('SELECT * FROM meetups WHERE id=?', id);
+  // 운영자가 숨기거나 지운 모임(hidden≠0)은 목록·상세·참가·채팅 어디에서도 보이지 않음
+  const getMeetup = (id: number) => one('SELECT * FROM meetups WHERE id=? AND hidden=0', id);
 
   app.get('/api/meetups', requireAuth, (req, res) => {
     const uid = me(req);
@@ -293,7 +298,7 @@ export function registerCommunity(app: express.Express, deps: CommunityDeps) {
     if (scope === 'mine') rows = all(`SELECT m.* FROM meetups m JOIN meetup_members mm ON mm.meetup_id=m.id AND mm.user_id=? AND mm.status IN ('approved','pending') ORDER BY m.starts_at DESC LIMIT 50`, uid);
     else if (scope === 'past') rows = all("SELECT * FROM meetups WHERE starts_at < ? AND status='open' ORDER BY starts_at DESC LIMIT 30", Date.now());
     else rows = all("SELECT * FROM meetups WHERE starts_at > ? AND status='open' ORDER BY starts_at LIMIT 60", Date.now() - 3600_000);
-    rows = rows.filter((r) => (!region || r.region.startsWith(region)) && (!kind || r.kind === kind) && (r.host_id === uid || !repo.eitherBlocked(uid, r.host_id)));
+    rows = rows.filter((r) => !r.hidden && (!region || r.region.startsWith(region)) && (!kind || r.kind === kind) && (r.host_id === uid || !repo.eitherBlocked(uid, r.host_id)));
     res.json({ meetups: rows.map((r) => meetupView(r, uid)) });
   });
 
@@ -433,7 +438,7 @@ export function registerCommunity(app: express.Express, deps: CommunityDeps) {
 
   // 곧 시작하는 모임 알림 (참가자에게 '광장에서 만나요' 안내)
   setInterval(() => {
-    const soon = all("SELECT * FROM meetups WHERE status='open' AND notified=0 AND starts_at BETWEEN ? AND ?", Date.now() - 60_000, Date.now() + 10 * 60_000);
+    const soon = all("SELECT * FROM meetups WHERE status='open' AND hidden=0 AND notified=0 AND starts_at BETWEEN ? AND ?", Date.now() - 60_000, Date.now() + 10 * 60_000);
     for (const r of soon) {
       run('UPDATE meetups SET notified=1 WHERE id=?', r.id);
       for (const m of all("SELECT user_id FROM meetup_members WHERE meetup_id=? AND status='approved'", r.id)) {

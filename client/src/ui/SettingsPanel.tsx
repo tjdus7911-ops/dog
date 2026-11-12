@@ -73,6 +73,8 @@ export function SettingsPanel() {
           </div>
         ))}
 
+        {!DEMO && me.role !== 'guest' && <AdminClaim isAdmin={me.role === 'admin'} />}
+
         <div className="pt-4 mt-2 border-t border-[#f1e2d2] text-sm text-cocoa-soft flex flex-wrap gap-x-3 gap-y-1">
           <button className="underline" onClick={() => setLegal('terms')}>이용약관</button>
           <button className="underline" onClick={() => setLegal('privacy')}>개인정보 처리방침</button>
@@ -88,5 +90,64 @@ export function SettingsPanel() {
       </div>
       {legal && <LegalModal doc={legal} onClose={() => setLegal(null)} />}
     </aside>
+  );
+}
+
+/**
+ * 운영자 계정 등록: 이 계정의 주인임을 확인하는 1회용 코드 (로그인한 본인에게만 보임, 24시간 유효)
+ * 코드만으로는 아무 권한도 생기지 않고, 저장소(GitHub)의 deploy/admins.txt 에 '아이디 코드'를 적어야 운영자로 지정돼요.
+ */
+function AdminClaim({ isAdmin }: { isAdmin: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [c, setC] = useState<{ code: string; expiresAt: number; userId: number; username: string } | null>(null);
+  async function make() {
+    setBusy(true);
+    await api<{ code: string; expiresAt: number; userId: number; username: string }>('/api/admin-claim', { body: {} })
+      .then(setC).catch((e) => toast(e.message, 'error'));
+    setBusy(false);
+  }
+  const line = c ? `${c.username} ${c.code} 최고` : '';
+  return (
+    <div className="pt-3" data-testid="admin-claim">
+      <button className="w-full flex items-center gap-2 text-left" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <h3 className="font-display text-lg flex-1">🛡️ 운영자 계정 등록</h3>
+        <span className="text-cocoa-soft text-sm">{open ? '접기' : '열기'}</span>
+      </button>
+      {open && (
+        <div className="bg-white rounded-2xl p-3 mt-2 space-y-2 text-sm">
+          {isAdmin ? (
+            <p>이 계정은 이미 운영자예요. 메뉴의 <b>관리자 페이지</b>에서 운영 기능을 쓸 수 있어요.</p>
+          ) : (
+            <>
+              <p className="text-cocoa-soft text-xs leading-relaxed">
+                멍글마을 운영자만 쓰는 기능이에요. 확인 코드는 이 계정에만 맞는 1회용 코드이고, 코드만으로는 아무 권한도 생기지 않아요.
+                저장소 주인이 GitHub의 <b>deploy/admins.txt</b> 파일에 아래 한 줄을 적어야 운영자로 지정돼요.
+              </p>
+              {!c ? (
+                <button className="btn btn-peach w-full py-2" disabled={busy} onClick={make} data-testid="admin-claim-make">{busy ? '만드는 중…' : '확인 코드 만들기'}</button>
+              ) : (
+                <>
+                  <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                    <dt className="text-cocoa-soft">아이디</dt><dd className="font-display">{c.username}</dd>
+                    <dt className="text-cocoa-soft">고유 번호</dt><dd>#{c.userId}</dd>
+                    <dt className="text-cocoa-soft">유효 기간</dt><dd>{new Date(c.expiresAt).toLocaleString('ko-KR')}까지 · 한 번만 사용</dd>
+                  </dl>
+                  <div className="rounded-xl bg-cream-2 px-3 py-2 font-mono text-[13px] select-all break-all" data-testid="admin-claim-line">{line}</div>
+                  <div className="flex gap-2">
+                    <button className="btn btn-ghost flex-1 py-2 border border-[#f1e2d2] !shadow-none" onClick={() => { void navigator.clipboard?.writeText(line).then(() => toast('복사했어요'), () => toast('길게 눌러 직접 복사해 주세요')); }}>한 줄 복사</button>
+                    <button className="btn btn-ghost flex-1 py-2 border border-[#f1e2d2] !shadow-none" disabled={busy} onClick={make}>새 코드</button>
+                  </div>
+                  <p className="text-xs text-cocoa-soft leading-relaxed">
+                    이 한 줄을 deploy/admins.txt 맨 아래에 붙여 넣고 저장(Commit)하면 5~10분 뒤 운영자로 바뀌어요. 끝의 '최고'는 최고 관리자 표시예요.
+                    새 코드를 만들면 이전 코드는 쓸 수 없어요. 이 코드를 다른 사람에게 보내지 마세요.
+                  </p>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

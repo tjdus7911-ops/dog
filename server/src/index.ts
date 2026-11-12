@@ -7,6 +7,8 @@ import { Server } from 'socket.io';
 import * as repo from './db';
 import * as persist from './persist';
 import { startAdminSync } from './admins';
+import { guardUploads, logAction, migrateAdmin, registerAdmin, signedUpload, touchLastSeen } from './admin';
+import { banMessage } from './ban';
 import { canVisit } from './access';
 import { APARTMENT_BUILDINGS, isValidUnit, unitsOf, type UnitInfo } from '../../shared/apartment';
 import { FURNITURE, GUESTBOOK_MAX_LEN, HOME_VISIBILITY, PLANS, movedLayout, tierOfBuilding, validateLayout, validateStyle, type HomeTier, type HomeView, type HomeVisibility } from '../../shared/home';
@@ -24,6 +26,9 @@ import { ownedPhotoUrls, registerPets, retireDogPhoto } from './pets';
 import { registerRunner, runnerTop } from './runner';
 import { setupRunnerMulti } from './runnerMulti';
 import { COURSES } from '../../shared/runner';
+
+// 관리자 기능용 데이터 구조 (추가만, 바꾸기 직전 자동 백업 — 실패하면 여기서 멈춤)
+migrateAdmin();
 
 const PORT = Number(process.env.PORT ?? 3001);
 const app = express();
@@ -96,7 +101,8 @@ app.post('/api/auth/login', (req, res) => {
   if (!u || typeof password !== 'string' || !verifyPassword(password, u.salt, u.pass_hash)) {
     return res.status(401).json({ error: '아이디 또는 비밀번호가 맞지 않아요.' });
   }
-  if (u.banned_until > Date.now()) return res.status(403).json({ error: `이용이 정지된 계정입니다. (${new Date(u.banned_until).toLocaleString('ko-KR')}까지)` });
+  if (u.banned_until > Date.now()) return res.status(403).json({ error: banMessage(u.banned_until, u.ban_reason ?? ''), code: 'banned' });
+  touchLastSeen(u.id);
   res.json({ token: issueToken(u.id), profile: repo.getMyProfile(u.id) });
 });
 
@@ -212,6 +218,8 @@ app.delete('/api/me/dog-photo', requireAuth, (req, res) => {
   res.json({ profile: repo.getMyProfile(id) });
 });
 
+// 승인 전 스크린 신청 사진은 본인·운영자에게 준 서명 주소로만 (주소를 알아도 다른 사람은 못 봄)
+app.use('/uploads', guardUploads(repo.UPLOAD_DIR));
 app.use('/uploads', express.static(repo.UPLOAD_DIR, { maxAge: '7d', index: false, dotfiles: 'deny' }));
 
 app.get('/api/parks', (_req, res) => res.json({ parks: rt.parks() }));
@@ -635,7 +643,8 @@ function toScreen(r: Record<string, any>) {
 }
 app.get('/api/screen', requireAuth, (_req, res) => res.json({ slides: screenFeed() }));
 app.get('/api/screen/mine', requireAuth, (req, res) => {
-  res.json({ items: repo.listScreenByAuthor((req as AuthedRequest).userId).map((r) => ({ ...toScreen(r), status: r.status })) });
+  // 내 신청: 승인 전 사진은 나에게만 보이는 서명 주소로
+  res.json({ items: repo.listScreenByAuthor((req as AuthedRequest).userId).map((r) => ({ ...toScreen(r), image: r.status === 'approved' ? r.image : signedUpload(r.image), status: r.status })) });
 });
 app.post('/api/screen', requireAuth, (req, res) => {
   const me = (req as AuthedRequest).userId;
@@ -664,7 +673,7 @@ app.delete('/api/screen/:id', requireAuth, (req, res) => {
 });
 app.get('/api/admin/screen', requireAuth, requireAdmin, (_req, res) => {
   // 승인 대기(오래된 것부터) + 처리 이력(승인·반려·내림, 최근 처리 순) + 운영 공지
-  const admin = (r: Record<string, any>) => ({ ...toScreen(r), status: r.status as string, username: (r.username as string) ?? '',
+  const admin = (r: Record<string, any>) => ({ ...toScreen(r), image: r.status === 'approved' ? r.image : signedUpload(r.image), status: r.status as string, username: (r.username as string) ?? '',
     decidedAt: (r.decided_at as number | null) ?? null, decidedBy: (r.decided_by_name as string | null) ?? null });
   const pending = repo.listScreenAdmin(['pending'], 100).reverse().map(admin);
   const history = repo.listScreenAdmin(['approved', 'rejected', 'hidden'], 100).map(admin);
@@ -679,6 +688,7 @@ app.post('/api/admin/screen/:id', requireAuth, requireAdmin, (req, res) => {
   const from = action === 'hide' ? ['approved'] : ['pending'];
   if (!from.includes(it.status)) return res.status(409).json({ error: '이미 처리된 신청이에요. 목록을 새로고침해 주세요.' });
   repo.setScreenStatus(it.id, action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : 'hidden', (req as AuthedRequest).userId);
+  logAction((req as AuthedRequest).userId, `screen_${action}`, 'screen', it.id, sanitize(req.body?.reason ?? '', 200) ?? '');
   rt.screenUpdated();
   if (it.kind === 'dog') rt.notify(it.author_id, 'screen:decided', { title: it.title, approved: action === 'approve' });
   res.json({ ok: true });
@@ -700,6 +710,9 @@ registerRunner(app, { changed: () => { rt.runnerChanged(); rt.screenUpdated(); }
 
 // ---------- 멍글 동네 (강아지 자랑·산책 모임·강아지 모임·애견샵) ----------
 registerCommunity(app, { saveImage, removeImage, notify: (u, e, p) => rt.notify(u, e, p), screenUpdated: () => rt.screenUpdated(), boardUpdated: () => rt.boardUpdated() });
+
+// ---------- 관리자 페이지 (/admin) ----------
+registerAdmin(app, { online: () => rt.onlineCount(), kick: (u, r) => rt.kick(u, r), screenUpdated: () => rt.screenUpdated(), boardUpdated: () => rt.boardUpdated(), removeImage });
 
 // ---------- 운영 ----------
 app.get('/api/admin/reports', requireAuth, requireAdmin, (_req, res) => res.json({ reports: repo.listReports() }));

@@ -85,7 +85,9 @@ export function connect() {
   s.on('connect_error', (e) => {
     if (e.message === 'unauthorized' || e.message === 'banned') {
       s.disconnect();
-      set({ connection: 'kicked', kickReason: e.message === 'banned' ? '이용이 정지된 계정이에요.' : '로그인이 만료되었어요. 다시 로그인해 주세요.' });
+      // 정지: 서버가 기간·사유·문의처를 담아 보냄
+      const banMsg = (e as Error & { data?: { message?: string } }).data?.message;
+      set({ connection: 'kicked', kickReason: e.message === 'banned' ? (banMsg || '이용이 정지된 계정이에요.') : '로그인이 만료되었어요. 다시 로그인해 주세요.' });
     }
   });
   s.on('space:kicked', ({ reason, moved }: { reason: string; moved?: boolean }) => {
@@ -441,8 +443,8 @@ export async function goToFriend(userId: number) {
 }
 
 export async function report(userId: number, reason: string, detail: string) {
-  const res = await request('report', { userId, reason, detail });
-  if (res.ok) toast('신고가 접수되었어요. 운영팀이 확인할게요.');
+  const res = await request<{ duplicate?: boolean }>('report', { userId, reason, detail });
+  if (res.ok) toast(res.duplicate ? '이미 접수된 신고예요. 운영팀이 확인하고 있어요.' : '신고가 접수되었어요. 운영팀이 확인할게요.');
   else toast(res.error, 'error');
   return res.ok;
 }

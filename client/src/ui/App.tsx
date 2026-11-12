@@ -14,6 +14,9 @@ import { useAutoAttendance } from './Coins';
 const Game = lazy(() => import('./Game'));
 const AvatarEditor = lazy(() => import('./AvatarEditor'));
 const MoveIn = lazy(() => import('./Apartment').then((m) => ({ default: m.MoveIn })));
+const AdminPage = lazy(() => import('./AdminPage'));
+/** 관리자 페이지 주소 (/admin, /admin/users …) — 화면만 열리고, 운영 데이터는 서버가 운영자에게만 내려줌 */
+const ADMIN_ROUTE = /^\/admin(\/|$)/.test(location.pathname);
 
 export function App() {
   const me = useStore((s) => s.me);
@@ -40,7 +43,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (me && !onboarding) connect();
+    if (me && !onboarding && !ADMIN_ROUTE) connect();
     return () => { if (!me) disconnect(); };
   }, [me?.id, onboarding]);
 
@@ -53,7 +56,7 @@ export function App() {
       ) : (
         <ErrorBoundary>
           <Suspense fallback={<Splash />}>
-            {onboarding ? <AvatarEditor mode="onboarding" /> : needMoveIn ? <MoveIn onDone={() => set({ moveInLater: true })} /> : <Game />}
+            {ADMIN_ROUTE ? <AdminPage /> : onboarding ? <AvatarEditor mode="onboarding" /> : needMoveIn ? <MoveIn onDone={() => set({ moveInLater: true })} /> : <Game />}
           </Suspense>
         </ErrorBoundary>
       )}

@@ -665,7 +665,7 @@ function Comments({ post, onCount }: { post: PostView; onCount: (n: number) => v
   );
 }
 
-const POST_REPORT_REASONS = ['부적절한 사진', '욕설/비하', '스팸·광고', '개인정보 노출', '동물 학대 의심', '기타'];
+const POST_REPORT_REASONS = ['욕설 및 괴롭힘', '광고 및 도배', '부적절한 이미지', '개인정보 노출', '기타'];
 function ReportPost({ post, onClose }: { post: PostView; onClose: () => void }) {
   const [reason, setReason] = useState('');
   const [detail, setDetail] = useState('');
@@ -681,7 +681,8 @@ function ReportPost({ post, onClose }: { post: PostView; onClose: () => void }) 
         <div className="flex gap-2 mt-3">
           <button className="btn btn-ghost px-4 min-h-[44px]" onClick={onClose}>취소</button>
           <button disabled={!reason} className="btn btn-coral flex-1 min-h-[44px]" onClick={async () => {
-            if (await call(`/api/posts/${post.id}/report`, { reason, detail })) { toast('신고가 접수되었어요. 확인 후 조치할게요.'); onClose(); }
+            const r = await call<{ duplicate?: boolean }>(`/api/posts/${post.id}/report`, { reason, detail });
+            if (r) { toast(r.duplicate ? '이미 접수된 신고예요. 운영자가 확인하고 있어요.' : '신고가 접수되었어요. 확인 후 조치할게요.'); onClose(); }
           }}>신고하기</button>
         </div>
       </div>

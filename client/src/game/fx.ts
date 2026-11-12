@@ -5,7 +5,7 @@ import type { DogDriver } from './models/Dog';
 import type { ScreenSlide } from '@shared/screen';
 
 /** 광장 스크린에 지금 보이는 슬라이드 (BigScreen이 갱신) */
-export const screenNow: { get: () => ScreenSlide | 'empty' } = { get: () => 'empty' };
+export const screenNow: { get: () => ScreenSlide | 'empty'; all: () => ScreenSlide[] } = { get: () => 'empty', all: () => [] };
 
 /** 사용자 id → 그 사용자 강아지의 애니메이션 드라이버 (쓰다듬기 반응 재생용) */
 export const dogDrivers = new Map<number, MutableRefObject<DogDriver>>();

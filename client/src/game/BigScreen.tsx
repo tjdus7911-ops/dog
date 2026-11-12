@@ -144,6 +144,7 @@ export function BigScreen() {
 
   // 지금 스크린에 보이는 슬라이드 ('자세히 보기'를 누른 시점의 내용을 고정해서 보여 줌)
   screenNow.get = () => slides[idx.current % Math.max(1, slides.length)] ?? 'empty';
+  screenNow.all = () => slides;
 
   const S = BIG_SCREEN;
   return (

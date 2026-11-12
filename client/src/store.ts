@@ -15,6 +15,8 @@ export interface ViewerState {
   caption?: string;
   /** '강아지 프로필 보기' 버튼 대상 */
   dogOwnerId?: number;
+  /** 사진마다 다른 제목·설명·프로필 대상 (광장 스크린처럼 여러 강아지의 사진을 넘겨 볼 때) */
+  items?: { title?: string; caption?: string; dogOwnerId?: number }[];
 }
 
 export type CommunityTab = 'meetups' | 'clubs' | 'posts';

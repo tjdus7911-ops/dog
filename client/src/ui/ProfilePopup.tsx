@@ -86,7 +86,7 @@ export function ProfilePopup() {
   );
 }
 
-const REASONS = ['욕설/비하', '도배/스팸', '불쾌한 닉네임/사진', '사칭/사기', '기타'];
+const REASONS = ['욕설 및 괴롭힘', '광고 및 도배', '부적절한 이미지', '개인정보 노출', '기타'];
 
 export function ReportDialog({ profile }: { profile: PublicProfile }) {
   const [reason, setReason] = useState('');

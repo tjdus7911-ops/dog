@@ -148,8 +148,9 @@ async function main() {
     check('멀리서는 앉기 거부', !far.ok && /가까이/.test(far.error));
     // B를 벤치 앞으로 조금씩 이동 (서버 속도 검증 통과)
     let bx = x + 0.4, bz = z;
-    for (let i = 0; i < 12 && Math.hypot(seat.frontX - bx, seat.frontZ - bz) > 0.1; i++) {
-      const dx = seat.frontX - bx, dz = seat.frontZ - bz, dd = Math.hypot(dx, dz), step = Math.min(dd, 1.6);
+    // (한 번에 1.0m — 이벤트가 몰려 도착해도 서버 속도 검증에 걸리지 않을 만큼 작게)
+    for (let i = 0; i < 24 && Math.hypot(seat.frontX - bx, seat.frontZ - bz) > 0.1; i++) {
+      const dx = seat.frontX - bx, dz = seat.frontZ - bz, dd = Math.hypot(dx, dz), step = Math.min(dd, 1.0);
       bx += (dx / dd) * step; bz += (dz / dd) * step;
       b.s.emit('state', [bx, bz, 0, 1, bx + 0.8, bz, 0, 1]);
       await sleep(320);
@@ -157,7 +158,7 @@ async function main() {
     clear(a, b);
     const sit = await emit(b.s, 'seat:sit', { seatId: seat.id });
     await sleep(150);
-    check('벤치 앞에서 앉기 성공', sit.ok && sit.seatId === seat.id);
+    check('벤치 앞에서 앉기 성공', sit.ok && sit.seatId === seat.id, sit);
     check('다른 사용자에게 좌석 점유 전파', got(a, 'seats', (m) => m[seat.id] === b.id));
     check('이미 앉은 자리는 다른 사용자가 선택 불가', !(await emit(a.s, 'seat:sit', { seatId: seat.id })).ok);
     check('없는 좌석 거부', !(await emit(b.s, 'seat:sit', { seatId: 'nope' })).ok);

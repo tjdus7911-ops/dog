@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import type { Server, Socket } from 'socket.io';
 import * as repo from './db';
 import { userFromToken } from './auth';
+import { banMessage } from './ban';
+import { touchLastSeen } from './admin';
 import { filterProfanity, RateLimiter, sanitize, SpamGuard } from './moderation';
 import {
   BIN_REACH, CHAT_MAX_LEN, DOG_ANIM_MAX, HUMAN_ANIM_MAX, HumanAnim, NET_TICK_MS, PARKS, PET_REACH, POOP_REACH, RUN_SPEED,
@@ -30,7 +32,8 @@ function nearFurniture(ownerId: number | undefined, x: number, z: number, kinds:
 }
 
 const CAPACITY = Number(process.env.MUNGLE_PARK_CAPACITY ?? 30);
-const REPORT_REASONS = ['욕설/비하', '도배/스팸', '불쾌한 닉네임/사진', '사칭/사기', '기타'];
+// 신고 사유 (예전 앱의 사유도 계속 받음)
+const REPORT_REASONS = ['욕설 및 괴롭힘', '광고 및 도배', '부적절한 이미지', '개인정보 노출', '기타', '욕설/비하', '도배/스팸', '불쾌한 닉네임/사진', '사칭/사기'];
 /** 배변 이벤트: 산책(걷기·달리기) 누적 시간이 MIN~MAX초 사이의 임의 값에 도달하면 CHANCE 확률로 발생 */
 const POOP_MIN_S = Number(process.env.MUNGLE_POOP_MIN_S ?? 300);
 const POOP_MAX_S = Number(process.env.MUNGLE_POOP_MAX_S ?? 600);
@@ -122,7 +125,7 @@ export function setupRealtime(io: Server) {
   io.use((socket, next) => {
     const u = userFromToken(socket.handshake.auth?.token);
     if (!u) return next(new Error('unauthorized'));
-    if ('banned' in u) return next(new Error('banned'));
+    if ('banned' in u) { const err = new Error('banned') as Error & { data?: unknown }; err.data = { message: banMessage(u.banned, u.reason) }; return next(err); }
     socket.data.userId = u.id;
     socket.data.role = u.role;
     next();
@@ -231,6 +234,7 @@ export function setupRealtime(io: Server) {
 
   io.on('connection', (socket) => {
     const userId: number = socket.data.userId;
+    touchLastSeen(userId); // 관리자 페이지 '최근 접속일'
 
     // 같은 계정의 이전 접속은 종료 (한 계정 = 한 아바타)
     const prev = sessions.get(userId);
@@ -640,8 +644,8 @@ export function setupRealtime(io: Server) {
       // 맥락: 같은 공원에서 대상이 보낸 최근 공개 채팅 (서버 기록 기준, 클라이언트 입력 신뢰 안 함)
       const room = session.parkId ? rooms.get(session.parkId) : null;
       const context = room ? room.recentChat.filter((m) => m.from === other).slice(-10).map((m) => `[${new Date(m.ts).toISOString()}] ${m.text}`).join('\n') : '';
-      repo.addReport(userId, other, data.reason, detail, context);
-      okAck(ack);
+      const added = repo.addReport(userId, other, data.reason, detail, context); // 처리 전 같은 신고는 한 건으로
+      okAck(ack, added === false ? { duplicate: true } : {});
     });
 
     // ---------- 1:1 채팅 (친구 전용) ----------
@@ -738,6 +742,8 @@ export function setupRealtime(io: Server) {
         s.socket.emit('space:kicked', { reason: '집주인이 공개 범위를 바꿔서 로비로 나왔어요.' });
       }
     },
+    /** 지금 접속 중인 사람 수 (둘러보기 포함) */
+    onlineCount() { return sessions.size; },
     kick(userId: number, reason: string) {
       const s = sessions.get(userId);
       if (!s) return;

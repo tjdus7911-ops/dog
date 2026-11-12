@@ -530,10 +530,12 @@ export function PhotoViewer() {
     setMoveLocked(true, 'viewer');
     history.pushState({ mungleViewer: true }, '');
     const onPop = () => set({ viewer: null });
+    const n0 = v.photos.length;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') closeViewer();
-      if (e.key === 'ArrowRight') setI((x) => Math.min(x + 1, v.photos.length - 1));
-      if (e.key === 'ArrowLeft') setI((x) => Math.max(x - 1, 0));
+      // 순환: 마지막 → 첫 번째, 첫 번째 → 마지막
+      if (e.key === 'ArrowRight' && n0 > 1) { e.preventDefault(); setI((x) => (x + 1) % n0); }
+      if (e.key === 'ArrowLeft' && n0 > 1) { e.preventDefault(); setI((x) => (x - 1 + n0) % n0); }
     };
     window.addEventListener('popstate', onPop);
     window.addEventListener('keydown', onKey);
@@ -541,31 +543,36 @@ export function PhotoViewer() {
   }, [v]);
   if (!v) return null;
   const n = v.photos.length;
-  const go = (d: number) => setI((x) => Math.max(0, Math.min(n - 1, x + d)));
+  const cur = Math.min(i, n - 1);
+  const go = (d: number) => setI((x) => (x + d + n) % n);
+  const it = v.items?.[cur];
+  const title = it?.title ?? v.title, caption = it ? it.caption : v.caption;
+  const owner = it ? it.dogOwnerId : v.dogOwnerId;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1e1712e6] md:bg-[#2b211bcc] md:p-8" data-testid="photo-viewer"
       {...backdropClose(closeViewer)} role="dialog" aria-label="사진 크게 보기">
       <div className="relative w-full h-full md:h-auto md:max-w-[880px] md:rounded-[22px] md:overflow-hidden md:bg-[#2b211b] flex flex-col">
         <div className="flex items-center gap-2 px-3 pt-[calc(10px+var(--safe-t,0px))] pb-2 text-white">
           <div className="flex-1 min-w-0">
-            {v.title && <div className="font-display text-lg truncate">{v.title}</div>}
-            {n > 1 && <div className="text-xs opacity-75">{i + 1} / {n}</div>}
+            {title && <div className="font-display text-lg truncate">{title}</div>}
+            {n > 1 && <div className="text-xs opacity-75" data-testid="viewer-count">{cur + 1} / {n}</div>}
           </div>
           <button className="w-11 h-11 rounded-full bg-white/15 text-xl" onClick={closeViewer} aria-label="닫기">✕</button>
         </div>
         <div className="relative flex-1 md:flex-none md:h-[68vh] min-h-0 select-none touch-pan-y"
           onPointerDown={(e) => { sx.current = e.clientX; }}
-          onPointerUp={(e) => { if (sx.current !== null && Math.abs(e.clientX - sx.current) > 40) go(e.clientX < sx.current ? 1 : -1); sx.current = null; }}>
+          onPointerUp={(e) => { if (n > 1 && sx.current !== null && Math.abs(e.clientX - sx.current) > 40) go(e.clientX < sx.current ? 1 : -1); sx.current = null; }}>
           {/* 비율 유지 · 잘리지 않게 (object-contain) */}
-          <img src={v.photos[i]} alt={v.title ? `${v.title} 사진 ${i + 1}` : `사진 ${i + 1}`} className="absolute inset-0 w-full h-full object-contain" draggable={false} />
-          {n > 1 && i > 0 && <button className="absolute left-2 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-white/80 text-2xl" onClick={() => go(-1)} aria-label="이전 사진">‹</button>}
-          {n > 1 && i < n - 1 && <button className="absolute right-2 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-white/80 text-2xl" onClick={() => go(1)} aria-label="다음 사진">›</button>}
+          <img src={v.photos[cur]} alt={title ? `${title} 사진 ${cur + 1}` : `사진 ${cur + 1}`} className="absolute inset-0 w-full h-full object-contain" draggable={false} data-testid="viewer-img" />
+          {/* 이전·다음: 사진 영역 세로 가운데 (위쪽 닫기 줄·아래 설명과 겹치지 않음), 처음/끝에서 순환 */}
+          {n > 1 && <button className="absolute left-2 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/85 text-[#51473F] text-2xl shadow" onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onClick={() => go(-1)} aria-label="이전 사진" data-testid="viewer-prev">‹</button>}
+          {n > 1 && <button className="absolute right-2 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/85 text-[#51473F] text-2xl shadow" onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onClick={() => go(1)} aria-label="다음 사진" data-testid="viewer-next">›</button>}
         </div>
-        {(v.caption || v.dogOwnerId !== undefined) && (
+        {(caption || owner !== undefined) && (
           <div className="px-4 pt-3 pb-[calc(14px+var(--safe-b))] md:pb-4 text-white">
-            {v.caption && <p className="text-sm opacity-90">{v.caption}</p>}
-            {v.dogOwnerId !== undefined && (
-              <button className="btn btn-coral w-full md:w-auto md:px-6 py-3 mt-2" onClick={() => { const id = v.dogOwnerId!; closeViewer(); set({ dogSheet: id }); }}>🐶 강아지 프로필 보기</button>
+            {caption && <p className="text-sm opacity-90">{caption}</p>}
+            {owner !== undefined && (
+              <button className="btn btn-coral w-full md:w-auto md:px-6 py-3 mt-2" onClick={() => { const id = owner; closeViewer(); set({ dogSheet: id }); }}>🐶 강아지 프로필 보기</button>
             )}
           </div>
         )}
@@ -579,28 +586,24 @@ export function closeViewer() {
   if (history.state?.mungleViewer) history.back();
 }
 
-/** 광장 스크린 슬라이드 열기: 사진이 있으면 크게 보기(누른 순간의 슬라이드 고정), 없으면 상세 */
+/**
+ * 광장 스크린 슬라이드 열기: 사진이 있으면 크게 보기, 없으면 상세.
+ * 크게 보기에서는 지금 스크린에 걸린(= 운영자가 승인한) 사진만 차례로 넘겨 볼 수 있음 — 누른 사진부터, 처음/끝에서 순환.
+ * (승인 대기·반려된 사진은 서버가 스크린 목록에 주지 않으므로 여기에 나올 수 없음)
+ */
 export function openScreenSlide(s: ScreenSlide | 'empty') {
   if (s !== 'empty' && s.kind === 'runner') { set({ runner: true, runnerRank: true }); return; }
   if (s === 'empty' || !s.image) { set({ screenDetail: s }); return; }
-  const slide = s;
-  set({
-    viewer: {
-      photos: [slide.image!], index: 0,
-      title: slide.kind === 'dog' && slide.dogName ? `🐶 ${slide.dogName}` : slide.title,
-      caption: [slide.kind === 'dog' ? slide.title : '', slide.text].filter(Boolean).join(' · ') || undefined,
-      dogOwnerId: slide.kind === 'dog' ? slide.authorId : undefined,
-    },
+  const withImage = screenNow.all().filter((x) => !!x.image && x.kind !== 'runner');
+  const seen = new Set<string>();
+  const list = (withImage.some((x) => x.id === s.id && x.kind === s.kind) ? withImage : [s, ...withImage]).filter((x) => (seen.has(x.image!) ? false : (seen.add(x.image!), true)));
+  const index = Math.max(0, list.findIndex((x) => x.image === s.image));
+  const meta = (x: ScreenSlide) => ({
+    title: x.kind === 'dog' && x.dogName ? `🐶 ${x.dogName}` : x.title,
+    caption: [x.kind === 'dog' ? x.title : '', x.text].filter(Boolean).join(' · ') || undefined,
+    dogOwnerId: x.kind === 'dog' ? x.authorId : undefined,
   });
-  // 강아지 사진첩이 공개돼 있으면 슬라이드에 이어 붙임 (누른 사진이 첫 장)
-  if (slide.kind === 'dog' && !DEMO) {
-    api<{ dog: DogProfileView }>(`/api/dogs/${slide.authorId}`).then((r) => {
-      const cur = get().viewer;
-      if (!cur || cur.photos[0] !== slide.image) return;
-      const more = r.dog.photos.filter((u) => u !== slide.image);
-      if (more.length) set({ viewer: { ...cur, photos: [slide.image!, ...more], caption: cur.caption ?? (r.dog.intro || undefined) } });
-    }).catch(() => {});
-  }
+  set({ viewer: { photos: list.map((x) => x.image!), index, ...meta(list[index]), items: list.map(meta) } });
 }
 
 // ---------- 둘러보기 방문자 가입 안내 ----------

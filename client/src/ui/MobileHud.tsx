@@ -131,6 +131,7 @@ export function MoreSheet() {
       { label: '개인정보·차단 설정', onClick: fromMenu(() => set({ panel: 'settings' })), hide: DEMO || guest },
       { label: '홈 화면에 추가', onClick: fromMenu(() => void installFromButton()), hide: !canOfferInstall(pwa) },
       { label: '운영 관리', onClick: fromMenu(() => set({ panel: 'admin' })), hide: DEMO || me.role !== 'admin' },
+      { label: '관리자 페이지', onClick: fromMenu(() => location.assign('/admin')), hide: DEMO || me.role !== 'admin' },
       DEMO ? { label: '처음부터 다시 만들기', onClick: fromMenu(resetDemo), soft: true } : { label: guest ? '둘러보기 끝내기' : '로그아웃', onClick: fromMenu(logout), soft: true },
     ] },
   ];

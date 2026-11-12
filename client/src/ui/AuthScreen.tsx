@@ -94,7 +94,7 @@ export function AuthScreen() {
                 </span>
               </label>
             )}
-            {error && <p className="text-sm text-[#c4553a] bg-[#fff0ec] rounded-xl px-3 py-2">{error}</p>}
+            {error && <p className="text-sm text-[#c4553a] bg-[#fff0ec] rounded-xl px-3 py-2 whitespace-pre-line">{error}</p>}
             <button className="btn btn-peach w-full py-3 text-lg" disabled={busy}>
               {busy ? '잠시만요…' : mode === 'login' ? '산책 나가기' : '가입하고 아바타 만들기 →'}
             </button>

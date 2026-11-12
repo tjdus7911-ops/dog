@@ -27,7 +27,7 @@ export function ConnectionOverlay() {
         <div className="panel p-6 max-w-sm text-center pop">
           <div className="text-4xl">🐾</div>
           <p className="font-display text-xl mt-2">연결이 종료되었어요</p>
-          <p className="text-sm text-cocoa-soft mt-1">{reason}</p>
+          <p className="text-sm text-cocoa-soft mt-1 whitespace-pre-line">{reason}</p>
           <div className="flex gap-2 mt-4">
             <button className="btn btn-ghost flex-1 py-2.5" onClick={logout}>로그아웃</button>
             <button className="btn btn-peach flex-1 py-2.5" onClick={connect}>다시 접속</button>

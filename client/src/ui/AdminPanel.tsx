@@ -14,7 +14,9 @@ export default function AdminPanel() {
   const [tab, setTab] = useState<'reports' | 'screen'>('reports');
   return (
     <Modal onClose={() => set({ panel: 'none' })} className="max-w-3xl p-5">
-      <PanelHeader icon="🛡️" title="운영 관리" onClose={() => set({ panel: 'none' })} />
+      <PanelHeader icon="🛡️" title="운영 관리" onClose={() => set({ panel: 'none' })}>
+        <a href="/admin" className="btn btn-ghost px-3 py-1.5 text-sm !shadow-none border border-[#f1e2d2]" data-testid="open-admin-page">관리자 페이지 ›</a>
+      </PanelHeader>
       <div className="grid grid-cols-2 gap-1 bg-cream-2 rounded-full p-1 mb-3">
         {(['reports', 'screen'] as const).map((t) => (
           <button key={t} className={`btn py-2 text-sm ${tab === t ? 'bg-white shadow-sm' : 'text-cocoa-soft'}`} onClick={() => setTab(t)}>{t === 'reports' ? '🚨 신고 관리' : '📺 광장 스크린'}</button>

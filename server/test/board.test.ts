@@ -47,7 +47,9 @@ async function main() {
     const owner = await signup('boardadmin');
     const a = await signup('writer_a');
     const b = await signup('reader_b');
-    fs.writeFileSync(adminsFile, 'boardadmin\n');
+    // 운영자 지정: 계정 확인 코드 + 저장소 목록 (아이디만 적으면 지정되지 않음)
+    const claim = (await api('/api/admin-claim', {}, owner.token)).body;
+    fs.writeFileSync(adminsFile, `boardadmin ${claim.code}\n`);
     await sleep(1000);
 
     // 예전 방식으로 잘못 연결돼 있던 데이터(자랑 글 + 스크린 항목)를 미리 만들어 둠 → 그대로 보존되는지

@@ -281,7 +281,7 @@ export function toggleLike(homeId: number, userId: number) {
 }
 export function listGuestbook(homeId: number, limit = 50) {
   return all(`SELECT g.id, g.author_id, g.text, g.created_at, p.nickname, p.dog_name FROM guestbook g
-    JOIN profiles p ON p.user_id = g.author_id WHERE g.home_id = ? ORDER BY g.created_at DESC, g.id DESC LIMIT ?`, homeId, limit);
+    JOIN profiles p ON p.user_id = g.author_id WHERE g.home_id = ? AND g.hidden = 0 ORDER BY g.created_at DESC, g.id DESC LIMIT ?`, homeId, limit);
 }
 export function addGuestbook(homeId: number, authorId: number, text: string) {
   const r = run('INSERT INTO guestbook (home_id, author_id, text, created_at) VALUES (?,?,?,?)', homeId, authorId, text, Date.now());
@@ -446,8 +446,12 @@ export function unreadCounts(me: number): Record<number, number> {
 }
 
 // ---------- reports ----------
-export const addReport = (reporter: number, target: number, reason: string, detail: string, context: string) =>
+/** 이용자 신고 — 같은 사람이 같은 이용자를 처리 전에 다시 신고하면 새로 쌓지 않음 (false) */
+export function addReport(reporter: number, target: number, reason: string, detail: string, context: string) {
+  if (one("SELECT 1 FROM reports WHERE reporter_id=? AND target_id=? AND target_type='user' AND status='open'", reporter, target)) return false;
   run('INSERT INTO reports (reporter_id, target_id, reason, detail, context, created_at) VALUES (?,?,?,?,?,?)', reporter, target, reason, detail, context, Date.now());
+  return true;
+}
 export const listReports = () => all(`
   SELECT r.*, pr.nickname AS reporter_nickname, pt.nickname AS target_nickname, u.banned_until AS target_banned_until
   FROM reports r JOIN profiles pr ON pr.user_id = r.reporter_id JOIN profiles pt ON pt.user_id = r.target_id
