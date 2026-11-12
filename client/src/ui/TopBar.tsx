@@ -123,6 +123,7 @@ const WARP_ROWS: { id: WarpId; icon: IconName; label: string; sub: string }[] = 
   { id: 'cafe', icon: 'coffee', label: '멍글 애견카페', sub: '카페 입구 앞' },
   { id: 'shop', icon: 'store', label: '멍글 애견샵', sub: '샵 입구 앞' },
   { id: 'runner', icon: 'flag', label: '멍글런너', sub: '경기장 입구 앞' },
+  { id: 'pavilion', icon: 'tree', label: '멍글 팔각정', sub: '다 같이 둘러앉는 정자 · 21자리' },
 ];
 const KIND_ICON: Record<string, IconName> = { park: 'tree', lobby: 'building', home: 'home', cafe: 'coffee', shop: 'store' };
 

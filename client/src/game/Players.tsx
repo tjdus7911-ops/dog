@@ -124,11 +124,14 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
       }
     }
     // 바닥 클릭 이동: 직접 조작하면 취소, 도착하거나 막혀서 못 가면 멈춤
-    if (mag > 0.05) local.moveTarget = null;
-    else if (local.moveTarget) {
+    if (mag > 0.05) { local.moveTarget = null; local.moveVia = []; }
+    else if (!local.moveTarget && local.moveVia.length) local.moveVia = []; // 다른 곳에서 이동이 취소됨
+    if (local.moveTarget && mag <= 0.05) {
       const tx = local.moveTarget.x - local.x, tz = local.moveTarget.z - local.z;
       const dist = Math.hypot(tx, tz);
-      if (dist < 0.25) { local.moveTarget = null; m.stuck = 0; m.lastDist = Infinity; m.detour = 0; }
+      // 거쳐 가는 지점: 조금 넓게 도착 처리하고 다음 지점으로
+      if (local.moveVia.length && dist < 0.45) { local.moveTarget = local.moveVia.shift()!; m.stuck = 0; m.lastDist = Infinity; m.detour = 0; }
+      else if (dist < 0.25) { local.moveTarget = null; m.stuck = 0; m.lastDist = Infinity; m.detour = 0; }
       else {
         // 장애물(가로등·나무 등)에 막히면 옆으로 비켜 돌아가 보고, 그래도 못 가면 멈춘다
         const progressed = dist < m.lastDist - 0.004;
@@ -136,7 +139,7 @@ export function LocalPlayer({ profile }: { profile: PublicProfile }) {
         m.lastDist = dist;
         if (m.detour > 0) m.detour -= dt;
         else if (m.stuck > 0.3) { m.detour = 0.7; m.detourSide = -m.detourSide; }
-        if (m.stuck > 3) { local.moveTarget = null; m.stuck = 0; m.lastDist = Infinity; m.detour = 0; }
+        if (m.stuck > 3) { local.moveTarget = null; local.moveVia = []; m.stuck = 0; m.lastDist = Infinity; m.detour = 0; }
         else {
           dx = tx; dz = tz;
           if (m.detour > 0) {

@@ -17,7 +17,7 @@ import { residenceLabel } from '@shared/apartment';
 import {
   APARTMENT_ENTRANCE, BIG_SCREEN, BUILDINGS, CAFE_ENTRANCE, FOUNTAIN_RADIUS, MEETING_BOARD, PATH_WIDTH, PHOTO_ZONE,
   PLAZA_RADIUS, RADIAL_ANGLES, RING_RADIUS, SHOP_ENTRANCE, TREES, WORLD_RADIUS,
-  RUNNER_ARENA,
+  RUNNER_ARENA, RADIAL_END, PAVILION,
 } from '@shared/world';
 import type { MeetupView } from '@shared/community';
 import type { WarpId } from '@shared/world';
@@ -315,6 +315,7 @@ const LANDMARKS: { icon: string; label: string; x: number; z: number; spot?: { x
   { icon: '☕', label: '애견카페', x: CAFE_ENTRANCE.x, z: CAFE_ENTRANCE.z - 3, warp: 'cafe' },
   { icon: '🛍️', label: '애견샵', x: SHOP_ENTRANCE.x, z: SHOP_ENTRANCE.z - 3, warp: 'shop' },
   { icon: '🏃', label: '멍글런너', x: RUNNER_ARENA.x, z: RUNNER_ARENA.z + 1, warp: 'runner' },
+  { icon: '🪵', label: '팔각정', x: PAVILION.x, z: PAVILION.z + 1, warp: 'pavilion' },
 ];
 
 function drawPark(g: CanvasRenderingContext2D, size: number, friendIds: Set<number>) {
@@ -324,7 +325,7 @@ function drawPark(g: CanvasRenderingContext2D, size: number, friendIds: Set<numb
   g.fillStyle = '#b6db9c'; g.beginPath(); g.arc(size / 2, size / 2, size / 2 - 2, 0, Math.PI * 2); g.fill();
   g.strokeStyle = '#f3e6cf'; g.lineWidth = PATH_WIDTH * k; g.lineCap = 'round';
   g.beginPath(); g.arc(size / 2, size / 2, RING_RADIUS * k, 0, Math.PI * 2); g.stroke();
-  for (const a of RADIAL_ANGLES) { g.beginPath(); g.moveTo(...P(0, 0)); g.lineTo(...P(Math.sin(a) * 34, Math.cos(a) * 34)); g.stroke(); }
+  for (const a of RADIAL_ANGLES) { g.beginPath(); g.moveTo(...P(0, 0)); g.lineTo(...P(Math.sin(a) * RADIAL_END, Math.cos(a) * RADIAL_END)); g.stroke(); }
   g.fillStyle = '#f3e6cf'; g.beginPath(); g.arc(size / 2, size / 2, PLAZA_RADIUS * k, 0, Math.PI * 2); g.fill();
   g.fillStyle = '#9ad6e8'; g.beginPath(); g.arc(size / 2, size / 2, FOUNTAIN_RADIUS * k, 0, Math.PI * 2); g.fill();
   for (const t of TREES) { g.fillStyle = t.kind === 'cherry' ? '#f4b6c6' : '#86b874'; g.beginPath(); g.arc(...P(t.x, t.z), 2.6, 0, Math.PI * 2); g.fill(); }

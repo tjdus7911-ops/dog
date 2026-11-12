@@ -13,7 +13,7 @@ import type { CoinEarned } from '@shared/coins';
 import { tierOfBuilding } from '@shared/home';
 import { onCoinEarned } from '../ui/Coins';
 import { attachMulti } from '../runner/multi';
-import { APARTMENT_ENTRANCE, BIN_BY_ID, CAFE_ENTRANCE, SHOP_ENTRANCE, warpState, type WarpId } from '@shared/world';
+import { APARTMENT_ENTRANCE, BIN_BY_ID, CAFE_ENTRANCE, SEAT_BY_ID, SHOP_ENTRANCE, warpState, type WarpId } from '@shared/world';
 import { ACTION_MS, PET_LOW, binOpenAt, petLow, playPet } from '../game/fx';
 import { onLayoutChanged, resetFurniture } from '../game/furniture';
 import { DOG_SCALE } from '../game/models/Dog';
@@ -146,7 +146,12 @@ export function connect() {
     set({ seats });
     // 서버에서 내 자리가 해제됐다면(멀리 이동 등) 로컬 상태도 정리
     const me = get().me?.id;
-    if (local.seated && seats[local.seated] !== me) { local.seated = null; set({ seated: null }); }
+    if (local.seated && seats[local.seated] !== me) {
+      // 의자 위에 그대로 남으면 충돌 보정으로 의자 뒤로 밀려나므로 의자 앞에 세움
+      const st = SEAT_BY_ID.get(local.seated);
+      if (st && Math.hypot(local.x - st.x, local.z - st.z) < 0.3) { local.x = st.frontX; local.z = st.frontZ; }
+      local.seated = null; set({ seated: null });
+    }
   });
   s.on('kicked', ({ reason }: { reason: string }) => {
     set({ connection: 'kicked', kickReason: reason, players: {}, park: null });

@@ -11,6 +11,8 @@ export const local = {
   sitUntil: 0,
   /** 바닥 클릭으로 정한 목적지 (키보드·조이스틱을 쓰면 취소) */
   moveTarget: null as { x: number; z: number } | null,
+  /** moveTarget 에 도착한 뒤 이어서 갈 지점들 (예: 팔각정 출입구 → 가운데 → 자리 앞) */
+  moveVia: [] as { x: number; z: number }[],
   /** 벤치: 앉으러 가는 좌석 / 앉아 있는 좌석 id */
   seatGoal: null as string | null,
   seated: null as string | null,

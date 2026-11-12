@@ -31,7 +31,7 @@ function nearFurniture(ownerId: number | undefined, x: number, z: number, kinds:
   return furnitureSpots(homeLayout(ownerId), tierOfBuilding(repo.getResidence(ownerId)?.building)).some((p) => p.actions.some((a) => kinds.includes(a)) && p.human.some((h) => Math.hypot(h.x - x, h.z - z) < 0.45));
 }
 
-const CAPACITY = Number(process.env.MUNGLE_PARK_CAPACITY ?? 30);
+const CAPACITY = Number(process.env.MUNGLE_PARK_CAPACITY ?? 50); // 광장 확장: 채널당 30 → 50명
 // 신고 사유 (예전 앱의 사유도 계속 받음)
 const REPORT_REASONS = ['욕설 및 괴롭힘', '광고 및 도배', '부적절한 이미지', '개인정보 노출', '기타', '욕설/비하', '도배/스팸', '불쾌한 닉네임/사진', '사칭/사기'];
 /** 배변 이벤트: 산책(걷기·달리기) 누적 시간이 MIN~MAX초 사이의 임의 값에 도달하면 CHANCE 확률로 발생 */
@@ -386,7 +386,8 @@ export function setupRealtime(io: Server) {
       const room = rooms.get(session.parkId)!;
       const seatId = [...room.seats].find(([, uid]) => uid === userId)?.[0];
       const seat = seatId ? SEAT_BY_ID.get(seatId) : undefined;
-      if (seat && Math.hypot(x - seat.x, z - seat.z) > 1.2) releaseSeat(room, userId);
+      // (앉는 순간 아직 자리 앞에서 보낸 위치가 늦게 도착할 수 있어 여유 있게 — 앉기 요청 가능 거리와 같음)
+      if (seat && Math.hypot(x - seat.x, z - seat.z) > SEAT_REACH) releaseSeat(room, userId);
       const seated = !!seat && room.seats.get(seat.id) === userId;
       let anim = ha >= 0 && ha <= HUMAN_ANIM_MAX ? ha | 0 : 0;
       // 앉기: 벤치 좌석 또는 집 소파 자리 / 눕기·잠자기: 집 침대 자리에서만 인정

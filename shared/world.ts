@@ -1,7 +1,7 @@
 // 중앙 공원 레이아웃 & 충돌 데이터 — 결정적(seeded)으로 생성해 모든 클라이언트가 같은 공원을 본다.
 
-export const WORLD_RADIUS = 36; // 이동 가능 반경
-export const GROUND_RADIUS = 60;
+export const WORLD_RADIUS = 48; // 이동 가능 반경 (광장 확장: 36 → 48)
+export const GROUND_RADIUS = 75;
 export const PLAZA_RADIUS = 7;
 export const FOUNTAIN_RADIUS = 2.6;
 export const RING_RADIUS = 14;
@@ -12,7 +12,8 @@ export interface Circle { x: number; z: number; r: number }
 export interface Box { x: number; z: number; hw: number; hd: number }
 
 export interface TreeDef { x: number; z: number; kind: 'cherry' | 'round' | 'pine'; scale: number; rot: number }
-export interface BenchDef { x: number; z: number; rot: number }
+/** kind 'pavilion' = 팔각정 안쪽 붙박이 의자 (따로 그림), seats = 좌석 수 */
+export interface BenchDef { x: number; z: number; rot: number; seats?: 2 | 3; kind?: 'bench' | 'pavilion' }
 export interface LampDef { x: number; z: number }
 export interface BuildingDef { x: number; z: number; w: number; d: number; rot: number; kind: 'apartment' | 'cafe' | 'shop'; roof: string; wall: string }
 export interface FlowerBed { x: number; z: number; r: number }
@@ -41,13 +42,16 @@ function distToRadial(px: number, pz: number, angle: number) {
   return Math.hypot(px - cx, pz - cz);
 }
 
-export function isOnPath(x: number, z: number, margin = 0) {
+/** 방사형 길이 끝나는 거리 (광장 확장으로 34 → 46) */
+export const RADIAL_END = 46;
+function onPath(x: number, z: number, margin: number, radialEnd: number) {
   const r = Math.hypot(x, z);
   if (r < PLAZA_RADIUS + margin) return true;
   if (Math.abs(r - RING_RADIUS) < PATH_WIDTH / 2 + margin) return true;
-  if (r < 34) for (const a of RADIAL_ANGLES) if (distToRadial(x, z, a) < PATH_WIDTH / 2 + margin) return true;
+  if (r < radialEnd) for (const a of RADIAL_ANGLES) if (distToRadial(x, z, a) < PATH_WIDTH / 2 + margin) return true;
   return false;
 }
+export function isOnPath(x: number, z: number, margin = 0) { return onPath(x, z, margin, RADIAL_END); }
 
 /** 광장 대형 스크린 (방사형 길 위에 기둥 2개로 세움, 화면은 광장 쪽을 봄) */
 export const BIG_SCREEN = { x: 0, z: -11.4, w: 5.4, h: 3.0, y: 3.4, postX: 2.9 };
@@ -66,11 +70,46 @@ function insideBuilding(x: number, z: number, margin: number) {
 const rand = mulberry32(20261109);
 
 export const BENCHES: BenchDef[] = [];
+// 기존 벤치 8개 (자리 그대로, 2인용 → 3인용으로 길게)
 for (const a of [Math.PI / 4, (3 * Math.PI) / 4, (5 * Math.PI) / 4, (7 * Math.PI) / 4]) {
   const r1 = PLAZA_RADIUS + 0.9;
-  BENCHES.push({ x: Math.sin(a) * r1, z: Math.cos(a) * r1, rot: a + Math.PI });
+  BENCHES.push({ x: Math.sin(a) * r1, z: Math.cos(a) * r1, rot: a + Math.PI, seats: 3 });
   const r2 = RING_RADIUS + PATH_WIDTH / 2 + 0.8;
-  BENCHES.push({ x: Math.sin(a + 0.3) * r2, z: Math.cos(a + 0.3) * r2, rot: a + 0.3 + Math.PI });
+  BENCHES.push({ x: Math.sin(a + 0.3) * r2, z: Math.cos(a + 0.3) * r2, rot: a + 0.3 + Math.PI, seats: 3 });
+}
+/** 기존 벤치 수 (나무 배치 계산은 이 벤치들만 기준으로 해서 기존 나무가 그대로 남게) */
+const LEGACY_BENCH_COUNT = BENCHES.length;
+// 광장 확장 구역: 방사형 길 끝 쪽(40m)에 길 양옆으로 3인용 벤치 (길을 바라봄)
+for (const a of RADIAL_ANGLES) {
+  for (const side of [-1, 1]) {
+    const d = 40, off = PATH_WIDTH / 2 + 1.0;
+    const x = Math.sin(a) * d + Math.cos(a) * off * side, z = Math.cos(a) * d - Math.sin(a) * off * side;
+    BENCHES.push({ x, z, rot: a + (side > 0 ? -Math.PI / 2 : Math.PI / 2), seats: 3 });
+  }
+}
+
+/**
+ * 팔각정 — 남서쪽 잔디밭(멍글런너 경기장 맞은편). 여러 사람이 함께 둘러앉는 정자.
+ * 8면 중 광장 쪽 1면은 출입구, 나머지 7면 안쪽에 3인용 붙박이 의자 → 21자리 (가운데를 보고 앉음)
+ */
+const PV_C = { x: -25.5, z: 14.5 };
+const PV_FACE = Math.atan2(-PV_C.x, -PV_C.z); // 광장 쪽 방향 (출입구)
+export const PAVILION = {
+  x: PV_C.x, z: PV_C.z,
+  /** 꼭짓점(기둥)까지 반지름 */
+  r: 4.3,
+  /** 출입구가 바라보는 방향 (y축 회전) */
+  rot: PV_FACE,
+  /** 바닥 높이 */
+  floor: 0.08,
+};
+/** 팔각정 면 k의 가운데 방향 (k=0 이 출입구) */
+export const pavilionSideAngle = (k: number) => PV_FACE + (k * Math.PI) / 4;
+for (let k = 1; k < 8; k++) {
+  const a = pavilionSideAngle(k);
+  const d = PAVILION.r * Math.cos(Math.PI / 8) - 0.55; // 면 안쪽으로 붙인 의자
+  // 의자는 가운데를 바라봄 (벤치 앞쪽 = +z 로컬 → 가운데 방향)
+  BENCHES.push({ x: PV_C.x + Math.sin(a) * d, z: PV_C.z + Math.cos(a) * d, rot: a + Math.PI, seats: 3, kind: 'pavilion' });
 }
 
 /** 벤치 좌석 — 벤치 하나에 2자리. 좌석 위치·방향과 강아지 대기 위치를 함께 정의 (서버 검증에도 사용) */
@@ -80,15 +119,19 @@ function benchToWorld(b: BenchDef, lx: number, lz: number): [number, number] {
   const c = Math.cos(b.rot), s = Math.sin(b.rot);
   return [b.x + lx * c + lz * s, b.z - lx * s + lz * c];
 }
+/** 벤치 길이(좌석 수별) — 그리기·충돌에 함께 사용 */
+export const benchLength = (b: BenchDef) => (b.seats === 3 ? 2.2 : 1.5);
 export const SEATS: SeatDef[] = [];
 BENCHES.forEach((b, i) => {
-  for (const [k, lx] of [[0, -0.38], [1, 0.38]] as const) {
+  const xs = b.seats === 3 ? [-0.72, 0, 0.72] : [-0.38, 0.38];
+  xs.forEach((lx, k) => {
     const [x, z] = benchToWorld(b, lx, -0.02);
-    const side = lx < 0 ? -1 : 1;
-    const [dogX, dogZ] = benchToWorld(b, lx + side * 0.2, 1.05);
+    // 강아지는 주인 앞에 앉음 (가운데 자리는 바로 앞, 양 끝은 바깥쪽으로 살짝)
+    const side = lx < 0 ? -1 : lx > 0 ? 1 : 0;
+    const [dogX, dogZ] = benchToWorld(b, lx + side * 0.15, 1.05);
     const [frontX, frontZ] = benchToWorld(b, lx, 1.0);
-    SEATS.push({ id: `b${i}s${k}`, bench: i, x, z, rot: b.rot, dogX, dogZ, dogRot: b.rot + side * 0.35, frontX, frontZ });
-  }
+    SEATS.push({ id: `b${i}s${k}`, bench: i, x, z, rot: b.rot, dogX, dogZ, dogRot: b.rot + side * 0.3, frontX, frontZ });
+  });
 });
 export const SEAT_BY_ID = new Map(SEATS.map((s) => [s.id, s]));
 /** 좌석에 앉으려면 이 거리 안에 있어야 함 (서버 검증) */
@@ -136,7 +179,7 @@ export const RUNNER_ARENA = {
 
 export const LAMPS: LampDef[] = [];
 for (const a of RADIAL_ANGLES) {
-  for (const d of [9.5, 21]) {
+  for (const d of [9.5, 21, 33, 44]) {
     const side = PATH_WIDTH / 2 + 0.6;
     const px = Math.sin(a) * d + Math.cos(a) * side;
     const pz = Math.cos(a) * d - Math.sin(a) * side;
@@ -156,19 +199,43 @@ for (let i = 0; i < 10; i++) {
 
 export const TREES: TreeDef[] = [];
 {
+  // 기존 나무 70그루: 확장 전과 똑같은 계산(같은 순서·같은 기준)으로 만들어 위치가 바뀌지 않게
+  const legacy: TreeDef[] = [];
+  const legacyBenches = BENCHES.slice(0, LEGACY_BENCH_COUNT);
   let guard = 0;
-  while (TREES.length < 70 && guard++ < 4000) {
+  while (legacy.length < 70 && guard++ < 4000) {
     const a = rand() * Math.PI * 2;
     const r = 9 + rand() * 30;
     const x = Math.sin(a) * r, z = Math.cos(a) * r;
-    if (isOnPath(x, z, 1.6)) continue;
+    if (onPath(x, z, 1.6, 34)) continue;
     if (insideBuilding(x, z, 2.5)) continue;
-    if (TREES.some((t) => Math.hypot(t.x - x, t.z - z) < 3.4)) continue;
-    if (BENCHES.some((b) => Math.hypot(b.x - x, b.z - z) < 2.4)) continue;
+    if (legacy.some((t) => Math.hypot(t.x - x, t.z - z) < 3.4)) continue;
+    if (legacyBenches.some((b) => Math.hypot(b.x - x, b.z - z) < 2.4)) continue;
     if (FLOWER_BEDS.some((f) => Math.hypot(f.x - x, f.z - z) < f.r + 1.2)) continue;
     const roll = rand();
     const kind: TreeDef['kind'] = r > 30 ? (roll < 0.5 ? 'pine' : 'round') : roll < 0.45 ? 'cherry' : roll < 0.8 ? 'round' : 'pine';
-    TREES.push({ x, z, kind, scale: 0.85 + rand() * 0.5, rot: rand() * Math.PI * 2 });
+    legacy.push({ x, z, kind, scale: 0.85 + rand() * 0.5, rot: rand() * Math.PI * 2 });
+  }
+  // 새로 생긴 시설(길 연장·팔각정·바깥 벤치·가로등)과 겹치는 나무만 뺌
+  const clear = (x: number, z: number, m: number) =>
+    !isOnPath(x, z, m) && Math.hypot(x - PAVILION.x, z - PAVILION.z) > PAVILION.r + 2.2
+    && !BENCHES.slice(LEGACY_BENCH_COUNT).some((b) => Math.hypot(b.x - x, b.z - z) < 2.4)
+    && !LAMPS.some((l) => Math.hypot(l.x - x, l.z - z) < 1.2);
+  for (const t of legacy) if (clear(t.x, t.z, 1.2)) TREES.push(t);
+  // 확장 구역(37~47m)에 새 나무 (따로 정한 시드로 — 기존 배치에 영향 없음)
+  const r2 = mulberry32(20261112);
+  let g2 = 0, added = 0;
+  while (added < 34 && g2++ < 4000) {
+    const a = r2() * Math.PI * 2;
+    const r = 37.5 + r2() * 9.5;
+    const x = Math.sin(a) * r, z = Math.cos(a) * r;
+    const roll = r2(), scale = 0.85 + r2() * 0.5, rot = r2() * Math.PI * 2;
+    if (!clear(x, z, 1.6)) continue;
+    if (insideBuilding(x, z, 2.5)) continue;
+    if (TREES.some((t) => Math.hypot(t.x - x, t.z - z) < 3.6)) continue;
+    if (Math.hypot(x - RA_C.x, z - RA_C.z) < 7) continue;
+    TREES.push({ x, z, kind: roll < 0.4 ? 'pine' : roll < 0.75 ? 'round' : 'cherry', scale, rot });
+    added++;
   }
 }
 
@@ -176,7 +243,10 @@ export const COLLIDERS_CIRCLE: Circle[] = [
   { x: 0, z: 0, r: FOUNTAIN_RADIUS + 0.3 },
   ...TREES.map((t) => ({ x: t.x, z: t.z, r: 0.45 * t.scale })),
   ...LAMPS.map((l) => ({ x: l.x, z: l.z, r: 0.25 })),
-  ...BENCHES.map((b) => ({ x: b.x, z: b.z, r: 0.75 })),
+  // 벤치: 길이에 맞춰 원 여러 개 (3인용은 양 끝까지 막음)
+  ...BENCHES.flatMap((b) => (b.seats === 3 ? [-0.75, 0, 0.75] : [0]).map((lx) => { const [x, z] = benchToWorld(b, lx, 0); return { x, z, r: b.seats === 3 ? 0.55 : 0.75 }; })),
+  // 팔각정 기둥 8개
+  ...Array.from({ length: 8 }, (_, k) => { const a = pavilionSideAngle(k) + Math.PI / 8; return { x: PAVILION.x + Math.sin(a) * PAVILION.r, z: PAVILION.z + Math.cos(a) * PAVILION.r, r: 0.22 }; }),
   // 대형 스크린 기둥, 포토존 배경판
   { x: BIG_SCREEN.x - BIG_SCREEN.postX, z: BIG_SCREEN.z, r: 0.3 },
   { x: BIG_SCREEN.x + BIG_SCREEN.postX, z: BIG_SCREEN.z, r: 0.3 },
@@ -239,8 +309,8 @@ export function spawnPoint(seed: number): [number, number] {
  * 장소 선택에서 고르면 그 장소의 '입구 앞'으로 바로 이동한다 (자동으로 걸어가지 않고, 안으로 바로 들어가지도 않음).
  * 입구 안내 버튼 범위(r) 바깥 몇 걸음 앞에서, 입구를 바라보게 선다. 좌표는 서버가 이 표로만 정한다 (클라이언트가 보낸 좌표는 쓰지 않음).
  */
-export type WarpId = 'plaza' | 'apartment' | 'cafe' | 'shop' | 'runner';
-export const WARP_IDS: WarpId[] = ['plaza', 'apartment', 'cafe', 'shop', 'runner'];
+export type WarpId = 'plaza' | 'apartment' | 'cafe' | 'shop' | 'runner' | 'pavilion';
+export const WARP_IDS: WarpId[] = ['plaza', 'apartment', 'cafe', 'shop', 'runner', 'pavilion'];
 export const isWarpId = (v: unknown): v is WarpId => typeof v === 'string' && (WARP_IDS as string[]).includes(v);
 /** 입구 앞에 설 거리 (입구 안내 범위 1.8~2.0m보다 조금 바깥) */
 const WARP_STEP = 2.7;
@@ -253,6 +323,8 @@ const WARP_BASE: Record<WarpId, { x: number; z: number; rot: number }> = {
   cafe: { x: CAFE_ENTRANCE.x, z: CAFE_ENTRANCE.z + WARP_STEP, rot: Math.PI },
   shop: { x: SHOP_ENTRANCE.x, z: SHOP_ENTRANCE.z + WARP_STEP, rot: Math.PI },
   runner: { x: RUNNER_ARENA.entrance.x + RA_OUT.x * WARP_STEP, z: RUNNER_ARENA.entrance.z + RA_OUT.z * WARP_STEP, rot: Math.atan2(-RA_OUT.x, -RA_OUT.z) },
+  // 팔각정: 출입구 바깥 몇 걸음 앞에서 팔각정을 바라봄
+  pavilion: { x: PAVILION.x + Math.sin(PAVILION.rot) * (PAVILION.r + 2.2), z: PAVILION.z + Math.cos(PAVILION.rot) * (PAVILION.r + 2.2), rot: PAVILION.rot + Math.PI },
 };
 /**
  * 순간 이동 위치 (사람 · 강아지): 여러 사람이 동시에 와도 겹치지 않게 사용자마다 옆으로 조금씩 비켜 서고,

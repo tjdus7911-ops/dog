@@ -1,6 +1,6 @@
 // 실시간 미니맵 — 내 위치(주황), 친구(초록), 다른 사용자(흰색)
 import { useEffect, useRef } from 'react';
-import { BINS, BUILDINGS, RUNNER_ARENA, FOUNTAIN_RADIUS, PATH_WIDTH, PLAZA_RADIUS, RADIAL_ANGLES, RING_RADIUS, TREES, WORLD_RADIUS } from '@shared/world';
+import { BINS, BUILDINGS, PAVILION, RADIAL_END, RUNNER_ARENA, FOUNTAIN_RADIUS, PATH_WIDTH, PLAZA_RADIUS, RADIAL_ANGLES, RING_RADIUS, TREES, WORLD_RADIUS } from '@shared/world';
 import { local } from '../game/local';
 import { rendered } from '../net/remote';
 import { get, useStore } from '../store';
@@ -25,7 +25,7 @@ export function MiniMap() {
       g.fillStyle = '#b6db9c'; g.beginPath(); g.arc(SIZE / 2, SIZE / 2, SIZE / 2, 0, Math.PI * 2); g.fill();
       g.strokeStyle = '#f3e6cf'; g.lineWidth = PATH_WIDTH * k; g.lineCap = 'round';
       g.beginPath(); g.arc(SIZE / 2, SIZE / 2, RING_RADIUS * k, 0, Math.PI * 2); g.stroke();
-      for (const a of RADIAL_ANGLES) { g.beginPath(); g.moveTo(...P(0, 0)); g.lineTo(...P(Math.sin(a) * 34, Math.cos(a) * 34)); g.stroke(); }
+      for (const a of RADIAL_ANGLES) { g.beginPath(); g.moveTo(...P(0, 0)); g.lineTo(...P(Math.sin(a) * RADIAL_END, Math.cos(a) * RADIAL_END)); g.stroke(); }
       g.fillStyle = '#f3e6cf'; g.beginPath(); g.arc(SIZE / 2, SIZE / 2, PLAZA_RADIUS * k, 0, Math.PI * 2); g.fill();
       g.fillStyle = '#9ad6e8'; g.beginPath(); g.arc(SIZE / 2, SIZE / 2, FOUNTAIN_RADIUS * k, 0, Math.PI * 2); g.fill();
       for (const t of TREES) { g.fillStyle = t.kind === 'cherry' ? '#f4b6c6' : '#86b874'; g.beginPath(); g.arc(...P(t.x, t.z), 1.6, 0, Math.PI * 2); g.fill(); }
@@ -65,6 +65,11 @@ export function MiniMap() {
 
 /** 배변봉투 휴지통(초록 네모) · 치워야 할 내 강아지 배변(갈색 점) */
 export function drawBinsAndPoops(g: CanvasRenderingContext2D, P: (x: number, z: number) => [number, number], r: number) {
+  // 팔각정 (나무색 팔각형)
+  { const [x, y] = P(PAVILION.x, PAVILION.z); const k = Math.max(3, P(PAVILION.x + PAVILION.r, 0)[0] - P(PAVILION.x, 0)[0]);
+    g.fillStyle = '#d9b48a'; g.strokeStyle = '#fff'; g.lineWidth = 1.2; g.beginPath();
+    for (let i = 0; i < 8; i++) { const a = PAVILION.rot + Math.PI / 8 + (i * Math.PI) / 4; const px = x + Math.sin(a) * k, py = y + Math.cos(a) * k; if (i) g.lineTo(px, py); else g.moveTo(px, py); }
+    g.closePath(); g.fill(); g.stroke(); }
   // 멍글런너 경기장 (코랄 원)
   { const [x, y] = P(RUNNER_ARENA.x, RUNNER_ARENA.z); const k = (P(RUNNER_ARENA.x + 4.4, 0)[0] - P(RUNNER_ARENA.x, 0)[0]);
     g.fillStyle = '#f7b8a4'; g.strokeStyle = '#fff'; g.lineWidth = 1.2; g.beginPath(); g.arc(x, y, Math.max(3, k), 0, Math.PI * 2); g.fill(); g.stroke(); }
