@@ -109,6 +109,7 @@ export function connect() {
   });
   s.on('runner:updated', () => set((x) => ({ runnerVersion: x.runnerVersion + 1 })));
   s.on('screen:updated', () => set((x) => ({ screenVersion: x.screenVersion + 1 })));
+  s.on('board:updated', () => set((x) => ({ boardVersion: x.boardVersion + 1 })));
   s.on('screen:decided', (v: { title: string; approved: boolean }) => toast(v.approved ? `📺 '${v.title}'이(가) 광장 스크린에 올라갔어요!` : `'${v.title}' 스크린 신청이 반려되었어요`));
   // ---------- 멍글 동네 ----------
   s.on('community:notice', (v: { text: string }) => {

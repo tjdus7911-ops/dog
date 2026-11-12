@@ -559,7 +559,6 @@ function PostFeed({ scope = 'all', clubId, canWrite }: { scope?: string; clubId?
 function PostComposer({ clubId, onDone }: { clubId?: number; onDone: (p: PostView | null) => void }) {
   const [text, setText] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
-  const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
   const file = useRef<HTMLInputElement>(null);
   async function pick(f: File | undefined) {
@@ -570,9 +569,10 @@ function PostComposer({ clubId, onDone }: { clubId?: number; onDone: (p: PostVie
     if (!clubId && !photo) return toast('강아지 사진을 골라 주세요.', 'error');
     if (!text.trim()) return toast('내용을 입력해 주세요.', 'error');
     setBusy(true);
-    const r = await call<{ post: PostView }>('/api/posts', { text, photo, clubId, screenConsent: consent });
+    // 자랑 글은 자랑 게시판에만 (광장 대형 스크린은 '광장 스크린 신청'으로 따로)
+    const r = await call<{ post: PostView }>('/api/posts', { text, photo, clubId });
     setBusy(false);
-    if (r) { toast(consent ? '글을 올렸어요! 운영자 승인 후 광장 스크린에도 나와요 📺' : '글을 올렸어요! 🐾'); onDone(r.post); }
+    if (r) { toast(clubId ? '글을 올렸어요! 🐾' : '글을 올렸어요! 광장의 동네 모임 게시판에도 바로 보여요 🐾'); onDone(r.post); }
   }
   return (
     <div className="panel !rounded-2xl p-3 mb-3">
@@ -584,12 +584,6 @@ function PostComposer({ clubId, onDone }: { clubId?: number; onDone: (p: PostVie
           </button>}
       <textarea className="field min-h-[80px]" maxLength={POST_MAX_LEN} value={text} onChange={(e) => setText(e.target.value)} placeholder={clubId ? '모임 멤버들에게 하고 싶은 이야기' : '우리 강아지 이야기를 들려주세요'} />
       <div className="text-right text-[11px] text-cocoa-soft">{text.length}/{POST_MAX_LEN}</div>
-      {!clubId && photo && (
-        <label className="flex items-start gap-2 text-sm mt-1 bg-cream-2 rounded-xl px-3 py-2">
-          <input type="checkbox" className="mt-1 accent-[#f39a7b]" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-          <span>📺 이 사진과 글을 <b>광장 대형 스크린</b>에 공개하는 데 동의해요. <span className="text-cocoa-soft text-xs">(운영자 승인 후 노출, 글을 지우면 함께 내려가요)</span></span>
-        </label>
-      )}
       <div className="flex gap-2 mt-2">
         <button className="btn btn-ghost px-4 min-h-[44px]" onClick={() => onDone(null)}>취소</button>
         <button disabled={busy} className="btn btn-peach flex-1 min-h-[44px]" onClick={submit}>{busy ? '올리는 중…' : '올리기'}</button>

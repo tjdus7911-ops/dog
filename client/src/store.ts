@@ -85,6 +85,8 @@ interface State {
   /** 멍글 동네(커뮤니티) 화면 — 열려 있으면 조이스틱·액션 버튼을 숨기고 이동 입력을 잠금 */
   community: CommunityView | null;
   communityVersion: number;
+  /** 광장 동네 모임 게시판(모임·자랑 글) 새로 그리기 */
+  boardVersion: number;
   /** 열려 있는 모임 채팅에 실시간으로 들어온 메시지 */
   meetupLive: { meetupId: number; message: MeetupMessage }[];
   /** 곧 시작하는 모임 안내 */
@@ -172,6 +174,7 @@ export const useStore = create<State>()(() => ({
   moveInLater: false,
   community: null,
   communityVersion: 0,
+  boardVersion: 0,
   meetupLive: [],
   meetupAlert: null,
   shopOpen: false,

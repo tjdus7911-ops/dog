@@ -62,7 +62,7 @@ async function main() {
     check('로그인 없이 글쓰기 불가', (await api('/api/posts', { text: 'x', photo: PNG1 })).status === 401);
     const p1 = await api('/api/posts', { text: '우리 사슴이 첫 산책 🐾', photo: PNG1, screenConsent: true }, a.token);
     check('사진 + 글 게시 (DB 저장, 업로드 파일 생성)', p1.status === 200 && p1.body.post.image?.startsWith('/uploads/') && fs.existsSync(path.join(dataDir, 'uploads', path.basename(p1.body.post.image))));
-    check('스크린 공개 동의 → 운영자 승인 대기', p1.body.post.screen === 'pending');
+    check('자랑 글은 자랑 게시판에만 (예전 앱의 스크린 동의 값이 와도 스크린 승인 대기에 안 올라감)', p1.body.post.screen === 'none');
     const pid = p1.body.post.id;
     const feed = await api('/api/posts', undefined, b.token);
     check('다른 사용자 피드에 표시 (작성자·강아지 프로필 포함)', feed.body.posts[0]?.id === pid && feed.body.posts[0].author.nickname === '앨리스' && feed.body.posts[0].author.dogName === '사슴이');
@@ -90,15 +90,18 @@ async function main() {
     check('게시글 신고 → 운영자 신고 목록 (글 내용 포함)', rp.status === 200 && reps.body.reports.some((r: any) => r.target_type === 'post' && r.target_ref === pid && r.context.includes('첫 산책')));
 
     console.log('\n[광장 스크린 연동]');
-    const before = await api('/api/screen', undefined, b.token);
-    check('승인 전에는 스크린에 노출 안 됨', !before.body.slides.some((s: any) => s.title.includes('사슴이 첫 산책')));
-    const pend = (await api('/api/admin/screen', undefined, admin.token)).body.items.find((i: any) => i.title.includes('사슴이 첫 산책'));
+    check('자랑 글은 스크린에 노출 안 됨', !(await api('/api/screen', undefined, b.token)).body.slides.some((s: any) => s.title.includes('사슴이 첫 산책')));
+    check('자랑 글은 운영자 스크린 승인 대기에도 없음', !(await api('/api/admin/screen', undefined, admin.token)).body.pending.some((i: any) => i.title.includes('사슴이 첫 산책')));
+    // 스크린은 따로 신청
+    await api('/api/screen', { consent: true, title: '사슴이 스크린 신청', photo: PNG1 }, a.token);
+    check('스크린 신청 → 승인 전 미노출', !(await api('/api/screen', undefined, b.token)).body.slides.some((s: any) => s.title.includes('사슴이 스크린 신청')));
+    const pend = (await api('/api/admin/screen', undefined, admin.token)).body.pending.find((i: any) => i.title.includes('사슴이 스크린 신청'));
     a.events.length = 0;
     await api(`/api/admin/screen/${pend.id}`, { action: 'approve' }, admin.token);
     await sleep(100);
     const after = await api('/api/screen', undefined, b.token);
-    check('운영자 승인 후 스크린 노출 + 작성자 알림', after.body.slides.some((s: any) => s.title.includes('사슴이 첫 산책')) && got(a, 'screen:decided', (d) => d.approved));
-    check('게시글에 스크린 승인 상태 표시', (await api('/api/posts?scope=mine', undefined, a.token)).body.posts[0].screen === 'approved');
+    check('운영자 승인 후 스크린 노출 + 작성자 알림', after.body.slides.some((s: any) => s.title.includes('사슴이 스크린 신청')) && got(a, 'screen:decided', (d) => d.approved));
+    check('자랑 글은 여전히 스크린과 무관', (await api('/api/posts?scope=mine', undefined, a.token)).body.posts.every((p: any) => p.screen === 'none'));
 
     console.log('\n[차단]');
     await emit(c.s, 'block', { userId: a.id });
@@ -161,7 +164,7 @@ async function main() {
     await sleep(900);
     check('모임 시작 전 참가자에게 광장 안내 알림', got(b, 'meetup:starting', (d) => d.meetupId === on.body.meetup.id && d.park === 'central-2'));
     const scr = await api('/api/screen', undefined, c.token);
-    check('광장 스크린에 동네 모임 일정 표시', scr.body.slides.some((s: any) => s.kind === 'meetup' && s.title === '토요일 망원 한강 산책'));
+    check('동네 모임 일정은 광장 스크린에 자동으로 나오지 않음 (게시판에만)', !scr.body.slides.some((s: any) => s.kind === 'meetup'));
     await sleep(1200);
     check('비참가자 후기 불가', (await api(`/api/meetups/${on.body.meetup.id}/reviews`, { rating: 5 }, c.token)).status === 403);
     const rv = await api(`/api/meetups/${on.body.meetup.id}/reviews`, { rating: 5, text: '즐거웠어요' }, b.token);

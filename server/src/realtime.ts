@@ -705,6 +705,8 @@ export function setupRealtime(io: Server) {
     privacyChanged(userId: number) { notifyFriendsPresence(userId); },
     /** 광장 스크린 콘텐츠가 바뀌면 모두에게 알림 */
     screenUpdated() { io.emit('screen:updated'); },
+    /** 동네 모임 게시판(모임 일정·강아지 자랑 글)이 바뀌면 모두에게 알림 */
+    boardUpdated() { io.emit('board:updated'); },
     /** 멍글런너 랭킹이 바뀌면 경기장 안내판 갱신 */
     runnerChanged() { io.emit('runner:updated'); },
     /** 특정 사용자에게 실시간 알림 (방문 신청·이웃 신청 등) */

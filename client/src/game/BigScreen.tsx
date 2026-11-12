@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { BIG_SCREEN, MEETING_BOARD, PHOTO_ZONE } from '@shared/world';
-import type { MeetupView } from '@shared/community';
+import type { MeetupView, PostView } from '@shared/community';
 import { openCommunity } from '../ui/Community';
 import type { ScreenSlide } from '@shared/screen';
 import { api } from '../lib/api';
@@ -193,11 +193,21 @@ function PhotoZone() {
   );
 }
 
-/** 광장 동네 모임 게시판: 다가오는 모임(실제 DB)을 나무 게시판에 표시, 누르면 멍글 동네 > 산책 모임 */
+/**
+ * 광장 동네 모임 게시판: 위쪽 = 다가오는 산책 모임, 아래쪽 = 최근 강아지 자랑 글 (둘 다 실제 DB).
+ * 글·모임이 새로 올라오면 서버 알림(board:updated)으로 바로 다시 그림. 위쪽을 누르면 산책 모임, 아래쪽을 누르면 강아지 자랑.
+ * (자랑 글은 이 게시판과 '멍글 동네 > 강아지 자랑'에만 — 광장 대형 스크린에는 따로 신청·승인된 것만 나옴)
+ */
+const BOARD_SPLIT_Y = 228; // 캔버스에서 모임/자랑 구역 경계 (px, 높이 400)
 function MeetingBoard() {
   const M = MEETING_BOARD;
   const version = useStore((s) => s.communityVersion);
+  const boardVersion = useStore((s) => s.boardVersion);
   const [list, setList] = useState<MeetupView[]>([]);
+  const [posts, setPosts] = useState<PostView[]>([]);
+  const [imgTick, setImgTick] = useState(0);
+  const imgs = useRef(new Map<string, HTMLImageElement>());
+  const plane = useRef<THREE.Mesh>(null!);
   const { canvas, tex } = useMemo(() => {
     const c = document.createElement('canvas'); c.width = 512; c.height = 400;
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
@@ -205,47 +215,80 @@ function MeetingBoard() {
   }, []);
   const boardMat = useMemo(() => new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }), [tex]);
   useEffect(() => {
-    const load = () => api<{ meetups: MeetupView[] }>('/api/meetups?scope=upcoming').then((r) => setList(r.meetups.filter((m) => m.startsAt > Date.now()).slice(0, 4))).catch(() => setList([]));
-    void load();
+    const load = () => {
+      void api<{ meetups: MeetupView[] }>('/api/meetups?scope=upcoming').then((r) => setList(r.meetups.filter((m) => m.startsAt > Date.now()).slice(0, 2))).catch(() => setList([]));
+      void api<{ posts: PostView[] }>('/api/posts').then((r) => setPosts(r.posts.slice(0, 2))).catch(() => setPosts([]));
+    };
+    load();
     const id = window.setInterval(load, 60_000);
     return () => window.clearInterval(id);
-  }, [version]);
+  }, [version, boardVersion]);
   useEffect(() => {
     const paint = () => {
       const g = canvas.getContext('2d')!;
       const font = (n: number) => `400 ${n}px Jua, "Gowun Dodum", sans-serif`;
+      const cut = (t: string, n: number) => { const a = Array.from(t.replace(/\s+/g, ' ')); return a.length > n ? a.slice(0, n - 1).join('') + '…' : a.join(''); };
       g.fillStyle = '#fff6e8'; g.fillRect(0, 0, 512, 400);
       g.fillStyle = '#f39a7b'; g.fillRect(0, 0, 512, 70);
       g.fillStyle = '#ffffff'; g.font = font(38); g.textAlign = 'center'; g.fillText('📋 동네 모임 게시판', 256, 50);
       g.textAlign = 'left';
+      // ---- 산책 모임 ----
+      g.fillStyle = '#ec7f5c'; g.font = font(20); g.fillText('🗓️ 산책 모임', 20, 94);
       if (!list.length) {
-        g.fillStyle = '#7a5a4b'; g.font = font(30); g.textAlign = 'center';
-        g.fillText('아직 예정된 모임이 없어요', 256, 200);
-        g.fillStyle = '#a3857a'; g.font = font(24); g.fillText('눌러서 첫 산책 모임을 만들어 보세요!', 256, 250);
-        g.textAlign = 'left';
+        g.fillStyle = '#ffffff'; g.fillRect(16, 104, 480, 54);
+        g.fillStyle = '#a3857a'; g.font = font(22); g.fillText('예정된 모임이 없어요 · 눌러서 만들어 보세요', 28, 138);
       }
       list.forEach((m, i) => {
-        const y = 92 + i * 76;
-        g.fillStyle = i % 2 ? '#fdeedd' : '#ffffff'; g.fillRect(16, y, 480, 68);
-        g.fillStyle = m.kind === 'online' ? '#6f9a6a' : '#ec7f5c'; g.font = font(20);
+        const y = 104 + i * 58;
+        g.fillStyle = i % 2 ? '#fdeedd' : '#ffffff'; g.fillRect(16, y, 480, 54);
+        g.fillStyle = m.kind === 'online' ? '#6f9a6a' : '#ec7f5c'; g.font = font(17);
         const when = new Date(m.startsAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-        g.fillText(`${m.kind === 'online' ? '💻 온라인' : '🌳 ' + m.region} · ${when}`, 28, y + 26);
-        g.fillStyle = '#5a4033'; g.font = font(28);
-        const t = Array.from(m.title); g.fillText(t.length > 15 ? t.slice(0, 14).join('') + '…' : m.title, 28, y + 58);
-        g.fillStyle = '#a3857a'; g.font = font(20); g.textAlign = 'right'; g.fillText(`${m.approvedCount}/${m.capacity}명`, 484, y + 58); g.textAlign = 'left';
+        g.fillText(`${m.kind === 'online' ? '💻 온라인' : '🌳 ' + m.region} · ${when}`, 28, y + 21);
+        g.fillStyle = '#5a4033'; g.font = font(24); g.fillText(cut(m.title, 16), 28, y + 46);
+        g.fillStyle = '#a3857a'; g.font = font(18); g.textAlign = 'right'; g.fillText(`${m.approvedCount}/${m.capacity}명`, 484, y + 46); g.textAlign = 'left';
+      });
+      // ---- 강아지 자랑 ----
+      g.fillStyle = '#e8d6c3'; g.fillRect(16, BOARD_SPLIT_Y, 480, 2);
+      g.fillStyle = '#ec7f5c'; g.font = font(20); g.fillText('📸 강아지 자랑', 20, BOARD_SPLIT_Y + 26);
+      if (!posts.length) {
+        g.fillStyle = '#ffffff'; g.fillRect(16, BOARD_SPLIT_Y + 36, 480, 64);
+        g.fillStyle = '#a3857a'; g.font = font(22); g.fillText('첫 자랑 글을 올려 보세요!', 28, BOARD_SPLIT_Y + 76);
+      }
+      posts.forEach((p, i) => {
+        const y = BOARD_SPLIT_Y + 36 + i * 68;
+        g.fillStyle = i % 2 ? '#fdeedd' : '#ffffff'; g.fillRect(16, y, 480, 64);
+        const im = p.image ? imgs.current.get(p.image) : undefined;
+        if (im && im.complete && im.naturalWidth) {
+          const s = Math.max(52 / im.naturalWidth, 52 / im.naturalHeight), w = im.naturalWidth * s, h = im.naturalHeight * s;
+          g.save(); g.beginPath(); g.rect(24, y + 6, 52, 52); g.clip(); g.drawImage(im, 24 + (52 - w) / 2, y + 6 + (52 - h) / 2, w, h); g.restore();
+        } else { g.fillStyle = '#fde3d6'; g.fillRect(24, y + 6, 52, 52); g.font = font(28); g.fillText('🐶', 34, y + 43); }
+        g.fillStyle = '#a3857a'; g.font = font(17); g.fillText(cut(`${p.author.nickname} · 🐶 ${p.author.dogName}`, 22), 88, y + 23);
+        g.fillStyle = '#5a4033'; g.font = font(23); g.fillText(cut(p.text, 15), 88, y + 52);
+        g.fillStyle = '#e86a5a'; g.font = font(18); g.textAlign = 'right'; g.fillText(`❤️ ${p.likes}`, 484, y + 23); g.textAlign = 'left';
       });
       tex.needsUpdate = true;
     };
+    // 자랑 글 사진은 불러온 뒤 다시 그림
+    for (const p of posts) {
+      if (!p.image || imgs.current.has(p.image)) continue;
+      const im = new Image(); im.onload = () => setImgTick((x) => x + 1); im.src = p.image;
+      imgs.current.set(p.image, im);
+    }
     paint();
     void document.fonts?.ready.then(paint);
-  }, [list, canvas, tex]);
+  }, [list, posts, imgTick, canvas, tex]);
   return (
     <group position={[M.x - BIG_SCREEN.x, 0, M.z - BIG_SCREEN.z]} rotation={[0, M.rot, 0]}
-      onClick={(e) => { if (e.delta > 8) return; e.stopPropagation(); openCommunity('meetups'); }}
+      onClick={(e) => {
+        if (e.delta > 8) return; e.stopPropagation();
+        // 게시판 아래쪽(강아지 자랑 구역)을 누르면 강아지 자랑, 그 밖은 산책 모임
+        const onPosts = e.object === plane.current && e.uv !== undefined && e.uv.y < 1 - BOARD_SPLIT_Y / 400;
+        openCommunity(onPosts ? 'posts' : 'meetups');
+      }}
       onPointerOver={(e) => { e.stopPropagation(); document.body.style.cursor = 'pointer'; }} onPointerOut={() => { document.body.style.cursor = ''; }}>
       {[-1.05, 1.05].map((x) => <mesh key={x} geometry={geo.cyl(0.08, 0.1, 2.3, 6)} material={mat('#a8794f')} position={[x, 1.15, -0.05]} />)}
       <mesh geometry={geo.box(2.3, 1.85, 0.14)} material={mat('#c99a6b')} position={[0, 1.45, 0]} />
-      <mesh position={[0, 1.45, 0.075]} material={boardMat}><planeGeometry args={[2.05, 1.6]} /></mesh>
+      <mesh ref={plane} position={[0, 1.45, 0.075]} material={boardMat}><planeGeometry args={[2.05, 1.6]} /></mesh>
       {/* 작은 지붕 */}
       {[-1, 1].map((s) => <mesh key={s} geometry={geo.box(1.4, 0.08, 0.5)} material={mat('#8fb88a')} position={[s * 0.6, 2.5, 0]} rotation={[0, 0, -s * 0.32]} />)}
       <mesh geometry={geo.circle(1.1, 18)} material={mat('#e3efdc')} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 1.1]} />

@@ -19,7 +19,8 @@
     "test:apartment-free": "tsx test/apartmentFree.test.ts",
     "test:runner-charts": "tsx test/runnerCharts.test.ts",
     "test:apartment-paid": "tsx test/apartmentPaid.test.ts",
-    "test:admin": "tsx test/admin.test.ts"
+    "test:admin": "tsx test/admin.test.ts",
+    "test:board": "tsx test/board.test.ts"
   },
   "dependencies": {
     "express": "^4.21.0",

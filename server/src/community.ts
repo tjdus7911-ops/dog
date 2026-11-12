@@ -100,6 +100,8 @@ export interface CommunityDeps {
   removeImage: (url: string | null | undefined) => void;
   notify: (userId: number, event: string, payload: unknown) => void;
   screenUpdated: () => void;
+  /** 광장 '동네 모임 게시판'(모임 일정 + 강아지 자랑 글)에 보일 내용이 바뀜 → 모두에게 알림 */
+  boardUpdated: () => void;
 }
 
 function author(id: number): AuthorSummary {
@@ -182,11 +184,10 @@ export function registerCommunity(app: express.Express, deps: CommunityDeps) {
     if (!clubId && !image) return res.status(400).json({ error: '강아지 사진을 함께 올려 주세요.' });
     const r = run('INSERT INTO posts (author_id, club_id, text, image, created_at) VALUES (?,?,?,?,?)', uid, clubId, text, image, Date.now());
     const id = Number(r.lastInsertRowid);
-    // 광장 스크린 공개 동의 → 운영자 승인 대기열로
-    if (req.body?.screenConsent === true && image && !clubId) {
-      run(`INSERT INTO screen_items (kind, author_id, title, text, image, owns_image, status, created_at, post_id) VALUES ('dog',?,?,?,?,0,'pending',?,?)`,
-        uid, Array.from(text).slice(0, 30).join(''), Array.from(text).slice(30, 110).join(''), image, Date.now(), id);
-    }
+    // 강아지 자랑 글은 자랑 게시판에만 등록 — 광장 대형 스크린(승인 대기 목록 포함)에는 자동으로 올라가지 않음.
+    // 스크린에 올리려면 '광장 스크린 신청'(POST /api/screen)으로 따로 신청 → 운영자 승인 후에만 노출.
+    // (예전 앱이 보내는 screenConsent 값은 무시)
+    if (!clubId) deps.boardUpdated();
     res.json({ post: postView(one('SELECT * FROM posts WHERE id=?', id)!, uid) });
   });
 
@@ -199,6 +200,7 @@ export function registerCommunity(app: express.Express, deps: CommunityDeps) {
     run('DELETE FROM posts WHERE id=?', r.id);
     deps.removeImage(r.image);
     deps.screenUpdated();
+    deps.boardUpdated();
     res.json({ ok: true });
   });
 
@@ -264,6 +266,7 @@ export function registerCommunity(app: express.Express, deps: CommunityDeps) {
     run('UPDATE posts SET hidden=1 WHERE id=?', Number(req.params.id));
     run("UPDATE screen_items SET status='hidden' WHERE post_id=?", Number(req.params.id));
     deps.screenUpdated();
+    deps.boardUpdated();
     res.json({ ok: true });
   });
 
@@ -327,6 +330,7 @@ export function registerCommunity(app: express.Express, deps: CommunityDeps) {
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, uid, title, intro, kind, region, place, park, startsAt, capacity, b.sizeRule, b.temperRule, approval, Date.now());
     const id = Number(r.lastInsertRowid);
     run("INSERT INTO meetup_members (meetup_id, user_id, status, created_at) VALUES (?,?,'approved',?)", id, uid, Date.now());
+    deps.boardUpdated();
     res.json({ meetup: meetupView(getMeetup(id)!, uid) });
   });
 
@@ -388,6 +392,7 @@ export function registerCommunity(app: express.Express, deps: CommunityDeps) {
     const r = getMeetup(Number(req.params.id));
     if (!r || r.host_id !== uid) return res.status(403).json({ error: '모임장만 취소할 수 있어요.' });
     run("UPDATE meetups SET status='cancelled' WHERE id=?", r.id);
+    deps.boardUpdated();
     for (const m of all("SELECT user_id FROM meetup_members WHERE meetup_id=? AND status='approved' AND user_id<>?", r.id, uid)) deps.notify(m.user_id, 'community:notice', { text: `'${r.title}' 모임이 취소됐어요` });
     res.json({ meetup: detail(getMeetup(r.id)!, uid) });
   });
@@ -512,11 +517,10 @@ export function registerCommunity(app: express.Express, deps: CommunityDeps) {
 /** 집 꾸미기에서 쓸 수 있는 추가 가구 (애견샵에서 받은 것) */
 export const claimedItems = (userId: number) => all('SELECT item FROM shop_claims WHERE user_id=?', userId).map((r) => r.item as string);
 
-/** 광장 스크린용: 다가오는 모임 · 인기 자랑 글 */
+/** 광장 스크린용: 인기 자랑 글 (운영자가 승인한 스크린 항목 중에서만 — 승인 안 된 글·모임은 스크린에 나오지 않음) */
 export function screenExtras() {
-  const meetups = all("SELECT * FROM meetups WHERE status='open' AND starts_at > ? ORDER BY starts_at LIMIT 3", Date.now());
   const popular = one(`SELECT s.*, p.nickname, p.dog_name, (SELECT COUNT(*) FROM post_likes l WHERE l.post_id=s.post_id) AS likes
     FROM screen_items s JOIN profiles p ON p.user_id=s.author_id WHERE s.status='approved' AND s.post_id IS NOT NULL
     AND s.created_at > ? ORDER BY likes DESC LIMIT 1`, Date.now() - 7 * 86400_000);
-  return { meetups, popular };
+  return { popular };
 }

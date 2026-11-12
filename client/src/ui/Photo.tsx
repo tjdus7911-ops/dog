@@ -130,7 +130,8 @@ export function ScreenDetail() {
         <div className="grid gap-2 mt-4">
           {s.kind === 'meetup' && <button className="btn btn-peach py-2.5" onClick={() => { close(); openCommunity('meetups', { meetupId: s.id }); }}>🐾 모임 보기·참가 신청</button>}
           {s.kind === 'dog' && s.authorId !== me?.id && <button className="btn btn-ghost py-2.5 border border-[#f1e2d2]" onClick={() => { close(); void openProfile(s.authorId); }}>👤 작성자 프로필 보기</button>}
-          {s.kind !== 'meetup' && <button className="btn btn-coral py-2.5" onClick={() => { close(); openCommunity('posts'); }}>📸 강아지 자랑하고 스크린에 올리기</button>}
+          {/* 스크린에는 따로 신청 → 운영자 승인 후에만 노출 (자랑 글을 써도 스크린에 자동으로 올라가지 않음) */}
+          {s.kind !== 'meetup' && <button className="btn btn-coral py-2.5" disabled={DEMO} onClick={() => set({ screenDetail: null, screenSubmit: {} })}>📺 우리 강아지 스크린에 올리기 신청</button>}
         </div>
       </div>
     </Modal>

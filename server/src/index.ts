@@ -609,16 +609,12 @@ function screenFeed() {
   // 오늘의 강아지: 승인된 강아지 중 날짜마다 한 마리씩 돌아가며
   const day = Math.floor((Date.now() + 9 * 3600_000) / 86400_000);
   const today = dogs.length ? dogs[day % dogs.length] : null;
-  const { meetups, popular } = screenExtras();
+  // 대형 스크린: 운영자가 승인한 항목(강아지 사진 신청·운영 공지)만. 동네 모임 일정·자랑 글은 '동네 모임 게시판'에만 (자동 노출 없음)
+  const { popular } = screenExtras();
   const pop = popular && popular.id !== today?.id ? popular : null;
   const slides = [
     ...(today ? [{ ...toScreen(today), label: '오늘의 강아지' }] : []),
     ...(pop ? [{ ...toScreen(pop), label: `인기 자랑 글 ❤️${pop.likes}` }] : []),
-    ...meetups.map((m) => ({
-      id: m.id as number, kind: 'meetup', label: '동네 모임 일정', title: m.title as string,
-      text: `${fmtWhen(m.starts_at)} · ${m.kind === 'online' ? '온라인 · ' : ''}${m.place}`, image: null,
-      author: repo.getPublicProfile(m.host_id)?.nickname ?? '', authorId: m.host_id as number, dogName: null, ts: m.created_at as number,
-    })),
     ...dogs.filter((d) => d !== today && d.id !== pop?.id).slice(0, 6).map((d) => ({ ...toScreen(d), label: '우리 강아지 자랑' })),
     ...notices.slice(0, 3).map((n) => ({ ...toScreen(n), label: '운영 공지' })),
     // 멍글런너 코스별 TOP 3 (기록이 있는 코스만)
@@ -703,7 +699,7 @@ registerPets(app, { saveImage, removeImage, profileChanged: (u) => rt.profileCha
 registerRunner(app, { changed: () => { rt.runnerChanged(); rt.screenUpdated(); } });
 
 // ---------- 멍글 동네 (강아지 자랑·산책 모임·강아지 모임·애견샵) ----------
-registerCommunity(app, { saveImage, removeImage, notify: (u, e, p) => rt.notify(u, e, p), screenUpdated: () => rt.screenUpdated() });
+registerCommunity(app, { saveImage, removeImage, notify: (u, e, p) => rt.notify(u, e, p), screenUpdated: () => rt.screenUpdated(), boardUpdated: () => rt.boardUpdated() });
 
 // ---------- 운영 ----------
 app.get('/api/admin/reports', requireAuth, requireAdmin, (_req, res) => res.json({ reports: repo.listReports() }));
