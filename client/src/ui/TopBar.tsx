@@ -12,7 +12,7 @@ import { openCommunity } from './Community';
 import { isTouchDevice } from '../game/input';
 import { CoinChip } from './Coins';
 import { Icon, type IconName } from './icons';
-import { closeMenu, dropdownPlacement, toggleMenu } from './menus';
+import { closeMenu, dropdownPlacement, goToPage, toggleMenu } from './menus';
 import type { WarpId } from '@shared/world';
 import { LogoMark } from './Logo';
 import { installFromButton } from './Install';
@@ -85,7 +85,7 @@ export function TopBar() {
             {DEMO ? <MenuItem onClick={resetDemo}>처음부터 다시 만들기</MenuItem> : <>
               <MenuItem onClick={() => set({ panel: 'settings' })}>개인정보·차단 설정</MenuItem>
               {me.role === 'admin' && <MenuItem onClick={() => set({ panel: 'admin' })}>운영 관리 (신고·스크린·설정)</MenuItem>}
-              {me.role === 'admin' && <MenuItem onClick={() => location.assign('/admin')}>관리자 페이지</MenuItem>}
+              {me.role === 'admin' && <MenuItem onClick={() => goToPage('/admin')}>관리자 페이지</MenuItem>}
               {canOfferInstall(pwa) && <MenuItem onClick={() => void installFromButton()}>홈 화면에 추가 (앱 설치)</MenuItem>}
               <MenuItem soft onClick={logout}>로그아웃</MenuItem>
             </>}

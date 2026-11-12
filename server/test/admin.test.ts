@@ -126,7 +126,9 @@ async function main() {
     console.log('\n[게시글: 숨김 → 해제 → 삭제(복구 가능) → 복구 → 영구 삭제]');
     await api(`/api/posts/${pid}/comments`, { text: '댓글 하나' }, other.token);
     const seen = async () => (await api('/api/posts', undefined, other.token)).body.posts.some((p: any) => p.id === pid);
-    check('사유 없이 숨김 불가', (await api(`/api/admin/content/post/${pid}`, { action: 'hide' }, owner.token)).status === 400);
+    // 글 처리 사유는 선택 (운영 기록에만, 작성자에게 알리지 않음)
+    check('사유 없이도 숨김 가능 → 다른 이용자에게 안 보임', (await api(`/api/admin/content/post/${pid}`, { action: 'hide' }, owner.token)).status === 200 && !(await seen()));
+    await api(`/api/admin/content/post/${pid}`, { action: 'unhide' }, owner.token);
     check('숨김 → 다른 이용자에게 안 보임', (await api(`/api/admin/content/post/${pid}`, { action: 'hide', reason: '광고' }, owner.token)).status === 200 && !(await seen()));
     check('숨김 해제 → 다시 보임', (await api(`/api/admin/content/post/${pid}`, { action: 'unhide', reason: '오해' }, owner.token)).status === 200 && (await seen()));
     check('삭제(복구 가능) → 안 보임', (await api(`/api/admin/content/post/${pid}`, { action: 'delete', reason: '광고 재확인' }, owner.token)).status === 200 && !(await seen()));

@@ -20,6 +20,25 @@ export const closeMenu = () => { if (get().activeMenu) set({ activeMenu: null })
 /** 메뉴 항목을 누르면: 메뉴를 닫고 그 동작 실행 */
 export const fromMenu = (fn: () => void) => () => { closeMenu(); fn(); };
 
+/**
+ * 다른 페이지(예: 관리자 페이지 /admin)로 이동.
+ * 메뉴·창을 닫으면 뒤로가기 기록 정리(history.back)가 뒤따라 일어나는데, 그게 막 시작한 페이지 이동을 취소해 버림.
+ * → 메뉴·창을 먼저 닫고, 기록 정리가 끝난 뒤(popstate, 없으면 잠시 뒤)에 이동한다.
+ */
+export function goToPage(url: string) {
+  closeMenu();
+  set({ panel: 'none' });
+  let done = false;
+  const go = () => {
+    if (done) return;
+    done = true;
+    window.removeEventListener('popstate', go);
+    location.assign(url);
+  };
+  window.addEventListener('popstate', go);
+  setTimeout(go, 350);
+}
+
 /** 메뉴를 닫게 하는 다른 창들 (새로 열리면 메뉴는 닫힘) */
 const OVERLAYS: ((s: State) => unknown)[] = [
   (s) => s.panel !== 'none', (s) => s.mapOpen, (s) => s.eventsOpen, (s) => s.wallet, (s) => s.moveOpen,

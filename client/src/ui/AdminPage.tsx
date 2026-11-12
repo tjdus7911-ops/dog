@@ -96,7 +96,7 @@ function Info({ label, children }: { label: string; children: ReactNode }) {
 // ---------------------------------------------------------------- 확인 창 (사유 입력 포함)
 interface Ask {
   title: string; desc?: ReactNode; confirmLabel: string; danger?: boolean;
-  /** 사유 입력 (기본: 필수) */ reason?: { label?: string; required?: boolean; presets?: string[] } | false;
+  /** 사유 입력 (기본: 필수) */ reason?: { label?: string; required?: boolean; presets?: string[]; hint?: string } | false;
   /** 이 문구를 그대로 입력해야 실행 (영구 삭제 등) */ typeWord?: string;
   onConfirm: (reason: string) => Promise<boolean>;
 }
@@ -128,7 +128,7 @@ function AskDialog({ a, onClose }: { a: Ask; onClose: () => void }) {
               </div>
             )}
             <textarea className="field mt-1.5 text-sm min-h-[64px]" maxLength={200} value={reason} onChange={(e) => setReason(e.target.value)}
-              placeholder="기록에 남고, 정지인 경우 해당 회원에게도 안내돼요" data-testid="admin-ask-reason" />
+              placeholder={a.reason?.hint ?? '운영 기록에만 남아요'} data-testid="admin-ask-reason" />
           </div>
         )}
         {a.typeWord && (
@@ -416,7 +416,7 @@ function UserDetail({ id, onClose }: { id: number; onClose: () => void }) {
   const ban = () => u && days !== null && nav.ask({
     title: `${u.nickname || u.username}님을 ${periodLabel(days)}할까요?`,
     desc: <>지금 접속 중이면 바로 연결이 끊기고, 로그인·게임·채팅을 쓸 수 없어요. 회원에게 기간과 사유, 문의처가 안내돼요.{banned ? ' (이미 정지 중이면 새 기간으로 바뀌어요)' : ''}</>,
-    confirmLabel: periodLabel(days), danger: true, reason: { label: '정지 사유', presets: REPORT_REASONS },
+    confirmLabel: periodLabel(days), danger: true, reason: { label: '정지 사유', presets: REPORT_REASONS, hint: '운영 기록에 남고, 정지된 회원에게 기간과 함께 안내돼요' },
     onConfirm: async (reason) => {
       const r = await call(`/api/admin/users/${u.id}/ban`, { days, reason });
       if (r) { toast(`${periodLabel(days)} 처리했어요`); setDays(null); nav.bump(); }
@@ -566,8 +566,10 @@ function ContentDetail({ type, id, onClose }: { type: CType; id: number; onClose
       restore: { title: `${name}을(를) 복구할까요?`, desc: type === 'screen' ? "'승인 대기'로 돌아가요. 스크린 승인에서 다시 승인하면 나와요." : '삭제 전처럼 회원에게 다시 보여요.', confirmLabel: '복구' },
       purge: { title: `${name}을(를) 영구 삭제할까요?`, desc: <>되돌릴 수 없어요. {type === 'post' ? `이 글의 댓글${d?.comments ? ` ${d.comments}개` : ''}·좋아요·저장·연결된 스크린 항목과 사진 파일이 함께 지워져요.` : type === 'meetup' ? '참가자·채팅·후기가 함께 지워져요.' : type === 'screen' ? '스크린 항목과 신청 사진 파일이 지워져요.' : '내용이 완전히 지워져요.'} 신고 기록은 처리 내역으로 남아요.</>, confirmLabel: '영구 삭제', danger: true, typeWord: '영구 삭제' },
     };
+    const NOTE = { required: false, hint: '운영 기록에만 남아요. 작성자에게는 알리지 않아요.' };
     nav.ask({
       ...conf[action],
+      reason: { ...NOTE, ...(conf[action].reason || {}), required: false },
       onConfirm: async (reason) => {
         const r = await call(`/api/admin/content/${type}/${id}`, { action, reason, ...(action === 'purge' ? { confirm: '영구 삭제' } : {}) });
         if (!r) return false;

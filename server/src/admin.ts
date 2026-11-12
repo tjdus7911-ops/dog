@@ -328,7 +328,7 @@ export function registerAdmin(app: express.Express, deps: AdminDeps) {
     const action = String(req.body?.action ?? '');
     const reason = reasonOf(req.body?.reason);
     if (!KINDS.includes(k) || !['hide', 'unhide', 'delete', 'restore', 'purge'].includes(action)) return res.status(400).json({ error: '잘못된 요청' });
-    if (!reason) return res.status(400).json({ error: '처리 사유를 입력해 주세요.' });
+    // 처리 사유는 선택 — 운영 기록에만 남고 작성자에게는 알리지 않음
     const r = getContent(k, Number(req.params.id));
     if (!r) return res.status(404).json({ error: '찾을 수 없어요.' });
     const id = Number(r.id);

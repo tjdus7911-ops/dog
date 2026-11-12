@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { set, toast } from '../store';
 import { openProfile } from '../net/socket';
 import { Modal, PanelHeader, timeLabel } from './common';
+import { goToPage } from './menus';
 
 interface Report {
   id: number; reporter_nickname: string; target_nickname: string; target_id: number; target_banned_until: number;
@@ -15,7 +16,7 @@ export default function AdminPanel() {
   return (
     <Modal onClose={() => set({ panel: 'none' })} className="max-w-3xl p-5">
       <PanelHeader icon="🛡️" title="운영 관리" onClose={() => set({ panel: 'none' })}>
-        <a href="/admin" className="btn btn-ghost px-3 py-1.5 text-sm !shadow-none border border-[#f1e2d2]" data-testid="open-admin-page">관리자 페이지 ›</a>
+        <button className="btn btn-ghost px-3 py-1.5 text-sm !shadow-none border border-[#f1e2d2]" onClick={() => goToPage('/admin')} data-testid="open-admin-page">관리자 페이지 ›</button>
       </PanelHeader>
       <div className="grid grid-cols-2 gap-1 bg-cream-2 rounded-full p-1 mb-3">
         {(['reports', 'screen'] as const).map((t) => (
