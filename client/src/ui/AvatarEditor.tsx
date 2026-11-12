@@ -206,7 +206,8 @@ export default function AvatarEditor({ mode }: { mode: 'onboarding' | 'edit' }) 
 
   const dogRows = (
     <>
-      <DogAiPanel current={dog} onApply={(next) => setDog({ ...next, harness: dog.harness })} onUseAsProfile={uploadPhoto} />
+      {/* 강아지 AI 사진 분석(사진 업로드): 모바일 화면에서는 숨김 (PC에서만) */}
+      {!isMobile && <DogAiPanel current={dog} onApply={(next) => setDog({ ...next, harness: dog.harness })} onUseAsProfile={uploadPhoto} />}
       <div className="grid md:grid-cols-2 gap-3 py-3 border-b border-[#f4e6d7]">
         <label className="text-sm font-display">강아지 이름
           <input className="field !rounded-2xl mt-1 font-body" value={dogName} maxLength={12} onChange={(e) => setDogName(e.target.value)} />

@@ -7,7 +7,7 @@ import { AuthScreen } from './AuthScreen';
 import { ErrorBoundary, Toasts } from './common';
 import type { MyProfile } from '@shared/protocol';
 import { DEMO, loadDemoProfile } from '../demo';
-import { InstallGuideSheet } from './Install';
+import { InAppBanner, InstallGuideSheet } from './Install';
 import { LogoMark } from './Logo';
 import { useAutoAttendance } from './Coins';
 
@@ -60,6 +60,7 @@ export function App() {
           </Suspense>
         </ErrorBoundary>
       )}
+      <InAppBanner />
       <InstallGuideSheet />
       <Toasts />
     </>

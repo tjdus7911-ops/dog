@@ -87,12 +87,16 @@ export async function startInstall(): Promise<'accepted' | 'dismissed' | 'guide'
   return 'guide';
 }
 export const closeInstallGuide = () => patch({ guide: null });
+/** 앱 속 브라우저 → 기본 브라우저로 여는 방법 안내 */
+export const openInAppGuide = () => patch({ guide: 'inapp' });
 
 /** 앱 안 브라우저에서 기본 브라우저로 열기 (지원하는 앱만, 아니면 null) */
 export function externalOpenUrl(): string | null {
   const url = location.href;
   if (inApp === 'kakao') return `kakaotalk://web/openExternal?url=${encodeURIComponent(url)}`;
   if (inApp === 'line') return url + (url.includes('?') ? '&' : '?') + 'openExternalBrowser=1';
-  if (device.android) return `intent://${location.host}${location.pathname}${location.search}#Intent;scheme=https;package=com.android.chrome;end`;
+  if (device.android) return `intent://${location.host}${location.pathname}${location.search}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(url)};end`;
+  // 아이폰: iOS 17 이상은 x-safari- 주소로 사파리를 바로 열 수 있음 (안 되는 버전은 화면 안내로)
+  if (device.ios) return `x-safari-${url}`;
   return null;
 }

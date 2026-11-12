@@ -1,6 +1,6 @@
 // 홈 화면에 추가 — 버튼과 기기별 안내 시트
 import { useEffect, useState, type ReactNode } from 'react';
-import { canOfferInstall, closeInstallGuide, device, externalOpenUrl, inApp, IN_APP_NAME, mobile, startInstall, usePwa } from '../pwa';
+import { canOfferInstall, closeInstallGuide, device, externalOpenUrl, inApp, IN_APP_NAME, mobile, openInAppGuide, startInstall, usePwa } from '../pwa';
 import { toast } from '../store';
 import { LogoMark } from './Logo';
 import { Icon } from './icons';
@@ -121,8 +121,8 @@ export function InstallGuideSheet() {
         )}
         {guide === 'inapp' && inApp && (
           <>
-            <p className="mt-3 text-[14px] leading-relaxed">{IN_APP_NAME[inApp]} 안에서 열린 화면에서는 홈 화면에 추가할 수 없어요. {device.ios ? '사파리' : '크롬'} 같은 기본 브라우저로 연 다음 다시 눌러 주세요.</p>
-            {!ext && device.ios && (
+            <p className="mt-3 text-[14px] leading-relaxed">{IN_APP_NAME[inApp]} 안에서 열린 화면에서는 3D 화면이 느리거나 홈 화면에 추가할 수 없어요. {device.ios ? '사파리' : '크롬'} 같은 기본 브라우저로 열어 주세요.</p>
+            {device.ios && (
               <ol className="mt-3 space-y-3">
                 <Step n={1}>화면 오른쪽 위나 아래의 <Chip>···</Chip> 또는 <Chip><Icon name="share" size={15} /></Chip> 버튼을 눌러요.</Step>
                 <Step n={2}><b>Safari로 열기</b>(또는 <b>외부 브라우저로 열기</b>)를 골라요.</Step>
@@ -140,6 +140,30 @@ export function InstallGuideSheet() {
           </p>
         )}
       </section>
+    </div>
+  );
+}
+
+/**
+ * 인스타그램·카카오톡 등 앱 속 브라우저에서 열렸을 때 위쪽 안내 띠.
+ * (페이지가 열리자마자 기본 브라우저로 한 번 자동으로 넘기고 — index.html — 그래도 여기 남아 있으면 보여 줌)
+ */
+export function InAppBanner() {
+  const [hidden, setHidden] = useState(() => { try { return sessionStorage.getItem('mungle.inappHide') === '1'; } catch { return false; } });
+  if (!inApp || hidden) return null;
+  const ext = externalOpenUrl();
+  const close = () => { try { sessionStorage.setItem('mungle.inappHide', '1'); } catch { /* 이번 화면에서만 숨김 */ } setHidden(true); };
+  return (
+    <div className="fixed inset-x-0 z-[65] flex justify-center px-3 pointer-events-none" style={{ top: 'calc(var(--safe-t, 0px) + 8px)' }} data-testid="inapp-banner">
+      <div className="panel pointer-events-auto w-full max-w-[460px] !rounded-[18px] px-3 py-2.5 flex items-center gap-2">
+        <Icon name="external" size={18} className="text-[#E58D76] shrink-0" />
+        <p className="flex-1 min-w-0 text-[13px] leading-snug">{IN_APP_NAME[inApp]} 안에서 열렸어요. {device.ios ? '사파리' : '크롬'}에서 열면 더 매끄러워요.</p>
+        {ext
+          ? <a href={ext} className="btn btn-peach px-3 py-1.5 text-[13px] shrink-0" data-testid="inapp-open">열기</a>
+          : <button type="button" className="btn btn-peach px-3 py-1.5 text-[13px] shrink-0" onClick={openInAppGuide}>방법</button>}
+        {ext && <button type="button" className="text-[12px] underline text-[#8A8078] shrink-0" onClick={openInAppGuide}>방법</button>}
+        <button type="button" className="w-7 h-7 grid place-items-center text-[#8A8078] shrink-0" onClick={close} aria-label="안내 닫기"><Icon name="x" size={14} /></button>
+      </div>
     </div>
   );
 }

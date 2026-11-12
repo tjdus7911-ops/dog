@@ -27,6 +27,24 @@
     <meta property="og:image:height" content="630" />
     <meta property="og:locale" content="ko_KR" />
     <meta name="twitter:card" content="summary_large_image" />
+    <!-- 인스타그램·카카오톡 등 앱 속 브라우저로 열리면 바로 기본 브라우저(크롬·사파리)로 넘김 (한 번만 시도, 안 되면 화면에서 안내) -->
+    <script>
+      (function () {
+        try {
+          var ua = navigator.userAgent || '';
+          if (!/KAKAOTALK|Instagram|FBAN|FBAV|FB_IAB|NAVER\(inapp|\bLine\/|BAND\/|everytimeApp|DaumApps|Threads|Barcelona/i.test(ua)) return;
+          if (sessionStorage.getItem('mungle.extTried')) return;
+          sessionStorage.setItem('mungle.extTried', '1');
+          var url = location.href;
+          var go = null;
+          if (/KAKAOTALK/i.test(ua)) go = 'kakaotalk://web/openExternal?url=' + encodeURIComponent(url);
+          else if (/\bLine\//i.test(ua)) go = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'openExternalBrowser=1';
+          else if (/Android/i.test(ua)) go = 'intent://' + location.host + location.pathname + location.search + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(url) + ';end';
+          else if (/iPhone|iPad|iPod/i.test(ua)) go = 'x-safari-' + url;
+          if (go) location.href = go;
+        } catch (e) { /* 저장소를 쓸 수 없는 환경: 그냥 이 화면에서 계속 */ }
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&family=Gowun+Dodum&display=swap" />
   </head>
