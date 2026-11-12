@@ -24,7 +24,8 @@ const MIN_DIST = 3.2, MAX_DIST = 20, MIN_PITCH = 0.08, MAX_PITCH = 1.25;
  */
 function parkView() {
   const portrait = typeof window !== 'undefined' && window.innerHeight > window.innerWidth;
-  if (portrait) return { dist: 10.4, pitch: 0.34, lookUp: 1.55, fov: 58 };
+  // 세로 화면(휴대폰): 여러 사람이 모여도 한눈에 보이게 더 높고 멀리 (거리 10.4 → 19, 각도 0.34 → 0.58)
+  if (portrait) return { dist: 19, pitch: 0.58, lookUp: 1.55, fov: 58 };
   // 가로 화면(PC·태블릿): 광장의 여러 사람이 한눈에 보이도록 멀리·조금 위에서 (거리 10 → 16, 각도 0.36 → 0.42)
   if (isTouchDevice()) return { dist: 16, pitch: 0.42, lookUp: 1.1, fov: 52 };
   return { dist: 16, pitch: 0.42, lookUp: 1.0, fov: 50 };

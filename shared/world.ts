@@ -13,7 +13,7 @@ export interface Box { x: number; z: number; hw: number; hd: number }
 
 export interface TreeDef { x: number; z: number; kind: 'cherry' | 'round' | 'pine'; scale: number; rot: number }
 /** kind 'pavilion' = 팔각정 안쪽 붙박이 의자 (따로 그림), seats = 좌석 수 */
-export interface BenchDef { x: number; z: number; rot: number; seats?: 2 | 3; kind?: 'bench' | 'pavilion' }
+export interface BenchDef { x: number; z: number; rot: number; seats?: number; kind?: 'bench' | 'pavilion' }
 export interface LampDef { x: number; z: number }
 export interface BuildingDef { x: number; z: number; w: number; d: number; rot: number; kind: 'apartment' | 'cafe' | 'shop'; roof: string; wall: string }
 export interface FlowerBed { x: number; z: number; r: number }
@@ -90,14 +90,14 @@ for (const a of RADIAL_ANGLES) {
 
 /**
  * 팔각정 — 남서쪽 잔디밭(멍글런너 경기장 맞은편). 여러 사람이 함께 둘러앉는 정자.
- * 8면 중 광장 쪽 1면은 출입구, 나머지 7면 안쪽에 3인용 붙박이 의자 → 21자리 (가운데를 보고 앉음)
+ * 8면 중 광장 쪽 1면은 출입구, 나머지 7면 안쪽에 5인용 붙박이 의자 → 35자리 (가운데를 보고 앉음)
  */
 const PV_C = { x: -25.5, z: 14.5 };
 const PV_FACE = Math.atan2(-PV_C.x, -PV_C.z); // 광장 쪽 방향 (출입구)
 export const PAVILION = {
   x: PV_C.x, z: PV_C.z,
   /** 꼭짓점(기둥)까지 반지름 */
-  r: 4.3,
+  r: 6.2,
   /** 출입구가 바라보는 방향 (y축 회전) */
   rot: PV_FACE,
   /** 바닥 높이 */
@@ -109,7 +109,7 @@ for (let k = 1; k < 8; k++) {
   const a = pavilionSideAngle(k);
   const d = PAVILION.r * Math.cos(Math.PI / 8) - 0.55; // 면 안쪽으로 붙인 의자
   // 의자는 가운데를 바라봄 (벤치 앞쪽 = +z 로컬 → 가운데 방향)
-  BENCHES.push({ x: PV_C.x + Math.sin(a) * d, z: PV_C.z + Math.cos(a) * d, rot: a + Math.PI, seats: 3, kind: 'pavilion' });
+  BENCHES.push({ x: PV_C.x + Math.sin(a) * d, z: PV_C.z + Math.cos(a) * d, rot: a + Math.PI, seats: 5, kind: 'pavilion' });
 }
 
 /** 벤치 좌석 — 벤치 하나에 2자리. 좌석 위치·방향과 강아지 대기 위치를 함께 정의 (서버 검증에도 사용) */
@@ -120,10 +120,16 @@ function benchToWorld(b: BenchDef, lx: number, lz: number): [number, number] {
   return [b.x + lx * c + lz * s, b.z - lx * s + lz * c];
 }
 /** 벤치 길이(좌석 수별) — 그리기·충돌에 함께 사용 */
-export const benchLength = (b: BenchDef) => (b.seats === 3 ? 2.2 : 1.5);
+const SEAT_GAP = 0.72;
+export const benchLength = (b: BenchDef) => ((b.seats ?? 2) >= 3 ? (b.seats as number) * SEAT_GAP + 0.04 : 1.5);
+/** 좌석 위치 (벤치 기준 좌우 좌표) — 2인용은 예전 간격, 3인용 이상은 0.72m 간격 */
+export const seatOffsets = (b: BenchDef) => {
+  const n = b.seats ?? 2;
+  return n >= 3 ? Array.from({ length: n }, (_, k) => (k - (n - 1) / 2) * SEAT_GAP) : [-0.38, 0.38];
+};
 export const SEATS: SeatDef[] = [];
 BENCHES.forEach((b, i) => {
-  const xs = b.seats === 3 ? [-0.72, 0, 0.72] : [-0.38, 0.38];
+  const xs = seatOffsets(b);
   xs.forEach((lx, k) => {
     const [x, z] = benchToWorld(b, lx, -0.02);
     // 강아지는 주인 앞에 앉음 (가운데 자리는 바로 앞, 양 끝은 바깥쪽으로 살짝)
@@ -244,7 +250,7 @@ export const COLLIDERS_CIRCLE: Circle[] = [
   ...TREES.map((t) => ({ x: t.x, z: t.z, r: 0.45 * t.scale })),
   ...LAMPS.map((l) => ({ x: l.x, z: l.z, r: 0.25 })),
   // 벤치: 길이에 맞춰 원 여러 개 (3인용은 양 끝까지 막음)
-  ...BENCHES.flatMap((b) => (b.seats === 3 ? [-0.75, 0, 0.75] : [0]).map((lx) => { const [x, z] = benchToWorld(b, lx, 0); return { x, z, r: b.seats === 3 ? 0.55 : 0.75 }; })),
+  ...BENCHES.flatMap((b) => ((b.seats ?? 2) >= 3 ? seatOffsets(b) : [0]).map((lx) => { const [x, z] = benchToWorld(b, lx, 0); return { x, z, r: (b.seats ?? 2) >= 3 ? 0.55 : 0.75 }; })),
   // 팔각정 기둥 8개
   ...Array.from({ length: 8 }, (_, k) => { const a = pavilionSideAngle(k) + Math.PI / 8; return { x: PAVILION.x + Math.sin(a) * PAVILION.r, z: PAVILION.z + Math.cos(a) * PAVILION.r, r: 0.22 }; }),
   // 대형 스크린 기둥, 포토존 배경판

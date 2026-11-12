@@ -376,7 +376,7 @@ function Benches() {
       {BENCHES.map((b, i) => {
         if (b.kind === 'pavilion') return null; // 팔각정 붙박이 의자는 <Pavilion />에서
         const L = benchLength(b);
-        const legs = b.seats === 3 ? [-L / 2 + 0.15, 0, L / 2 - 0.15] : [-0.6, 0.6];
+        const legs = (b.seats ?? 2) >= 3 ? [-L / 2 + 0.15, 0, L / 2 - 0.15] : [-0.6, 0.6];
         return (
           <group key={i} position={[b.x, 0, b.z]} rotation={[0, b.rot, 0]}
             onClick={(e) => { if (e.delta > 8) return; e.stopPropagation(); set({ benchMenu: i }); }}
@@ -426,7 +426,7 @@ function Pavilion() {
     }
   });
   const seatWood = mat(PALETTE.wood), seatDark = mat(PALETTE.woodDark);
-  const H = 2.7; // 기둥 높이
+  const H = 3.0; // 기둥 높이
   const open = (i: number) => { set({ benchMenu: i }); };
   return (
     <group position={[P.x, 0, P.z]}>
@@ -435,12 +435,12 @@ function Pavilion() {
       <mesh geometry={geo.cyl(P.r + 0.35, P.r + 0.45, 0.06, 8)} material={stone} position={[0, 0.09, 0]} rotation={[0, P.rot + Math.PI / 8, 0]} />
       <mesh geometry={geo.cyl(P.r + 0.1, P.r + 0.1, 0.04, 8)} material={deck} position={[0, 0.12, 0]} rotation={[0, P.rot + Math.PI / 8, 0]} />
       {/* 마루 널 무늬 */}
-      {[-2.4, -1.2, 0, 1.2, 2.4].map((o) => (
+      {[-4.8, -3.6, -2.4, -1.2, 0, 1.2, 2.4, 3.6, 4.8].map((o) => (
         <mesh key={o} geometry={geo.box(0.04, 0.01, 2 * Math.sqrt(Math.max(0, (P.r * 0.92) ** 2 - o * o)))} material={deckLine}
           position={[Math.cos(P.rot) * o, 0.145, -Math.sin(P.rot) * o]} rotation={[0, P.rot, 0]} />
       ))}
       {/* 출입구 계단 */}
-      <mesh geometry={geo.box(2.2, 0.08, 0.6)} material={stone} position={[Math.sin(P.rot) * (P.r + 0.75), 0.04, Math.cos(P.rot) * (P.r + 0.75)]} rotation={[0, P.rot, 0]} />
+      <mesh geometry={geo.box(2.8, 0.08, 0.6)} material={stone} position={[Math.sin(P.rot) * (P.r + 0.75), 0.04, Math.cos(P.rot) * (P.r + 0.75)]} rotation={[0, P.rot, 0]} />
       {/* 기둥 8개 + 위쪽 들보 */}
       {parts.sides.map(({ k }) => {
         const [x, z] = parts.vert(k);
@@ -453,7 +453,7 @@ function Pavilion() {
           {/* 출입구가 아닌 면: 낮은 난간 + 안쪽 붙박이 의자 */}
           {k !== 0 && <>
             <mesh geometry={geo.box(len - 0.3, 0.07, 0.08)} material={beam} position={[0, 0.78, apo]} />
-            {[-0.9, 0, 0.9].map((o) => <mesh key={o} geometry={geo.box(0.06, 0.64, 0.06)} material={beam} position={[o, 0.46, apo]} />)}
+            {[-1.8, -0.9, 0, 0.9, 1.8].map((o) => <mesh key={o} geometry={geo.box(0.06, 0.64, 0.06)} material={beam} position={[o, 0.46, apo]} />)}
           </>}
         </group>
       ))}
@@ -464,18 +464,18 @@ function Pavilion() {
           onPointerOver={(e) => { e.stopPropagation(); document.body.style.cursor = 'pointer'; }}
           onPointerOut={() => { document.body.style.cursor = ''; }}>
           <mesh geometry={geo.box(benchLength(b) + 0.35, 0.08, 0.48)} material={seatWood} position={[0, 0.42, 0]} />
-          {[-0.9, 0, 0.9].map((x) => <mesh key={x} geometry={geo.box(0.08, 0.3, 0.42)} material={seatDark} position={[x, 0.29, 0]} />)}
+          {[-1.6, -0.55, 0.55, 1.6].map((x) => <mesh key={x} geometry={geo.box(0.08, 0.3, 0.42)} material={seatDark} position={[x, 0.29, 0]} />)}
         </group>
       ))}
       {/* 지붕: 처마(넓은 판) + 팔각 기와지붕 + 꼭대기 장식 */}
       <group position={[0, 0.14 + H + 0.08, 0]} rotation={[0, P.rot + Math.PI / 8, 0]}>
         <mesh geometry={geo.cyl(P.r + 0.95, P.r + 1.05, 0.14, 8)} material={eave} position={[0, 0, 0]} />
         <mesh geometry={geo.cyl(P.r + 1.15, P.r + 1.2, 0.1, 8)} material={roofDark} position={[0, 0.1, 0]} />
-        <mesh geometry={geo.cone(P.r + 1.05, 2.1, 8)} material={roof} position={[0, 1.15, 0]} />
-        <mesh geometry={geo.cyl(0.18, 0.28, 0.3, 8)} material={roofDark} position={[0, 2.3, 0]} />
-        <mesh geometry={geo.ico(0.22, 0)} material={finial} position={[0, 2.58, 0]} />
+        <mesh geometry={geo.cone(P.r + 1.05, 2.8, 8)} material={roof} position={[0, 1.5, 0]} />
+        <mesh geometry={geo.cyl(0.2, 0.32, 0.34, 8)} material={roofDark} position={[0, 3.0, 0]} />
+        <mesh geometry={geo.ico(0.26, 0)} material={finial} position={[0, 3.3, 0]} />
       </group>
-      <Html position={[0, 0.14 + H + 3.2, 0]} center distanceFactor={22} zIndexRange={[5, 0]}>
+      <Html position={[0, 0.14 + H + 4.0, 0]} center distanceFactor={22} zIndexRange={[5, 0]}>
         <div ref={tag} className="name-tag" style={{ fontSize: 13, pointerEvents: 'none' }}>🪵 멍글 팔각정 · 다 같이 앉아요</div>
       </Html>
     </group>

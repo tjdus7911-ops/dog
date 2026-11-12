@@ -31,7 +31,7 @@ function nearFurniture(ownerId: number | undefined, x: number, z: number, kinds:
   return furnitureSpots(homeLayout(ownerId), tierOfBuilding(repo.getResidence(ownerId)?.building)).some((p) => p.actions.some((a) => kinds.includes(a)) && p.human.some((h) => Math.hypot(h.x - x, h.z - z) < 0.45));
 }
 
-const CAPACITY = Number(process.env.MUNGLE_PARK_CAPACITY ?? 50); // 광장 확장: 채널당 30 → 50명
+const CAPACITY = Number(process.env.MUNGLE_PARK_CAPACITY ?? 80); // 광장 확장: 채널당 30 → 80명
 // 신고 사유 (예전 앱의 사유도 계속 받음)
 const REPORT_REASONS = ['욕설 및 괴롭힘', '광고 및 도배', '부적절한 이미지', '개인정보 노출', '기타', '욕설/비하', '도배/스팸', '불쾌한 닉네임/사진', '사칭/사기'];
 /** 배변 이벤트: 산책(걷기·달리기) 누적 시간이 MIN~MAX초 사이의 임의 값에 도달하면 CHANCE 확률로 발생 */

@@ -15,7 +15,7 @@ export function BenchMenu() {
   if (bench === null || mobileChat) return null;
   const list = SEATS.filter((s) => s.bench === bench);
   const pavilion = BENCHES[bench]?.kind === 'pavilion';
-  const seatLabel = (i: number) => (list.length === 3 ? ['왼쪽 자리', '가운데 자리', '오른쪽 자리'][i] : i === 0 ? '왼쪽 자리' : '오른쪽 자리');
+  const seatLabel = (i: number) => (list.length > 3 ? `${i + 1}번` : list.length === 3 ? ['왼쪽 자리', '가운데 자리', '오른쪽 자리'][i] : i === 0 ? '왼쪽 자리' : '오른쪽 자리');
   const close = () => set({ benchMenu: null });
 
   function choose(id: string) {
@@ -43,7 +43,7 @@ export function BenchMenu() {
         </div>
         <button className="btn btn-ghost w-9 h-9" onClick={close} aria-label="닫기">✕</button>
       </div>
-      <div className={`grid ${list.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2 mt-3`}>
+      <div className={`grid ${list.length > 3 ? 'grid-cols-5 gap-1.5' : list.length === 3 ? 'grid-cols-3 gap-2' : 'grid-cols-2 gap-2'} mt-3`}>
         {list.map((s, i) => {
           const who = seats[s.id];
           const mine = who === me.id || seated === s.id;
@@ -51,9 +51,9 @@ export function BenchMenu() {
           const name = taken ? players[who]?.nickname ?? '다른 산책러' : '';
           return (
             <button key={s.id} disabled={taken || mine} onClick={() => choose(s.id)}
-              className={`rounded-2xl py-3 px-2 border-2 text-center ${mine ? 'border-[#a9cfa0] bg-sage-soft' : taken ? 'border-transparent bg-cream-2 opacity-70' : 'border-dashed border-[#e9d8c6] bg-white hover:border-[#f4776a]'}`}>
+              className={`rounded-2xl py-3 ${list.length > 3 ? 'px-0.5 min-w-0' : 'px-2'} border-2 text-center ${mine ? 'border-[#a9cfa0] bg-sage-soft' : taken ? 'border-transparent bg-cream-2 opacity-70' : 'border-dashed border-[#e9d8c6] bg-white hover:border-[#f4776a]'}`}>
               <div className="font-display">{seatLabel(i)}</div>
-              <div className="text-[11px] text-cocoa-soft mt-0.5">{mine ? '앉아 있는 자리' : taken ? `${name}님이 앉아 있어요` : '앉기 ▸'}</div>
+              <div className="text-[11px] text-cocoa-soft mt-0.5">{list.length > 3 ? (mine ? '내 자리' : taken ? name : '앉기 ▸') : mine ? '앉아 있는 자리' : taken ? `${name}님이 앉아 있어요` : '앉기 ▸'}</div>
             </button>
           );
         })}
